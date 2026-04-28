@@ -1,0 +1,1342 @@
+:root {
+  --ink-900: #1f2924;
+  --ink-700: #3e4d46;
+  --ink-500: #66756f;
+  --paper: #fffdf7;
+  --paper-soft: #f9f5ea;
+  --mint: #d7efe3;
+  --mint-strong: #2f8f73;
+  --amber: #f5d58f;
+  --rose: #f5b6a2;
+  --sky: #b8dff2;
+  --line: #d7d1c0;
+  --danger: #b64035;
+  --ok: #1d7f62;
+  --card-shadow: 0 15px 35px rgba(41, 50, 45, 0.08);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+.page-shell {
+  width: min(1400px, calc(100% - 2rem));
+  margin: 1rem auto 2.5rem;
+  color: var(--ink-700);
+}
+
+.card {
+  background: rgba(255, 253, 247, 0.86);
+  border: 1px solid rgba(215, 209, 192, 0.8);
+  border-radius: 22px;
+  box-shadow: var(--card-shadow);
+  padding: 1.2rem;
+  backdrop-filter: blur(10px);
+}
+
+.topbar {
+  display: grid;
+  grid-template-columns: 1.25fr 1fr;
+  gap: 1.2rem;
+  align-items: start;
+}
+
+.eyebrow {
+  margin: 0;
+  font-size: 0.75rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--mint-strong);
+  font-weight: 700;
+}
+
+h1,
+h2,
+h3,
+h4 {
+  color: var(--ink-900);
+  margin: 0;
+}
+
+h1 {
+  margin-top: 0.35rem;
+  font-size: clamp(1.55rem, 2.7vw, 2.35rem);
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+}
+
+h2 {
+  font-size: clamp(1.1rem, 1.8vw, 1.35rem);
+  margin-bottom: 0.45rem;
+}
+
+h3 {
+  font-size: 1rem;
+}
+
+h4 {
+  font-size: 0.92rem;
+}
+
+.subtext {
+  margin: 0.5rem 0 0;
+  color: var(--ink-500);
+  line-height: 1.5;
+  font-size: 0.92rem;
+}
+
+.top-controls {
+  display: grid;
+  gap: 0.9rem;
+}
+
+.session-role {
+  border: 1px dashed rgba(47, 143, 115, 0.45);
+  border-radius: 12px;
+  padding: 0.55rem 0.7rem;
+  display: grid;
+  gap: 0.15rem;
+}
+
+.session-role span {
+  color: var(--ink-500);
+  font-size: 0.74rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.session-role strong {
+  color: var(--ink-900);
+  font-size: 0.95rem;
+}
+
+.session-role small {
+  color: var(--ink-500);
+  font-size: 0.72rem;
+}
+
+.cloud-sync.cloud-ready {
+  border-color: rgba(31, 127, 98, 0.45);
+  background: rgba(31, 180, 134, 0.07);
+}
+
+.cloud-sync.cloud-checking {
+  border-color: rgba(177, 122, 67, 0.45);
+  background: rgba(245, 213, 143, 0.12);
+}
+
+.cloud-sync.cloud-offline,
+.cloud-sync.cloud-error {
+  border-color: rgba(182, 64, 53, 0.38);
+  background: rgba(210, 87, 74, 0.08);
+}
+
+.header-actions {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.5rem;
+}
+
+.login-shell {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+}
+
+.login-card {
+  width: min(500px, 100%);
+  display: grid;
+  gap: 0.7rem;
+}
+
+.login-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.55rem;
+}
+
+.quick-user-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.quick-user-list button {
+  background: rgba(47, 143, 115, 0.1);
+  color: var(--mint-strong);
+  border: 1px solid rgba(47, 143, 115, 0.25);
+  padding: 0.42rem 0.62rem;
+  font-size: 0.82rem;
+}
+
+.quick-user-list button.active {
+  background: linear-gradient(135deg, #226f5a, #2f8f73);
+  color: #fff;
+}
+
+.section-switcher {
+  padding: 0.9rem 1rem;
+}
+
+.subpanel-toggle {
+  margin-top: 0.65rem;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(100px, 1fr));
+  gap: 0.48rem;
+}
+
+.subpanel-toggle.observer-toggle {
+  grid-template-columns: repeat(5, minmax(100px, 1fr));
+}
+
+.subpanel-toggle button {
+  background: #eef2eb;
+  color: var(--ink-900);
+  padding: 0.5rem 0.65rem;
+  border-radius: 10px;
+  font-size: 0.84rem;
+}
+
+.subpanel-toggle button.active {
+  background: linear-gradient(135deg, #226f5a, #2f8f73);
+  color: #fff;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+button {
+  border: none;
+  border-radius: 12px;
+  padding: 0.62rem 0.95rem;
+  cursor: pointer;
+  background: linear-gradient(135deg, #226f5a, #2f8f73);
+  color: #ffffff;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+button:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 8px 18px rgba(31, 84, 67, 0.24);
+}
+
+button:active {
+  transform: translateY(0);
+}
+
+button.secondary {
+  background: linear-gradient(135deg, #8f6742, #b17a43);
+}
+
+button.ghost-button {
+  background: rgba(47, 143, 115, 0.1);
+  color: var(--mint-strong);
+  border: 1px solid rgba(47, 143, 115, 0.25);
+}
+
+.date-control {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.date-control label {
+  font-size: 0.78rem;
+  color: var(--ink-500);
+}
+
+input,
+select,
+textarea {
+  width: 100%;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.92);
+  color: var(--ink-900);
+  padding: 0.6rem 0.75rem;
+  min-height: 42px;
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+  outline: 2px solid rgba(47, 143, 115, 0.28);
+  outline-offset: 1px;
+  border-color: rgba(47, 143, 115, 0.4);
+}
+
+textarea {
+  min-height: 120px;
+  resize: vertical;
+}
+
+.form-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0.6rem;
+  margin-top: 0.8rem;
+}
+
+.form-row.compact {
+  grid-template-columns: 1fr auto;
+  margin-top: 0.55rem;
+}
+
+.form-row.responsive {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.form-row.responsive button {
+  width: 100%;
+}
+
+.owners-month-row {
+  grid-template-columns: auto minmax(160px, 220px) auto 1fr;
+  align-items: center;
+}
+
+.owners-month-row .ghost-button {
+  white-space: nowrap;
+}
+
+.owners-month-row .my-calendar-month-select {
+  text-transform: capitalize;
+}
+
+.owners-month-hint {
+  margin-top: 0;
+}
+
+.owners-action-row {
+  grid-template-columns: repeat(3, auto);
+  justify-content: flex-start;
+}
+
+.notice {
+  margin-top: 0.9rem;
+  padding: 0.72rem 0.88rem;
+  border-radius: 12px;
+  border: 1px solid;
+  font-weight: 600;
+}
+
+.notice.success {
+  color: var(--ok);
+  background: rgba(31, 180, 134, 0.11);
+  border-color: rgba(31, 180, 134, 0.33);
+}
+
+.notice.warning {
+  color: var(--danger);
+  background: rgba(210, 87, 74, 0.09);
+  border-color: rgba(210, 87, 74, 0.3);
+}
+
+.stats-grid {
+  margin-top: 0.95rem;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.8rem;
+}
+
+.stat-card {
+  background: linear-gradient(160deg, #f7f1e0, #fefcf4);
+  border-radius: 16px;
+  border: 1px solid rgba(211, 199, 164, 0.5);
+  padding: 0.9rem;
+  display: grid;
+  gap: 0.3rem;
+}
+
+.stat-card span {
+  color: var(--ink-500);
+  font-size: 0.8rem;
+}
+
+.stat-card strong {
+  color: var(--ink-900);
+  font-size: 1.5rem;
+  letter-spacing: -0.02em;
+}
+
+.stack-layout {
+  margin-top: 0.95rem;
+  display: grid;
+  gap: 0.95rem;
+}
+
+.chip-wrap {
+  margin-top: 0.65rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.42rem;
+}
+
+.chip {
+  border: 1px solid rgba(60, 76, 69, 0.25);
+  background: rgba(255, 255, 255, 0.78);
+  border-radius: 999px;
+  color: var(--ink-900);
+  padding: 0.28rem 0.62rem;
+  font-size: 0.8rem;
+  line-height: 1.3;
+}
+
+.chip.soft {
+  border-style: dashed;
+}
+
+.chip.removable {
+  cursor: pointer;
+}
+
+.chip.removable:hover {
+  border-color: rgba(210, 87, 74, 0.55);
+  color: var(--danger);
+}
+
+.empty {
+  color: var(--ink-500);
+  font-size: 0.82rem;
+}
+
+.offday-text {
+  color: #8f6742;
+  font-weight: 600;
+}
+
+.location-chip-grid {
+  margin-top: 0.8rem;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.7rem;
+}
+
+.site-group-card {
+  margin-top: 0.9rem;
+  border: 1px solid rgba(63, 69, 66, 0.18);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.66);
+  padding: 0.8rem;
+}
+
+.site-group-title {
+  margin-bottom: 0.3rem;
+  font-size: 1rem;
+  color: #184838;
+  letter-spacing: 0.03em;
+}
+
+.location-pill {
+  border-radius: 14px;
+  border: 1px solid rgba(63, 69, 66, 0.2);
+  padding: 0.7rem;
+  display: grid;
+  gap: 0.62rem;
+}
+
+.location-pill p {
+  margin: 0.22rem 0 0;
+  color: var(--ink-900);
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.location-pill small {
+  color: var(--ink-500);
+  font-size: 0.74rem;
+}
+
+.owner-inline {
+  color: var(--ink-700);
+  font-weight: 500;
+  font-size: 0.76rem;
+}
+
+.location-actions {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0.42rem;
+  align-items: center;
+}
+
+.location-actions select {
+  min-height: 36px;
+  padding: 0.34rem 0.5rem;
+  border-radius: 10px;
+}
+
+.week-duty-grid {
+  margin-top: 0.9rem;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.7rem;
+}
+
+.duty-day-card {
+  border: 1px solid rgba(201, 139, 121, 0.45);
+  border-radius: 14px;
+  background: linear-gradient(160deg, rgba(245, 182, 162, 0.24), rgba(255, 248, 245, 0.9));
+  padding: 0.65rem;
+}
+
+.duty-day-card h3 {
+  font-size: 0.86rem;
+  line-height: 1.35;
+}
+
+.duty-row {
+  grid-template-columns: 1fr 1fr auto;
+}
+
+.duty-site-chip {
+  border-color: rgba(47, 64, 58, 0.3);
+}
+
+.duty-site-sancaktepe {
+  background: rgba(215, 239, 227, 0.7);
+}
+
+.duty-site-feriha-oz {
+  background: rgba(252, 226, 170, 0.75);
+}
+
+.duty-site-cekmekoy {
+  background: rgba(184, 223, 242, 0.75);
+}
+
+.duty-list-module {
+  margin-top: 1rem;
+}
+
+.duty-list-table-wrap {
+  margin-top: 0.55rem;
+  overflow: auto;
+  border: 1px solid rgba(102, 111, 107, 0.26);
+  border-radius: 12px;
+}
+
+.duty-list-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  min-width: 100%;
+  table-layout: fixed;
+  font-size: 0.8rem;
+}
+
+.duty-list-table col.duty-col-day {
+  width: 110px;
+}
+
+.duty-list-table col.duty-col-sancaktepe {
+  width: 31%;
+}
+
+.duty-list-table col.duty-col-feriha-oz {
+  width: 50%;
+}
+
+.duty-list-table col.duty-col-cekmekoy {
+  width: 9%;
+}
+
+.duty-list-table th,
+.duty-list-table td {
+  border-right: 1px solid rgba(122, 132, 127, 0.22);
+  border-bottom: 1px solid rgba(122, 132, 127, 0.22);
+  padding: 0.28rem 0.36rem;
+  text-align: left;
+  vertical-align: top;
+}
+
+.duty-list-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: #eef2eb;
+  color: var(--ink-900);
+  font-weight: 800;
+}
+
+.duty-list-table .day-col {
+  width: 98px;
+  min-width: 98px;
+  background: #f5f6f4;
+}
+
+.duty-list-table .site-col-head {
+  text-align: center;
+}
+
+.duty-list-table .site-slot-head {
+  text-align: center;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.duty-list-table .site-col-sancaktepe {
+  background: rgba(238, 241, 245, 0.86);
+}
+
+.duty-list-table .site-col-feriha-oz {
+  background: rgba(245, 174, 214, 0.72);
+}
+
+.duty-list-table .site-col-cekmekoy {
+  background: rgba(240, 242, 245, 0.9);
+}
+
+.duty-list-table .site-col-cell {
+  min-width: 0;
+  white-space: normal;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  font-size: 0.92rem;
+  line-height: 1.4;
+}
+
+.duty-name-stack {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 0.14rem 0.22rem;
+}
+
+.duty-name-line {
+  display: inline-flex;
+  width: auto;
+  max-width: 100%;
+  font-size: 0.96rem;
+  font-weight: 600;
+  white-space: nowrap;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.72);
+  border: 1px solid rgba(91, 102, 97, 0.2);
+  padding: 0.07rem 0.32rem;
+}
+
+.duty-list-table tr.weekend-row td {
+  background-color: rgba(251, 243, 106, 0.55);
+}
+
+.duty-list-table tr.holiday-row td {
+  background-color: rgba(255, 223, 149, 0.68);
+}
+
+.duty-list-table tr.weekend-row td.site-col-feriha-oz,
+.duty-list-table tr.holiday-row td.site-col-feriha-oz {
+  background-color: rgba(238, 152, 197, 0.8);
+}
+
+.day-col-main {
+  display: grid;
+  gap: 0.1rem;
+}
+
+.day-col-main strong {
+  font-size: 1rem;
+}
+
+.day-col-main span {
+  font-size: 0.7rem;
+  color: var(--ink-600);
+}
+
+.holiday-reason-inline {
+  margin-top: 0.2rem;
+  display: inline-block;
+  font-size: 0.68rem;
+  color: #7a4a16;
+}
+
+.import-issue-card {
+  margin-top: 0.7rem;
+  border: 1px solid rgba(210, 87, 74, 0.3);
+  background: rgba(210, 87, 74, 0.08);
+  border-radius: 12px;
+  padding: 0.65rem;
+}
+
+.import-issue-card h3 {
+  margin-bottom: 0.35rem;
+  font-size: 0.9rem;
+}
+
+.import-issue-card ul {
+  margin: 0;
+  padding-left: 1rem;
+  display: grid;
+  gap: 0.25rem;
+}
+
+.import-issue-card li {
+  font-size: 0.79rem;
+  color: var(--danger);
+}
+
+.week-grid {
+  margin-top: 0.9rem;
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.9rem;
+  width: 100%;
+}
+
+.week-grid > * {
+  width: 100%;
+}
+
+.planner-day-tabs {
+  margin-top: 0.9rem;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.5rem;
+}
+
+.planner-day-tabs button {
+  background: #eef2eb;
+  color: var(--ink-900);
+  border: 1px solid rgba(63, 69, 66, 0.2);
+  padding: 0.55rem 0.7rem;
+  border-radius: 10px;
+  text-align: left;
+  font-size: 0.82rem;
+}
+
+.planner-day-tabs button.active {
+  background: linear-gradient(135deg, #226f5a, #2f8f73);
+  color: #fff;
+}
+
+.planner-date-controls {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.planner-month-tabs {
+  margin-top: 0.68rem;
+  max-height: 220px;
+  overflow-y: auto;
+  padding-right: 0.15rem;
+}
+
+.planner-day-tabs button.nonworking {
+  background: rgba(255, 232, 170, 0.42);
+  border-color: rgba(176, 124, 67, 0.33);
+  color: #6f4a27;
+}
+
+.planner-day-tabs button.nonworking.active {
+  background: linear-gradient(135deg, #226f5a, #2f8f73);
+  color: #fff;
+}
+
+.planner-hint {
+  margin-top: 0.7rem;
+}
+
+.observer-tab-title {
+  margin-top: 0.85rem;
+  font-size: 0.86rem;
+  color: var(--ink-700);
+}
+
+.day-card {
+  border: 1px solid rgba(99, 121, 111, 0.24);
+  border-radius: 16px;
+  background: rgba(251, 248, 240, 0.88);
+  padding: 0.8rem;
+  width: 100%;
+}
+
+.day-card > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.65rem;
+}
+
+.day-card > header small {
+  color: var(--ink-500);
+  font-size: 0.76rem;
+}
+
+.day-tools {
+  margin-bottom: 0.62rem;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.48rem;
+}
+
+.planner-mode-tabs {
+  margin-bottom: 0.62rem;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.48rem;
+}
+
+.planner-mode-tabs button {
+  background: #eef2eb;
+  color: var(--ink-900);
+  border: 1px solid rgba(63, 69, 66, 0.2);
+}
+
+.planner-mode-tabs button.active {
+  background: linear-gradient(135deg, #226f5a, #2f8f73);
+  color: #fff;
+}
+
+.planner-layout {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.planner-layout-rooms {
+  grid-template-columns: minmax(0, 1.35fr) minmax(280px, 1fr) minmax(0, 1.35fr);
+}
+
+.planner-layout-status {
+  grid-template-columns: 2fr 1fr;
+}
+
+.planner-main-column {
+  min-width: 0;
+}
+
+.planner-right-column {
+  min-width: 0;
+}
+
+.planner-side-panel {
+  border: 1px solid rgba(79, 104, 94, 0.25);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.75);
+  padding: 0.7rem;
+}
+
+.planner-side-panel h4 {
+  margin: 0.2rem 0 0;
+}
+
+.stack-list {
+  margin-top: 0.45rem;
+  display: grid;
+  gap: 0.32rem;
+}
+
+.owner-choice-box {
+  margin-top: 0.55rem;
+  padding: 0.55rem;
+  border-radius: 10px;
+  border: 1px dashed rgba(99, 121, 111, 0.5);
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.owner-choice-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.3rem 0.6rem;
+  margin-bottom: 0.5rem;
+}
+
+.owner-choice-grid label {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.8rem;
+}
+
+.observer-week-tabs button {
+  background: rgba(245, 213, 143, 0.35);
+  border: 1px solid rgba(177, 122, 67, 0.36);
+  color: #6c4524;
+  font-weight: 700;
+}
+
+.observer-week-tabs button.active {
+  background: linear-gradient(135deg, #8f6742, #b17a43);
+  color: #fff;
+}
+
+.observer-day-tabs button {
+  background: rgba(184, 223, 242, 0.32);
+  border: 1px solid rgba(76, 129, 153, 0.35);
+  color: #244d63;
+  font-weight: 600;
+}
+
+.observer-day-tabs button.active {
+  background: linear-gradient(135deg, #34728f, #4690b4);
+  color: #fff;
+}
+
+.my-summary-grid {
+  margin-top: 0.7rem;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.55rem;
+}
+
+.my-summary-card {
+  border: 1px solid rgba(63, 69, 66, 0.2);
+  background: rgba(255, 255, 255, 0.78);
+  border-radius: 12px;
+  padding: 0.55rem;
+  display: grid;
+  gap: 0.2rem;
+}
+
+.my-summary-card span {
+  font-size: 0.76rem;
+  color: var(--ink-500);
+}
+
+.my-summary-card strong {
+  font-size: 1.05rem;
+  color: var(--ink-900);
+}
+
+.site-block {
+  border-top: 1px dashed rgba(132, 143, 138, 0.5);
+  padding-top: 0.65rem;
+  margin-top: 0.65rem;
+}
+
+.site-block h4 {
+  margin: 0 0 0.5rem;
+  color: #184838;
+  font-size: 0.9rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  padding: 0.4rem 0.55rem;
+  border-radius: 10px;
+  background: linear-gradient(135deg, rgba(194, 231, 214, 0.85), rgba(232, 245, 238, 0.9));
+  border: 1px solid rgba(47, 143, 115, 0.35);
+}
+
+.location-row {
+  border-radius: 12px;
+  padding: 0.65rem;
+  border: 1px solid rgba(91, 102, 97, 0.25);
+  margin-bottom: 0.55rem;
+}
+
+.location-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.location-meta span {
+  font-size: 0.72rem;
+  color: var(--ink-500);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.hint-text {
+  margin: 0.52rem 0 0;
+  font-size: 0.77rem;
+  color: var(--ink-500);
+}
+
+.timeline-grid {
+  margin-top: 0.9rem;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.7rem;
+}
+
+.timeline-card {
+  border-radius: 14px;
+  border: 1px solid rgba(113, 123, 118, 0.35);
+  padding: 0.65rem;
+  background: linear-gradient(170deg, rgba(215, 239, 227, 0.35), rgba(255, 255, 255, 0.92));
+}
+
+.timeline-card header {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.timeline-card small {
+  color: var(--ink-500);
+  font-size: 0.73rem;
+}
+
+.focus-location {
+  margin-top: 0.8rem;
+  border: 1px solid rgba(75, 127, 110, 0.35);
+  border-radius: 14px;
+  padding: 0.7rem;
+  background: linear-gradient(140deg, rgba(210, 245, 231, 0.36), rgba(255, 255, 255, 0.94));
+}
+
+.my-calendar-panel {
+  margin-top: 0.95rem;
+}
+
+.my-calendar-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.8rem;
+  margin-bottom: 0.55rem;
+}
+
+.my-calendar-toolbar h3 {
+  margin: 0;
+  text-transform: capitalize;
+}
+
+.my-calendar-toolbar select {
+  max-width: 210px;
+  min-width: 180px;
+  text-transform: capitalize;
+}
+
+.my-calendar-month-select {
+  cursor: pointer;
+}
+
+.my-calendar-month-select option {
+  text-transform: capitalize;
+}
+
+.my-calendar-weekdays {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 0.4rem;
+  min-width: 920px;
+}
+
+.my-calendar-weekdays span {
+  text-align: center;
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--ink-700);
+}
+
+.my-calendar-grid {
+  margin-top: 0.45rem;
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 0.4rem;
+  min-width: 920px;
+}
+
+.my-calendar-scroll {
+  overflow-x: auto;
+  padding-bottom: 0.2rem;
+}
+
+.my-calendar-cell {
+  min-height: 120px;
+  border: 1px solid rgba(110, 121, 116, 0.3);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.9);
+  padding: 0.45rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.my-calendar-cell header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.45rem;
+}
+
+.my-calendar-cell header strong {
+  font-size: 1rem;
+  color: var(--ink-900);
+}
+
+.my-calendar-cell header small {
+  font-size: 0.68rem;
+  color: var(--ink-500);
+}
+
+.my-calendar-cell.weekend {
+  background: linear-gradient(165deg, rgba(196, 222, 255, 0.46), rgba(244, 250, 255, 0.94));
+  border-color: rgba(74, 125, 182, 0.38);
+}
+
+.my-calendar-cell.holiday {
+  background: linear-gradient(165deg, rgba(255, 225, 163, 0.46), rgba(255, 248, 229, 0.94));
+  border-color: rgba(185, 131, 58, 0.42);
+}
+
+.my-calendar-cell.weekend.holiday {
+  background: linear-gradient(165deg, rgba(245, 191, 201, 0.5), rgba(255, 240, 244, 0.95));
+  border-color: rgba(180, 83, 111, 0.44);
+}
+
+.my-calendar-cell.outside-month {
+  opacity: 0.6;
+  background: rgba(236, 240, 236, 0.9);
+}
+
+.my-calendar-cell.today {
+  border-color: rgba(47, 143, 115, 0.85);
+  box-shadow: 0 0 0 1px rgba(47, 143, 115, 0.35);
+}
+
+.my-calendar-content {
+  display: grid;
+  gap: 0.24rem;
+  align-content: start;
+}
+
+.my-calendar-holiday-reason {
+  display: inline-flex;
+  width: fit-content;
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: #7a4a16;
+  background: rgba(255, 230, 184, 0.62);
+  border: 1px solid rgba(186, 130, 48, 0.38);
+  border-radius: 8px;
+  padding: 0.13rem 0.4rem;
+}
+
+.my-calendar-duty {
+  display: inline-flex;
+  width: fit-content;
+  align-items: center;
+  font-size: 0.72rem;
+  font-weight: 800;
+  border-radius: 999px;
+  padding: 0.16rem 0.5rem;
+  border: 1px solid rgba(31, 60, 50, 0.2);
+}
+
+.my-calendar-location {
+  display: inline-flex;
+  width: fit-content;
+  font-size: 0.72rem;
+  line-height: 1.25;
+  border-radius: 8px;
+  border: 1px dashed rgba(63, 69, 66, 0.24);
+  padding: 0.15rem 0.42rem;
+  background: rgba(255, 255, 255, 0.85);
+}
+
+.tiny {
+  font-size: 0.68rem;
+}
+
+.location-tiles {
+  margin-top: 0.8rem;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.7rem;
+}
+
+.tile {
+  border-radius: 14px;
+  border: 1px solid rgba(117, 128, 121, 0.3);
+  padding: 0.65rem;
+  background: rgba(255, 255, 255, 0.84);
+}
+
+.tile header {
+  display: grid;
+  gap: 0.22rem;
+}
+
+.tile small {
+  color: var(--ink-500);
+  font-size: 0.74rem;
+}
+
+.tone-sand {
+  background-color: rgba(251, 232, 192, 0.26);
+}
+
+.tone-sage {
+  background-color: rgba(215, 239, 227, 0.36);
+}
+
+.tone-amber {
+  background-color: rgba(252, 226, 170, 0.3);
+}
+
+.tone-sky {
+  background-color: rgba(184, 223, 242, 0.3);
+}
+
+.tone-rose {
+  background-color: rgba(245, 182, 162, 0.31);
+}
+
+.kind-duty,
+.kind-postDuty {
+  border-style: dashed;
+}
+
+code {
+  background: rgba(50, 66, 59, 0.09);
+  border-radius: 8px;
+  padding: 0.16rem 0.34rem;
+  font-size: 0.82em;
+}
+
+.fade-up {
+  opacity: 0;
+  transform: translateY(10px);
+  animation: rise 0.55s ease forwards;
+}
+
+.delay-1 {
+  animation-delay: 0.05s;
+}
+
+.delay-2 {
+  animation-delay: 0.1s;
+}
+
+.delay-3 {
+  animation-delay: 0.15s;
+}
+
+.delay-4 {
+  animation-delay: 0.2s;
+}
+
+.delay-5 {
+  animation-delay: 0.25s;
+}
+
+@keyframes rise {
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (max-width: 1220px) {
+  .topbar {
+    grid-template-columns: 1fr;
+  }
+
+  .location-chip-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .week-duty-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .week-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .timeline-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .my-summary-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .location-tiles {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .planner-day-tabs {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .planner-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .subpanel-toggle {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .day-tools {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 760px) {
+  .page-shell {
+    width: calc(100% - 1rem);
+    margin-top: 0.5rem;
+  }
+
+  .card {
+    padding: 0.85rem;
+    border-radius: 16px;
+  }
+
+  .stats-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .form-row,
+  .form-row.compact,
+  .form-row.responsive {
+    grid-template-columns: 1fr;
+  }
+
+  .duty-row {
+    grid-template-columns: 1fr;
+  }
+
+  .location-chip-grid,
+  .week-duty-grid,
+  .timeline-grid,
+  .location-tiles {
+    grid-template-columns: 1fr;
+  }
+
+  .my-summary-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .my-calendar-toolbar {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .my-calendar-cell {
+    min-height: 106px;
+  }
+
+  .planner-day-tabs {
+    grid-template-columns: 1fr;
+  }
+
+  .owner-choice-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .location-actions {
+    grid-template-columns: 1fr;
+  }
+
+  .subpanel-toggle {
+    grid-template-columns: 1fr;
+  }
+
+  .day-tools {
+    grid-template-columns: 1fr;
+  }
+
+  .login-actions,
+  .header-actions {
+    grid-template-columns: 1fr;
+  }
+}
