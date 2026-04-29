@@ -3003,6 +3003,15 @@ function App() {
       }
 
       if (
+        typeof window !== 'undefined' &&
+        !window.confirm(
+          `${target.site} / ${target.name} alanını ${todayISO} ve sonrası için kapatmak istediğine emin misin?`,
+        )
+      ) {
+        return previous
+      }
+
+      if (
         target.activeUntil &&
         hasIsoShape(target.activeUntil) &&
         target.activeUntil <= todayISO
@@ -3099,6 +3108,15 @@ function App() {
   }
 
   const removeAssistant = (name: string) => {
+    if (
+      typeof window !== 'undefined' &&
+      !window.confirm(
+        `${name} isimli asistanı listeden çıkarmak istediğine emin misin? Bu işlem atama ve nöbet kayıtlarından da temizler.`,
+      )
+    ) {
+      return
+    }
+
     setData((previous) => {
       const remainingAssistants = previous.assistants.filter((assistant) => assistant !== name)
       const nextAssistantRanks = compactAssistantRanks(

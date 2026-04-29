@@ -406,6 +406,13 @@ button:active {
   transform: translateY(0);
 }
 
+button:disabled {
+  opacity: 0.58;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+
 button.secondary {
   background: linear-gradient(135deg, #8f6742, #b17a43);
 }
@@ -2094,7 +2101,7 @@ code {
 
   .subpanel-toggle.observer-toggle {
     display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
     overflow: visible;
     gap: 0.45rem;
     padding-bottom: 0;
@@ -2263,7 +2270,7 @@ code {
 
   .subpanel-toggle.observer-toggle {
     display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
     overflow: visible;
     gap: 0.45rem;
     padding-bottom: 0;
