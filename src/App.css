@@ -144,6 +144,16 @@ h4 {
   font-size: 0.72rem;
 }
 
+.assistant-welcome-card {
+  background: linear-gradient(135deg, rgba(215, 239, 227, 0.44), rgba(255, 255, 255, 0.86));
+  border-style: solid;
+}
+
+.assistant-welcome-text {
+  font-size: 1.04rem;
+  line-height: 1.25;
+}
+
 .cloud-sync.cloud-ready {
   border-color: rgba(31, 127, 98, 0.45);
   background: rgba(31, 180, 134, 0.07);
@@ -164,6 +174,23 @@ h4 {
   display: grid;
   grid-template-columns: 1fr;
   gap: 0.5rem;
+}
+
+.app-credit {
+  position: fixed;
+  left: 50%;
+  bottom: calc(0.38rem + env(safe-area-inset-bottom, 0px));
+  transform: translateX(-50%);
+  margin: 0;
+  padding: 0 0.45rem;
+  max-width: calc(100% - 1rem);
+  text-align: center;
+  font-size: clamp(0.62rem, 1.45vw, 0.72rem);
+  line-height: 1.25;
+  color: rgba(65, 84, 76, 0.46);
+  letter-spacing: 0.02em;
+  pointer-events: none;
+  z-index: 24;
 }
 
 .login-shell {
@@ -448,7 +475,7 @@ button.portal-app-card {
   color: var(--ink-500);
 }
 
-input,
+input:not([type='checkbox']):not([type='radio']),
 select,
 textarea {
   width: 100%;
@@ -460,7 +487,7 @@ textarea {
   min-height: 42px;
 }
 
-input:focus,
+input:not([type='checkbox']):not([type='radio']):focus,
 select:focus,
 textarea:focus {
   outline: 2px solid rgba(47, 143, 115, 0.28);
@@ -883,12 +910,13 @@ button.assistant-chip:active {
 .duty-list-table-wrap {
   margin-top: 0.55rem;
   overflow: auto;
+  -webkit-overflow-scrolling: touch;
   border: 1px solid rgba(102, 111, 107, 0.22);
   border-radius: 14px;
   background: rgba(255, 255, 255, 0.96);
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.65);
   touch-action: pan-x pinch-zoom;
-  overscroll-behavior-x: contain;
+  overscroll-behavior-x: auto;
 }
 
 .duty-list-table {
@@ -1293,16 +1321,71 @@ button.assistant-chip:active {
 
 .owner-choice-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0.3rem 0.6rem;
+  grid-template-columns: 1fr;
+  gap: 0.4rem;
   margin-bottom: 0.5rem;
 }
 
-.owner-choice-grid label {
+.owner-choice-chip {
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+  padding: 0.42rem 0.5rem;
+  border-radius: 10px;
+  border: 1px solid rgba(79, 104, 94, 0.32);
+  background: rgba(255, 255, 255, 0.92);
+  color: var(--ink-900);
+  font-size: 0.82rem;
+  line-height: 1.28;
+  font-weight: 600;
   display: flex;
-  align-items: center;
-  gap: 0.35rem;
-  font-size: 0.8rem;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.32rem;
+  text-align: left;
+}
+
+.owner-choice-chip span:last-child {
+  width: 100%;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  white-space: normal;
+  color: #30433b;
+}
+
+.owner-choice-chip-check {
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  border: 1px solid rgba(47, 143, 115, 0.42);
+  display: grid;
+  place-items: center;
+  font-size: 1rem;
+  line-height: 1;
+  font-weight: 800;
+  color: transparent;
+  background: rgba(47, 143, 115, 0.04);
+}
+
+.owner-choice-chip:hover {
+  transform: none;
+  box-shadow: none;
+}
+
+.owner-choice-chip.selected {
+  border-color: rgba(47, 143, 115, 0.5);
+  background: rgba(233, 247, 241, 0.92);
+}
+
+.owner-choice-chip.selected .owner-choice-chip-check {
+  background: #2f8f73;
+  border-color: #2f8f73;
+  color: #fff;
+}
+
+.owner-choice-chip:disabled {
+  opacity: 0.62;
+  cursor: not-allowed;
 }
 
 .observer-week-tabs button {
@@ -1369,9 +1452,10 @@ button.assistant-chip:active {
 
 .weekly-export-table-wrap {
   overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
   border: 1px solid #1a1a1a;
   touch-action: pan-x pinch-zoom;
-  overscroll-behavior-x: contain;
+  overscroll-behavior-x: auto;
 }
 
 .weekly-export-table {
@@ -1536,11 +1620,22 @@ button.assistant-chip:active {
 
 .assistant-monthly-calendar-scroll {
   margin-top: 0.28rem;
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-x pinch-zoom;
+  overscroll-behavior-x: auto;
+}
+
+.assistant-monthly-calendar-inner {
+  min-width: 980px;
+  width: max-content;
 }
 
 .assistant-monthly-table-sheet .my-calendar-weekdays,
 .assistant-monthly-table-sheet .my-calendar-grid {
-  min-width: 980px;
+  min-width: 0;
+  width: 980px;
 }
 
 .assistant-monthly-table-sheet .my-calendar-cell {
@@ -1735,10 +1830,11 @@ button.assistant-chip:active {
 
 .my-calendar-scroll {
   overflow-x: auto;
+  overflow-y: hidden;
   padding-bottom: 0.2rem;
   -webkit-overflow-scrolling: touch;
   touch-action: pan-x pinch-zoom;
-  overscroll-behavior-x: contain;
+  overscroll-behavior-x: auto;
 }
 
 .my-calendar-cell {
@@ -2342,6 +2438,10 @@ code {
 
   .assistant-monthly-table-sheet .my-calendar-weekdays,
   .assistant-monthly-table-sheet .my-calendar-grid {
+    width: 760px;
+  }
+
+  .assistant-monthly-calendar-inner {
     min-width: 760px;
   }
 
@@ -2533,9 +2633,14 @@ code {
     border: none !important;
   }
 
+  .assistant-monthly-calendar-inner {
+    min-width: 100%;
+    width: 100%;
+  }
+
   .assistant-monthly-table-sheet .my-calendar-weekdays,
   .assistant-monthly-table-sheet .my-calendar-grid {
-    min-width: 100%;
+    width: 100%;
   }
 
   .assistant-monthly-table-sheet .my-calendar-cell,

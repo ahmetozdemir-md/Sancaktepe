@@ -2680,6 +2680,28 @@ function App() {
     )
   }
 
+  const getWeeklyPersonLocationLabel = (
+    state: PlannerState,
+    dayKey: string,
+    assistant: string,
+    location: WorkLocation,
+  ): string => {
+    if (location.kind === 'duty') {
+      const dutyAssignment = getDutyAssignmentForPerson(state, dayKey, assistant)
+      return dutyAssignment ? `${dutyAssignment.site} Nöbet` : 'Nöbet'
+    }
+
+    if (location.kind === 'postDuty') {
+      return 'Nöbet Ertesi'
+    }
+
+    if (location.kind === 'leave') {
+      return location.name
+    }
+
+    return `${location.site} / ${location.name}`
+  }
+
   const startOwnersEdit = () => {
     if (!isValidMonthISO(ownersMonth)) {
       showWarning('Önce geçerli bir ay seçmelisin.')
@@ -4350,17 +4372,19 @@ function App() {
                       const selectedOwners = ownerSelectionDrafts[draftKey] ?? []
                       const isSelected = selectedOwners.includes(ownerName)
                       return (
-                        <label key={`${draftKey}-owner-choice-${ownerName}`}>
-                          <input
-                            type="checkbox"
-                            disabled={!isEditableDay}
-                            checked={isSelected}
-                            onChange={() => toggleOwnerSelection(dayKey, location.id, ownerName)}
-                          />
+                        <button
+                          key={`${draftKey}-owner-choice-${ownerName}`}
+                          type="button"
+                          className={`owner-choice-chip ${isSelected ? 'selected' : ''}`}
+                          aria-pressed={isSelected}
+                          disabled={!isEditableDay}
+                          onClick={() => toggleOwnerSelection(dayKey, location.id, ownerName)}
+                        >
+                          <span className="owner-choice-chip-check">{isSelected ? '✓' : ''}</span>
                           <span>
                             {getAssistantOptionLabelForState(plannerState, ownerName, dayKey)}
                           </span>
-                        </label>
+                        </button>
                       )
                     })}
                   </div>
@@ -4560,6 +4584,12 @@ function App() {
     )
   }
 
+  const appFooter = (
+    <footer className="app-credit no-print">
+      © 2026 Anestezi Asistanları Portalı · Developed by Ahmet Özdemir
+    </footer>
+  )
+
   if (!session) {
     return (
       <div className="page-shell login-shell">
@@ -4691,6 +4721,7 @@ function App() {
             </div>
           ) : null}
         </section>
+        {appFooter}
       </div>
     )
   }
@@ -4708,6 +4739,7 @@ function App() {
           onNextWeek={() => shiftPlannerWeeklyExportWeek(1)}
           onPrint={() => window.print()}
         />
+        {appFooter}
       </div>
     )
   }
@@ -4727,6 +4759,7 @@ function App() {
           onApplyMonth={applyAssistantMonthlyTableMonth}
           onClose={closeAssistantMonthlyTable}
         />
+        {appFooter}
       </div>
     )
   }
@@ -4761,6 +4794,7 @@ function App() {
             {renderDutyListTable(observerDutyTableModel, 'observer-duty-page')}
           </section>
         </div>
+        {appFooter}
       </div>
     )
   }
@@ -4805,21 +4839,11 @@ function App() {
           ) : null}
 
           {session.role === 'assistant' ? (
-            <div className="date-control">
-              <label htmlFor="assistant-focus">Kişi Görünümü</label>
-              <select
-                id="assistant-focus"
-                value={observerAssistant}
-                onChange={(event) => {
-                  setObserverAssistant(event.target.value)
-                }}
-              >
-                {data.assistants.map((assistant) => (
-                  <option key={`focus-top-${assistant}`} value={assistant}>
-                    {assistant}
-                  </option>
-                ))}
-              </select>
+            <div className="session-role assistant-welcome-card">
+              <span>Asistan Hekim</span>
+              <strong className="assistant-welcome-text">
+                Hoşgeldiniz Sayın {observerAssistant || session.assistantName || 'Asistan'}
+              </strong>
             </div>
           ) : null}
 
@@ -5592,7 +5616,7 @@ function App() {
                       {locations.length ? (
                         locations.map((location) => (
                           <span key={`${day.key}-${location.id}`} className="chip soft">
-                            {location.site} / {location.name}
+                            {getWeeklyPersonLocationLabel(data, day.key, observerAssistant, location)}
                           </span>
                         ))
                       ) : dayTypeLabel ? (
@@ -5778,6 +5802,7 @@ function App() {
 
         </main>
       )}
+      {appFooter}
     </div>
   )
 }

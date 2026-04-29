@@ -89,64 +89,66 @@ function AssistantMonthlyTableView({
         <p>{displayMonthLabel}</p>
 
         <div className="my-calendar-scroll assistant-monthly-calendar-scroll">
-          <div className="my-calendar-weekdays">
-            {['Pzt', 'Sal', 'Çar', 'Per', 'Cum', 'Cmt', 'Paz'].map((weekday) => (
-              <span key={`assistant-calendar-weekday-${weekday}`}>{weekday}</span>
-            ))}
-          </div>
+          <div className="assistant-monthly-calendar-inner">
+            <div className="my-calendar-weekdays">
+              {['Pzt', 'Sal', 'Çar', 'Per', 'Cum', 'Cmt', 'Paz'].map((weekday) => (
+                <span key={`assistant-calendar-weekday-${weekday}`}>{weekday}</span>
+              ))}
+            </div>
 
-          <div className="my-calendar-grid">
-            {weeks.flat().map((cell) => {
-              const dayDate = new Date(cell.key)
-              const dayNumber = dayDate.getDate()
-              const dayData = dayDataMap[cell.key]
-              const locations = dayData?.locations ?? []
-              const dutySite = dayData?.dutySite ?? null
-              const dayTypeLabel = dayData?.dayTypeLabel ?? null
-              const holidayReason = cell.inMonth ? dayData?.holidayReason ?? null : null
+            <div className="my-calendar-grid">
+              {weeks.flat().map((cell) => {
+                const dayDate = new Date(cell.key)
+                const dayNumber = dayDate.getDate()
+                const dayData = dayDataMap[cell.key]
+                const locations = dayData?.locations ?? []
+                const dutySite = dayData?.dutySite ?? null
+                const dayTypeLabel = dayData?.dayTypeLabel ?? null
+                const holidayReason = cell.inMonth ? dayData?.holidayReason ?? null : null
 
-              return (
-                <article
-                  key={`assistant-table-calendar-${cell.key}`}
-                  className={`my-calendar-cell${cell.inMonth ? '' : ' outside-month'}${
-                    cell.weekend ? ' weekend' : ''
-                  }${cell.officialHoliday ? ' holiday' : ''}${cell.key === todayISO ? ' today' : ''}`}
-                >
-                  <header>
-                    <strong>{dayNumber}</strong>
-                    <small>{cell.key}</small>
-                  </header>
+                return (
+                  <article
+                    key={`assistant-table-calendar-${cell.key}`}
+                    className={`my-calendar-cell${cell.inMonth ? '' : ' outside-month'}${
+                      cell.weekend ? ' weekend' : ''
+                    }${cell.officialHoliday ? ' holiday' : ''}${cell.key === todayISO ? ' today' : ''}`}
+                  >
+                    <header>
+                      <strong>{dayNumber}</strong>
+                      <small>{cell.key}</small>
+                    </header>
 
-                  <div className="my-calendar-content">
-                    {holidayReason ? <span className="my-calendar-holiday-reason">{holidayReason}</span> : null}
+                    <div className="my-calendar-content">
+                      {holidayReason ? <span className="my-calendar-holiday-reason">{holidayReason}</span> : null}
 
-                    {dutySite ? (
-                      <span className={`my-calendar-duty duty-site-${dutySiteClassName(dutySite)}`}>
-                        Nöbet ({dutySiteShortLabel(dutySite)})
-                      </span>
-                    ) : null}
+                      {dutySite ? (
+                        <span className={`my-calendar-duty duty-site-${dutySiteClassName(dutySite)}`}>
+                          Nöbet ({dutySiteShortLabel(dutySite)})
+                        </span>
+                      ) : null}
 
-                    {locations.map((locationLabel) => (
-                      <span key={`assistant-table-location-${cell.key}-${locationLabel}`} className="my-calendar-location">
-                        {locationLabel}
-                      </span>
-                    ))}
+                      {locations.map((locationLabel) => (
+                        <span key={`assistant-table-location-${cell.key}-${locationLabel}`} className="my-calendar-location">
+                          {locationLabel}
+                        </span>
+                      ))}
 
-                    {!dutySite && !locations.length ? (
-                      <span className="empty tiny">
-                        {cell.inMonth && dayTypeLabel
-                          ? holidayReason
-                            ? 'Resmi tatil'
-                            : dayTypeLabel
-                          : cell.inMonth
-                            ? 'Atama yok'
-                            : ''}
-                      </span>
-                    ) : null}
-                  </div>
-                </article>
-              )
-            })}
+                      {!dutySite && !locations.length ? (
+                        <span className="empty tiny">
+                          {cell.inMonth && dayTypeLabel
+                            ? holidayReason
+                              ? 'Resmi tatil'
+                              : dayTypeLabel
+                            : cell.inMonth
+                              ? 'Atama yok'
+                              : ''}
+                        </span>
+                      ) : null}
+                    </div>
+                  </article>
+                )
+              })}
+            </div>
           </div>
         </div>
       </section>
