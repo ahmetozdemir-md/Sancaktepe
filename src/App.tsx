@@ -1,6 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import './App.css'
-import { isSupabaseConfigured, REMOTE_STATE_ROW_ID, REMOTE_STATE_TABLE, supabase } from './supabase'
+import {
+  isCloudWriteEnabled,
+  isSupabaseConfigured,
+  REMOTE_STATE_ROW_ID,
+  REMOTE_STATE_TABLE,
+  supabase,
+} from './supabase'
 import portalCalendarIcon from './assets/calendar-portal.png'
 import WeeklyRotaExportView, {
   type WeeklyRotaExportDay,
@@ -111,6 +117,7 @@ interface RemotePortalPayload {
 const STORAGE_KEY = 'assistant-scheduler-v1'
 const USER_BINDING_KEY = 'assistant-user-binding-v1'
 const LAST_ASSISTANT_USER_KEY = 'assistant-last-user-v1'
+const CLOUD_READ_ONLY_TEXT = 'Bulut salt-okunur modda (yerelden buluta yazma kapalı).'
 const APP_PASSWORD = '1234'
 const ALLOWED_ASSISTANT_USERS = ['ahmetozdemir', 'ilkerermis', 'ebubekirozgur'] as const
 const DUTY_SITES: DutySite[] = ['Sancaktepe', 'Feriha Öz', 'Çekmeköy']
@@ -1834,7 +1841,9 @@ function App() {
     isSupabaseConfigured ? 'checking' : 'offline',
   )
   const [cloudStateText, setCloudStateText] = useState(
-    isSupabaseConfigured ? 'Bulut bağlantısı kontrol ediliyor...' : 'Bulut kaydı kapalı',
+    isSupabaseConfigured
+      ? 'Bulut bağlantısı kontrol ediliyor...'
+      : 'Bulut kaydı kapalı',
   )
   const [isCloudSaving, setIsCloudSaving] = useState(false)
   const [cloudLastSavedAt, setCloudLastSavedAt] = useState<string | null>(null)
@@ -2115,10 +2124,18 @@ function App() {
         setData(nextPlannerState)
         setUserBindings(nextUserBindings)
         setCloudState('ready')
-        setCloudStateText('Bulut kaydı aktif.')
+        setCloudStateText(isCloudWriteEnabled ? 'Bulut kaydı aktif.' : CLOUD_READ_ONLY_TEXT)
         if (typeof row.updated_at === 'string' && row.updated_at) {
           setCloudLastSavedAt(row.updated_at)
         }
+        return
+      }
+
+      if (!isCloudWriteEnabled) {
+        cloudPayloadRef.current = JSON.stringify(currentSnapshot)
+        cloudHydratedRef.current = true
+        setCloudState('ready')
+        setCloudStateText(CLOUD_READ_ONLY_TEXT)
         return
       }
 
@@ -2145,7 +2162,7 @@ function App() {
       cloudPayloadRef.current = JSON.stringify(currentSnapshot)
       cloudHydratedRef.current = true
       setCloudState('ready')
-      setCloudStateText('Bulut kaydı aktif.')
+      setCloudStateText(isCloudWriteEnabled ? 'Bulut kaydı aktif.' : CLOUD_READ_ONLY_TEXT)
       setCloudLastSavedAt(nowISO)
     }
 
@@ -2158,7 +2175,7 @@ function App() {
   }, [])
 
   useEffect(() => {
-    if (!isSupabaseConfigured || !supabase || !cloudHydratedRef.current) {
+    if (!isSupabaseConfigured || !supabase || !cloudHydratedRef.current || !isCloudWriteEnabled) {
       return
     }
     if (cloudPayload === cloudPayloadRef.current) {
@@ -2198,7 +2215,7 @@ function App() {
         const nowISO = new Date().toISOString()
         cloudPayloadRef.current = cloudPayload
         setCloudState('ready')
-        setCloudStateText('Bulut kaydı aktif.')
+        setCloudStateText(isCloudWriteEnabled ? 'Bulut kaydı aktif.' : CLOUD_READ_ONLY_TEXT)
         setCloudLastSavedAt(nowISO)
         setIsCloudSaving(false)
       }
