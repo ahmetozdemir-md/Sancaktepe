@@ -4635,11 +4635,27 @@ function App() {
           {loginView === 'assistant' ? (
             <>
               <div className="date-control">
-                <label htmlFor="assistant-user">Asistan İsmi</label>
+                <label htmlFor="assistant-picker-search">Asistan Seç</label>
                 <div className="assistant-user-picker">
                   <input
-                    id="assistant-user"
-                    name="assistant-user-login"
+                    type="text"
+                    tabIndex={-1}
+                    autoComplete="off"
+                    aria-hidden="true"
+                    style={{
+                      position: 'absolute',
+                      opacity: 0,
+                      pointerEvents: 'none',
+                      width: 0,
+                      height: 0,
+                      border: 0,
+                      padding: 0,
+                    }}
+                  />
+                  <input
+                    id="assistant-picker-search"
+                    name="assistant-picker-search"
+                    type="search"
                     value={assistantUsernameInput}
                     onFocus={() => setAssistantUserPickerOpen(true)}
                     onBlur={() => {
@@ -4649,11 +4665,15 @@ function App() {
                       setAssistantUsernameInput(event.target.value)
                       setAssistantUserPickerOpen(true)
                     }}
-                    placeholder="İsim yaz (örn: Ahmet Özdemir)"
-                    autoComplete="new-password"
+                    placeholder="İsim ara"
+                    autoComplete="off"
                     autoCorrect="off"
                     spellCheck={false}
-                    autoCapitalize="words"
+                    autoCapitalize="none"
+                    inputMode="search"
+                    enterKeyHint="search"
+                    data-form-type="other"
+                    data-lpignore="true"
                   />
                   {assistantUserPickerOpen ? (
                     <div className="assistant-user-picker-list">
