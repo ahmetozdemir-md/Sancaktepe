@@ -1,6 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import './App.css'
 import { isSupabaseConfigured, REMOTE_STATE_ROW_ID, REMOTE_STATE_TABLE, supabase } from './supabase'
+import portalCalendarIcon from './assets/calendar-portal.png'
+import WeeklyRotaExportView, {
+  type WeeklyRotaExportDay,
+  type WeeklyRotaExportGroup,
+  type WeeklyRotaExportRow,
+} from './WeeklyRotaExportView'
 
 type PanelMode = 'admin' | 'observer'
 type AdminSection = 'assistants' | 'locations' | 'duty' | 'planner'
@@ -9,11 +15,13 @@ type PlannerView = 'rooms' | 'status'
 type LocationKind = 'normal' | 'leave' | 'duty' | 'postDuty'
 type LocationTone = 'sand' | 'sage' | 'amber' | 'sky' | 'rose'
 type DutySite = 'Sancaktepe' | 'Feriha Öz' | 'Çekmeköy'
+type SeniorityLevel = number
 
 type ManualAssignments = Record<string, Record<string, string[]>>
 type DutyRoster = Record<string, DutyAssignment[]>
 type LocationOwners = Record<string, string[]>
 type LocationOwnersByMonth = Record<string, LocationOwners>
+type AssistantRanks = Record<string, SeniorityLevel>
 
 interface DutyAssignment {
   name: string
@@ -32,10 +40,15 @@ interface WorkLocation {
   name: string
   kind: LocationKind
   tone: LocationTone
+  order?: number
+  orderHistory?: Array<{ from: string; value: number }>
+  activeFrom?: string
+  activeUntil?: string | null
 }
 
 interface PlannerState {
   assistants: string[]
+  assistantRanks: AssistantRanks
   locations: WorkLocation[]
   locationOwners: LocationOwners
   locationOwnersByMonth: LocationOwnersByMonth
@@ -105,6 +118,19 @@ const REMOTE_SAVE_DEBOUNCE_MS = 900
 const DUTY_SITE_ORDER = new Map<DutySite, number>(
   DUTY_SITES.map((site, index) => [site, index]),
 )
+const LOCATION_SITE_ID_PREFIX: Record<DutySite, string> = {
+  Sancaktepe: 'sancak',
+  'Feriha Öz': 'feriha-oz',
+  Çekmeköy: 'cekmekoy',
+}
+const LEAVE_LOCATION_IDS = {
+  excuse: 'mazeret-izni',
+  annual: 'yillik-izin',
+  rotation: 'rotasyon',
+} as const
+const BASE_SENIORITY_LEVEL_COUNT = 4
+const LEGACY_LEAVE_LOCATION_ID = 'izinli'
+const SITE_DISPLAY_ORDER = ['Sancaktepe', 'Çekmeköy', 'Feriha Öz', 'Diğer']
 
 const LOCATION_KIND_LABELS: Record<LocationKind, string> = {
   normal: 'Normal Alan',
@@ -192,7 +218,152 @@ function withResolvedTone(location: WorkLocation): WorkLocation {
   }
 }
 
-const DEFAULT_LOCATIONS: WorkLocation[] = ([
+function getSiteDisplayRank(site: string): number {
+  const index = SITE_DISPLAY_ORDER.indexOf(site)
+  return index === -1 ? 99 : index
+}
+
+function normalizeOrderHistory(
+  history: WorkLocation['orderHistory'],
+): Array<{ from: string; value: number }> {
+  if (!Array.isArray(history)) {
+    return []
+  }
+
+  const shape = /^\d{4}-\d{2}-\d{2}$/
+  const map = new Map<string, number>()
+  history.forEach((entry) => {
+    if (!entry || typeof entry !== 'object') {
+      return
+    }
+    const from = typeof entry.from === 'string' ? entry.from : ''
+    const value = Math.floor(Number(entry.value))
+    if (!shape.test(from) || !Number.isFinite(value) || value < 1) {
+      return
+    }
+    map.set(from, value)
+  })
+
+  return [...map.entries()]
+    .map(([from, value]) => ({ from, value }))
+    .sort((a, b) => a.from.localeCompare(b.from))
+}
+
+function getLocationOrderForDay(location: WorkLocation, dayKey: string): number {
+  const history = normalizeOrderHistory(location.orderHistory)
+  if (history.length) {
+    const activeEntry = [...history].reverse().find((entry) => entry.from <= dayKey)
+    if (activeEntry) {
+      return activeEntry.value
+    }
+  }
+  return Number.isFinite(location.order) && Number(location.order) > 0 ? Math.floor(Number(location.order)) : 1
+}
+
+function setLocationOrderFromDay(location: WorkLocation, fromDay: string, value: number): WorkLocation {
+  const safeValue = Math.max(1, Math.floor(value))
+  const nextHistory = normalizeOrderHistory([
+    ...(location.orderHistory ?? []),
+    {
+      from: fromDay,
+      value: safeValue,
+    },
+  ])
+
+  return {
+    ...location,
+    order: safeValue,
+    orderHistory: nextHistory,
+  }
+}
+
+function isLocationActiveOnDay(location: WorkLocation, dayKey: string): boolean {
+  const fromDay = location.activeFrom && hasIsoShape(location.activeFrom) ? location.activeFrom : '1900-01-01'
+  const untilDay =
+    location.activeUntil && hasIsoShape(location.activeUntil) ? location.activeUntil : null
+  if (dayKey < fromDay) {
+    return false
+  }
+  if (untilDay && dayKey >= untilDay) {
+    return false
+  }
+  return true
+}
+
+function getLocationsForDay(state: PlannerState, dayKey: string): WorkLocation[] {
+  return sortLocationsForState(
+    state.locations.filter((location) => isLocationActiveOnDay(location, dayKey)),
+    dayKey,
+  )
+}
+
+function normalizeNormalLocationOrders(locations: WorkLocation[]): WorkLocation[] {
+  const withIndex = locations.map((location, index) => ({ location, index }))
+  const nextOrders = new Map<string, number>()
+
+  SITE_DISPLAY_ORDER.forEach((siteName) => {
+    const siteNormals = withIndex
+      .filter(({ location }) => location.kind === 'normal' && location.site === siteName)
+      .sort((a, b) => {
+        const orderA = getLocationOrderForDay(a.location, '9999-12-31') || a.index + 1
+        const orderB = getLocationOrderForDay(b.location, '9999-12-31') || b.index + 1
+        return (
+          orderA - orderB ||
+          a.location.name.localeCompare(b.location.name, 'tr') ||
+          a.index - b.index
+        )
+      })
+
+    siteNormals.forEach(({ location }, position) => {
+      nextOrders.set(location.id, position + 1)
+    })
+  })
+
+  return locations.map((location) =>
+    location.kind === 'normal'
+      ? {
+          ...location,
+          order: nextOrders.get(location.id) ?? 1,
+        }
+      : location,
+  )
+}
+
+function sortLocationsForState(locations: WorkLocation[], dayKey = toISODate(new Date())): WorkLocation[] {
+  const kindRank: Record<LocationKind, number> = {
+    normal: 0,
+    leave: 1,
+    duty: 2,
+    postDuty: 3,
+  }
+
+  return [...locations].sort((a, b) => {
+    const siteDelta = getSiteDisplayRank(a.site) - getSiteDisplayRank(b.site)
+    if (siteDelta !== 0) {
+      return siteDelta
+    }
+
+    if (a.kind === 'normal' && b.kind === 'normal') {
+      return (
+        getLocationOrderForDay(a, dayKey) - getLocationOrderForDay(b, dayKey) ||
+        a.name.localeCompare(b.name, 'tr') ||
+        a.id.localeCompare(b.id, 'tr')
+      )
+    }
+
+    return (
+      kindRank[a.kind] - kindRank[b.kind] ||
+      a.name.localeCompare(b.name, 'tr') ||
+      a.id.localeCompare(b.id, 'tr')
+    )
+  })
+}
+
+function normalizeAndSortLocations(locations: WorkLocation[]): WorkLocation[] {
+  return sortLocationsForState(normalizeNormalLocationOrders(locations))
+}
+
+const DEFAULT_LOCATIONS: WorkLocation[] = normalizeAndSortLocations(([
   { id: 'sancak-ameliyathane-1', site: 'Sancaktepe', name: 'Ameliyathane 1', kind: 'normal', tone: 'sand' },
   { id: 'sancak-ameliyathane-2', site: 'Sancaktepe', name: 'Ameliyathane 2', kind: 'normal', tone: 'sand' },
   { id: 'sancak-ameliyathane-3', site: 'Sancaktepe', name: 'Ameliyathane 3', kind: 'normal', tone: 'sand' },
@@ -223,11 +394,12 @@ const DEFAULT_LOCATIONS: WorkLocation[] = ([
   { id: 'feriha-oz-poliklinik', site: 'Feriha Öz', name: 'Poliklinik', kind: 'normal', tone: 'amber' },
   { id: 'feriha-oz-dis-anestezi', site: 'Feriha Öz', name: 'Dış Anestezi', kind: 'normal', tone: 'amber' },
 
-  { id: 'izinli', site: 'Diğer', name: 'İzinli', kind: 'leave', tone: 'sky' },
-  { id: 'rotasyon', site: 'Diğer', name: 'Rotasyon', kind: 'leave', tone: 'sky' },
+  { id: LEAVE_LOCATION_IDS.excuse, site: 'Diğer', name: 'Mazeret İzni', kind: 'leave', tone: 'sky' },
+  { id: LEAVE_LOCATION_IDS.annual, site: 'Diğer', name: 'Yıllık İzin', kind: 'leave', tone: 'sky' },
+  { id: LEAVE_LOCATION_IDS.rotation, site: 'Diğer', name: 'Rotasyon', kind: 'leave', tone: 'sky' },
   { id: 'nobet', site: 'Diğer', name: 'Nöbet', kind: 'duty', tone: 'rose' },
   { id: 'nobet-ertesi', site: 'Diğer', name: 'Nöbet Ertesi', kind: 'postDuty', tone: 'rose' },
-] as WorkLocation[]).map(withResolvedTone)
+] as WorkLocation[]).map(withResolvedTone))
 
 const DEFAULT_ASSISTANTS = [
   'Hilal',
@@ -293,8 +465,51 @@ function isOfficialHoliday(date: Date): boolean {
   return getOfficialHolidayReason(isoDate) !== null
 }
 
-function isNonWorkingDay(date: Date): boolean {
-  return isWeekend(date) || isOfficialHoliday(date)
+function isHalfDayHolidayReason(reason: string | null): boolean {
+  if (!reason) {
+    return false
+  }
+  return reason.toLocaleLowerCase('tr').includes('yarım gün')
+}
+
+function isHalfDayOfficialHoliday(date: Date): boolean {
+  const reason = getOfficialHolidayReason(toISODate(date))
+  return isHalfDayHolidayReason(reason)
+}
+
+function isFullOfficialHoliday(date: Date): boolean {
+  if (!isOfficialHoliday(date)) {
+    return false
+  }
+  return !isHalfDayOfficialHoliday(date)
+}
+
+function isFullNonWorkingDay(date: Date): boolean {
+  return isWeekend(date) || isFullOfficialHoliday(date)
+}
+
+function isRoomAssignableDay(date: Date): boolean {
+  return !isFullNonWorkingDay(date)
+}
+
+function getScheduledWorkHoursForDay(date: Date): number {
+  if (isWeekend(date)) {
+    return 0
+  }
+  if (isHalfDayOfficialHoliday(date)) {
+    return 4
+  }
+  if (isFullOfficialHoliday(date)) {
+    return 0
+  }
+  return 8
+}
+
+function calculateDutyOvertimeHoursForDay(dutyDate: Date): number {
+  const dutyHours = 24
+  const currentDayPlannedHours = getScheduledWorkHoursForDay(dutyDate)
+  const nextDayPlannedHours = getScheduledWorkHoursForDay(addDays(dutyDate, 1))
+  return Math.max(0, dutyHours - currentDayPlannedHours - nextDayPlannedHours)
 }
 
 function startOfISOWeek(date: Date): Date {
@@ -308,6 +523,144 @@ function uniqueSortedNames(names: string[]): string[] {
   return [...new Set(names.map((name) => name.trim()).filter(Boolean))].sort((a, b) =>
     a.localeCompare(b, 'tr'),
   )
+}
+
+function normalizeAssistantName(rawName: string): string {
+  const normalizedSpace = rawName.trim().replace(/\s+/g, ' ')
+  if (!normalizedSpace) {
+    return ''
+  }
+
+  const capitalizeToken = (token: string): string => {
+    const lower = token.toLocaleLowerCase('tr')
+    if (!lower) {
+      return ''
+    }
+    const [first, ...rest] = [...lower]
+    return `${first.toLocaleUpperCase('tr')}${rest.join('')}`
+  }
+
+  const separators = /([-'’])/g
+  return normalizedSpace
+    .split(' ')
+    .map((word) =>
+      word
+        .split(separators)
+        .map((piece) =>
+          piece === '-' || piece === "'" || piece === '’' ? piece : capitalizeToken(piece),
+        )
+        .join(''),
+    )
+    .join(' ')
+}
+
+function hashString(value: string): number {
+  let hash = 2166136261
+  for (const char of value) {
+    hash ^= char.codePointAt(0) ?? 0
+    hash = Math.imul(hash, 16777619)
+  }
+  return Math.abs(hash)
+}
+
+function getCurrentMaxSeniorityLevel(assistants: string[], ranks: AssistantRanks): number {
+  const fromRanks = assistants.reduce((maxLevel, assistant) => {
+    const level = Math.floor(Number(ranks[assistant] ?? 0))
+    if (!Number.isFinite(level) || level < 1) {
+      return maxLevel
+    }
+    return Math.max(maxLevel, level)
+  }, 0)
+  return Math.max(BASE_SENIORITY_LEVEL_COUNT, fromRanks)
+}
+
+function buildSeniorityLevels(
+  assistants: string[],
+  ranks: AssistantRanks,
+  includeNextLevel = false,
+): SeniorityLevel[] {
+  const maxLevel = getCurrentMaxSeniorityLevel(assistants, ranks) + (includeNextLevel ? 1 : 0)
+  return Array.from({ length: Math.max(1, maxLevel) }, (_, index) => index + 1)
+}
+
+function toSafeSeniorityLevel(value: number, fallback = 1): SeniorityLevel {
+  const normalized = Math.floor(Number(value))
+  if (!Number.isFinite(normalized) || normalized < 1) {
+    return Math.max(1, Math.floor(fallback))
+  }
+  return normalized
+}
+
+function buildRandomAssistantRanks(assistants: string[]): AssistantRanks {
+  if (!assistants.length) {
+    return {}
+  }
+
+  const shuffled = [...assistants].sort((a, b) => {
+    const hashDiff = hashString(a) - hashString(b)
+    if (hashDiff !== 0) {
+      return hashDiff
+    }
+    return a.localeCompare(b, 'tr')
+  })
+  const baseLevels = Array.from({ length: BASE_SENIORITY_LEVEL_COUNT }, (_, index) => index + 1)
+
+  return Object.fromEntries(
+    shuffled.map((assistant, index) => [assistant, baseLevels[index % baseLevels.length]]),
+  ) as AssistantRanks
+}
+
+function compactAssistantRanks(assistants: string[], ranks: AssistantRanks): AssistantRanks {
+  if (!assistants.length) {
+    return {}
+  }
+
+  const buckets = new Map<number, string[]>()
+  assistants.forEach((assistant) => {
+    const safeLevel = toSafeSeniorityLevel(ranks[assistant] ?? 1)
+    if (!buckets.has(safeLevel)) {
+      buckets.set(safeLevel, [])
+    }
+    buckets.get(safeLevel)?.push(assistant)
+  })
+
+  const presentLevels = [...buckets.keys()].sort((a, b) => a - b)
+  const levelMap = new Map<number, SeniorityLevel>()
+  presentLevels.forEach((originalLevel, index) => {
+    levelMap.set(originalLevel, index + 1)
+  })
+
+  return Object.fromEntries(
+    assistants.map((assistant) => {
+      const originalLevel = toSafeSeniorityLevel(ranks[assistant] ?? 1)
+      const targetLevel = levelMap.get(originalLevel) ?? 1
+      return [assistant, targetLevel]
+    }),
+  ) as AssistantRanks
+}
+
+function normalizeAssistantRanks(raw: unknown, assistants: string[]): AssistantRanks {
+  const parsedRanks: Partial<Record<string, SeniorityLevel>> = {}
+  if (raw && typeof raw === 'object') {
+    Object.entries(raw as Record<string, unknown>).forEach(([assistant, level]) => {
+      const numeric = Number(level)
+      if (Number.isFinite(numeric) && numeric >= 1) {
+        parsedRanks[assistant] = toSafeSeniorityLevel(numeric)
+      }
+    })
+  }
+
+  const missingAssistants = assistants.filter((assistant) => !parsedRanks[assistant])
+  const randomForMissing = buildRandomAssistantRanks(missingAssistants)
+
+  const merged: AssistantRanks = Object.fromEntries(
+    assistants.map((assistant) => [
+      assistant,
+      toSafeSeniorityLevel(parsedRanks[assistant] ?? randomForMissing[assistant] ?? 1),
+    ]),
+  ) as AssistantRanks
+
+  return compactAssistantRanks(assistants, merged)
 }
 
 function normalizeDutySite(rawSite: string): DutySite | null {
@@ -324,11 +677,70 @@ function normalizeDutySite(rawSite: string): DutySite | null {
   return null
 }
 
-function sortDutyAssignments(assignments: DutyAssignment[]): DutyAssignment[] {
+function slugifyLocationName(value: string): string {
+  return value
+    .trim()
+    .toLocaleLowerCase('tr')
+    .replace(/ç/g, 'c')
+    .replace(/ğ/g, 'g')
+    .replace(/ı/g, 'i')
+    .replace(/ö/g, 'o')
+    .replace(/ş/g, 's')
+    .replace(/ü/g, 'u')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+}
+
+function buildUniqueLocationId(
+  site: DutySite,
+  locationName: string,
+  existingLocations: WorkLocation[],
+): string {
+  const sitePrefix = LOCATION_SITE_ID_PREFIX[site]
+  const locationToken = slugifyLocationName(locationName) || 'alan'
+  const baseId = `${sitePrefix}-${locationToken}`
+  const takenIds = new Set(existingLocations.map((location) => location.id))
+  if (!takenIds.has(baseId)) {
+    return baseId
+  }
+
+  let serial = 2
+  while (takenIds.has(`${baseId}-${serial}`)) {
+    serial += 1
+  }
+  return `${baseId}-${serial}`
+}
+
+function compareAssistantNamesByRank(
+  leftName: string,
+  rightName: string,
+  assistantRanks?: AssistantRanks,
+): number {
+  const leftRankRaw = Number(assistantRanks?.[leftName])
+  const rightRankRaw = Number(assistantRanks?.[rightName])
+  const leftRank = Number.isFinite(leftRankRaw) && leftRankRaw >= 1 ? Math.floor(leftRankRaw) : 999
+  const rightRank = Number.isFinite(rightRankRaw) && rightRankRaw >= 1 ? Math.floor(rightRankRaw) : 999
+
+  return leftRank - rightRank || leftName.localeCompare(rightName, 'tr')
+}
+
+function sortAssistantNamesByRank(
+  assistantNames: string[],
+  assistantRanks?: AssistantRanks,
+): string[] {
+  return [...assistantNames].sort((left, right) =>
+    compareAssistantNamesByRank(left, right, assistantRanks),
+  )
+}
+
+function sortDutyAssignments(
+  assignments: DutyAssignment[],
+  assistantRanks?: AssistantRanks,
+): DutyAssignment[] {
   return [...assignments].sort(
     (a, b) =>
       (DUTY_SITE_ORDER.get(a.site) ?? 99) - (DUTY_SITE_ORDER.get(b.site) ?? 99) ||
-      a.name.localeCompare(b.name, 'tr'),
+      compareAssistantNamesByRank(a.name, b.name, assistantRanks),
   )
 }
 
@@ -368,6 +780,59 @@ function dutySiteShortLabel(site: DutySite): string {
     return 'Feriha'
   }
   return 'Çekmeköy'
+}
+
+function normalizeTrToken(value: string): string {
+  return value
+    .toLocaleLowerCase('tr')
+    .replace(/ı/g, 'i')
+    .replace(/ğ/g, 'g')
+    .replace(/ş/g, 's')
+    .replace(/ö/g, 'o')
+    .replace(/ü/g, 'u')
+    .replace(/ç/g, 'c')
+}
+
+function getWeeklyExportUnitLabel(location: WorkLocation): string {
+  const name = location.name.trim()
+  const normalizedName = normalizeTrToken(name)
+
+  if (location.kind === 'leave') {
+    if (location.id === LEAVE_LOCATION_IDS.rotation || normalizedName.includes('rotasyon')) {
+      return 'ROT'
+    }
+    if (location.id === LEAVE_LOCATION_IDS.annual || normalizedName.includes('yillik')) {
+      return 'YILLIK'
+    }
+    return 'İZİNLİ'
+  }
+
+  if (location.site === 'Sancaktepe') {
+    const sancakRoomMatch = name.match(/ameliyathane\s*(\d+)/iu)
+    if (sancakRoomMatch) {
+      return sancakRoomMatch[1]
+    }
+  }
+
+  const unitCodeMatch = name.match(/^(C\d+|G\d+)/iu)
+  if (unitCodeMatch) {
+    return unitCodeMatch[1].toLocaleUpperCase('tr')
+  }
+
+  if (normalizedName.includes('ameliyathane')) {
+    return 'AML'
+  }
+  if (normalizedName.includes('yogun bakim')) {
+    return 'YBU'
+  }
+  if (normalizedName.includes('poliklinik')) {
+    return 'POL'
+  }
+  if (normalizedName.includes('dis anestezi')) {
+    return 'DIŞ'
+  }
+
+  return name
 }
 
 function buildWeek(weekStartISO: string): DayInfo[] {
@@ -433,15 +898,20 @@ function getDayTypeLabel(dayKey: string): string | null {
   const date = fromISODate(dayKey)
   const weekend = isWeekend(date)
   const officialHoliday = isOfficialHoliday(date)
+  const halfDayHoliday = isHalfDayOfficialHoliday(date)
+  const fullHoliday = officialHoliday && !halfDayHoliday
 
-  if (weekend && officialHoliday) {
+  if (weekend && fullHoliday) {
     return 'Hafta sonu ve resmi tatil'
   }
-  if (officialHoliday) {
+  if (fullHoliday) {
     return 'Resmi tatil'
   }
   if (weekend) {
     return 'Hafta sonu'
+  }
+  if (halfDayHoliday) {
+    return 'Yarım gün resmi tatil (4 saat mesai)'
   }
   return null
 }
@@ -451,8 +921,12 @@ function getAssignmentsForLocation(
   dayKey: string,
   location: WorkLocation,
 ): string[] {
+  if (!isLocationActiveOnDay(location, dayKey)) {
+    return []
+  }
+
   const dayDate = fromISODate(dayKey)
-  if ((location.kind === 'normal' || location.kind === 'leave') && isNonWorkingDay(dayDate)) {
+  if ((location.kind === 'normal' || location.kind === 'leave') && !isRoomAssignableDay(dayDate)) {
     return []
   }
 
@@ -718,9 +1192,13 @@ function buildMonthCalendarGrid(monthISO: string): CalendarCellInfo[][] {
   return weeks
 }
 
-function buildDutyTableModel(dutyRoster: DutyRoster, monthISO: string): DutyTableModel {
+function buildDutyTableModel(
+  dutyRoster: DutyRoster,
+  monthISO: string,
+  assistantRanks?: AssistantRanks,
+): DutyTableModel {
   const rows: DutyTableRow[] = listMonthDays(monthISO).map((dayKey) => {
-    const entries = sortDutyAssignments(dutyRoster[dayKey] ?? [])
+    const entries = sortDutyAssignments(dutyRoster[dayKey] ?? [], assistantRanks)
     const bySite: Record<DutySite, string[]> = {
       Sancaktepe: [],
       'Feriha Öz': [],
@@ -912,58 +1390,6 @@ function parseDutyQuickLines(
   return { data, issues, totalNames }
 }
 
-function removeMonthFromDutyRoster(dutyRoster: DutyRoster, monthISO: string): DutyRoster {
-  return Object.fromEntries(
-    Object.entries(dutyRoster).filter(([dayKey]) => !dayKey.startsWith(`${monthISO}-`)),
-  )
-}
-
-function generateDutyRosterForMonth(
-  assistants: string[],
-  monthISO: string,
-  perDayCount: number,
-): DutyRoster {
-  const cleanAssistants = uniqueSortedNames(assistants)
-  if (!cleanAssistants.length) {
-    return {}
-  }
-
-  const monthDays = listMonthDays(monthISO)
-  if (!monthDays.length) {
-    return {}
-  }
-
-  const safePerDay = Math.max(1, Math.min(perDayCount, cleanAssistants.length))
-  const roster: DutyRoster = {}
-  let cursor = 0
-  let previousDayAssignees = new Set<string>()
-
-  monthDays.forEach((dayKey) => {
-    const selected: string[] = []
-
-    for (let offset = 0; offset < cleanAssistants.length && selected.length < safePerDay; offset += 1) {
-      const candidate = cleanAssistants[(cursor + offset) % cleanAssistants.length]
-      const alreadySelected = selected.includes(candidate)
-      const blockedByPreviousDay = previousDayAssignees.has(candidate)
-      if (alreadySelected || blockedByPreviousDay) {
-        continue
-      }
-      selected.push(candidate)
-    }
-
-    roster[dayKey] = sortDutyAssignments(
-      selected.map((name, index) => ({
-        name,
-        site: DUTY_SITES[index % DUTY_SITES.length],
-      })),
-    )
-    previousDayAssignees = new Set(selected)
-    cursor = (cursor + safePerDay) % cleanAssistants.length
-  })
-
-  return roster
-}
-
 function sanitizeManualAssignments(
   manualAssignments: ManualAssignments,
   dutyRoster: DutyRoster,
@@ -975,7 +1401,7 @@ function sanitizeManualAssignments(
 
   Object.entries(manualAssignments).forEach(([dayKey, locationAssignments]) => {
     const prevDay = toISODate(addDays(fromISODate(dayKey), -1))
-    const workingDay = !isNonWorkingDay(fromISODate(dayKey))
+    const workingDay = isRoomAssignableDay(fromISODate(dayKey))
     const blockedForNormal = new Set([...dutyAssignmentsToNames(dutyRoster[prevDay] ?? [])])
 
     const normalizedLocationAssignments: Record<string, string[]> = {}
@@ -1040,27 +1466,94 @@ function removeNameFromDuty(dutyRoster: DutyRoster, nameToRemove: string): DutyR
   )
 }
 
+function cloneDayLocationAssignments(
+  assignments: Record<string, string[]> | undefined,
+): Record<string, string[]> {
+  return Object.fromEntries(
+    Object.entries(assignments ?? {}).map(([locationId, names]) => [
+      locationId,
+      uniqueSortedNames(names),
+    ]),
+  )
+}
+
+function remapLegacyLeaveAssignments(manualAssignments: ManualAssignments): ManualAssignments {
+  return Object.fromEntries(
+    Object.entries(manualAssignments).map(([dayKey, assignments]) => {
+      const nextAssignments: Record<string, string[]> = {}
+
+      Object.entries(assignments).forEach(([locationId, names]) => {
+        const normalized = uniqueSortedNames(names)
+        if (!normalized.length) {
+          return
+        }
+
+        const targetId = locationId === LEGACY_LEAVE_LOCATION_ID ? LEAVE_LOCATION_IDS.excuse : locationId
+        const merged = uniqueSortedNames([...(nextAssignments[targetId] ?? []), ...normalized])
+        nextAssignments[targetId] = merged
+      })
+
+      return [dayKey, nextAssignments]
+    }),
+  )
+}
+
 function ensureCoreLocations(locations: WorkLocation[]): WorkLocation[] {
   const hasDuty = locations.some((location) => location.kind === 'duty')
   const hasPostDuty = locations.some((location) => location.kind === 'postDuty')
-  const hasLeave = locations.some((location) => location.kind === 'leave')
-  const hasRotation = locations.some(
-    (location) => location.kind === 'leave' && location.name.toLowerCase() === 'rotasyon',
+  const cleaned = locations.filter(
+    (location) =>
+      !(
+        location.kind === 'leave' &&
+        (location.id === LEGACY_LEAVE_LOCATION_ID ||
+          location.name.trim().toLocaleLowerCase('tr') === 'izinli')
+      ),
+  )
+  const hasExcuseLeave = cleaned.some(
+    (location) =>
+      location.kind === 'leave' &&
+      (location.id === LEAVE_LOCATION_IDS.excuse ||
+        location.name.trim().toLocaleLowerCase('tr').includes('mazeret')),
+  )
+  const hasAnnualLeave = cleaned.some(
+    (location) =>
+      location.kind === 'leave' &&
+      (location.id === LEAVE_LOCATION_IDS.annual ||
+        location.name
+          .trim()
+          .toLocaleLowerCase('tr')
+          .replace(/ı/g, 'i')
+          .includes('yillik')),
+  )
+  const hasRotation = cleaned.some(
+    (location) =>
+      location.kind === 'leave' &&
+      (location.id === LEAVE_LOCATION_IDS.rotation ||
+        location.name.trim().toLocaleLowerCase('tr').includes('rotasyon')),
   )
 
-  const next = [...locations]
-  if (!hasLeave) {
+  const next = [...cleaned]
+  if (!hasExcuseLeave) {
     next.push({
-      id: 'izinli',
+      id: LEAVE_LOCATION_IDS.excuse,
       site: 'Diğer',
-      name: 'İzinli',
+      name: 'Mazeret İzni',
+      kind: 'leave',
+      tone: 'sky',
+    })
+  }
+  if (!hasAnnualLeave) {
+    next.push({
+      id: LEAVE_LOCATION_IDS.annual,
+      site: 'Diğer',
+      name: 'Yıllık İzin',
       kind: 'leave',
       tone: 'sky',
     })
   }
   if (!hasRotation) {
     next.push({
-      id: 'rotasyon',
+      id: LEAVE_LOCATION_IDS.rotation,
       site: 'Diğer',
       name: 'Rotasyon',
       kind: 'leave',
@@ -1085,7 +1578,7 @@ function ensureCoreLocations(locations: WorkLocation[]): WorkLocation[] {
       tone: 'rose',
     })
   }
-  return next.map(withResolvedTone)
+  return normalizeAndSortLocations(next.map(withResolvedTone))
 }
 
 function buildFallbackState(): PlannerState {
@@ -1093,8 +1586,10 @@ function buildFallbackState(): PlannerState {
   const weekStartISO = toISODate(startOfISOWeek(now))
   const currentMonthISO = toISODate(now).slice(0, 7)
   const fallbackLocationOwners = createDefaultLocationOwners(DEFAULT_LOCATIONS, DEFAULT_ASSISTANTS)
+  const fallbackAssistantRanks = buildRandomAssistantRanks(DEFAULT_ASSISTANTS)
   return {
     assistants: DEFAULT_ASSISTANTS,
+    assistantRanks: fallbackAssistantRanks,
     locations: DEFAULT_LOCATIONS,
     locationOwners: fallbackLocationOwners,
     locationOwnersByMonth: {
@@ -1112,6 +1607,10 @@ function sanitizePlannerState(parsed: Partial<PlannerState>, fallback: PlannerSt
   const assistants = Array.isArray(parsed.assistants)
     ? uniqueSortedNames(parsed.assistants.filter((item): item is string => typeof item === 'string'))
     : fallback.assistants
+  const assistantRanks = normalizeAssistantRanks(
+    (parsed as { assistantRanks?: unknown }).assistantRanks,
+    assistants,
+  )
 
   const locations = Array.isArray(parsed.locations)
     ? ensureCoreLocations(
@@ -1124,9 +1623,24 @@ function sanitizePlannerState(parsed: Partial<PlannerState>, fallback: PlannerSt
               typeof item?.name === 'string' &&
               typeof item?.kind === 'string',
           )
-          .map((location) => withResolvedTone(location)),
+          .map((location) => {
+            const parsedOrder = Number(location.order)
+            return withResolvedTone({
+              ...location,
+              order: Number.isFinite(parsedOrder) && parsedOrder > 0 ? Math.floor(parsedOrder) : undefined,
+              orderHistory: normalizeOrderHistory(location.orderHistory),
+              activeFrom:
+                typeof location.activeFrom === 'string' && hasIsoShape(location.activeFrom)
+                  ? location.activeFrom
+                  : undefined,
+              activeUntil:
+                typeof location.activeUntil === 'string' && hasIsoShape(location.activeUntil)
+                  ? location.activeUntil
+                  : null,
+            })
+          }),
       )
-    : fallback.locations.map(withResolvedTone)
+    : normalizeAndSortLocations(fallback.locations.map(withResolvedTone))
 
   const rawLocationOwners = (parsed as { locationOwners?: Record<string, unknown> }).locationOwners
   const legacyOwnersSource =
@@ -1165,7 +1679,7 @@ function sanitizePlannerState(parsed: Partial<PlannerState>, fallback: PlannerSt
     normalizedLocationOwnersByMonth[currentMonthISO] = normalizedLocationOwners
   }
 
-  const manualAssignments: ManualAssignments =
+  const rawManualAssignments: ManualAssignments =
     parsed.manualAssignments && typeof parsed.manualAssignments === 'object'
       ? Object.fromEntries(
           Object.entries(parsed.manualAssignments).map(([day, locationAssignments]) => [
@@ -1181,6 +1695,7 @@ function sanitizePlannerState(parsed: Partial<PlannerState>, fallback: PlannerSt
           ]),
         )
       : fallback.manualAssignments
+  const manualAssignments = remapLegacyLeaveAssignments(rawManualAssignments)
 
   const dutyRoster: DutyRoster =
     parsed.dutyRoster && typeof parsed.dutyRoster === 'object'
@@ -1226,6 +1741,7 @@ function sanitizePlannerState(parsed: Partial<PlannerState>, fallback: PlannerSt
 
   return {
     assistants,
+    assistantRanks,
     locations,
     locationOwners: normalizedLocationOwners,
     locationOwnersByMonth: normalizedLocationOwnersByMonth,
@@ -1301,7 +1817,13 @@ function App() {
   const [observerSection, setObserverSection] = useState<ObserverSection>('myPanel')
   const [plannerView, setPlannerView] = useState<PlannerView>('rooms')
   const [session, setSession] = useState<SessionInfo | null>(null)
+  const [entryStep, setEntryStep] = useState<'welcome' | 'login'>('welcome')
   const [loginView, setLoginView] = useState<'choose' | 'admin' | 'assistant'>('choose')
+  const [selectedPortalApp, setSelectedPortalApp] = useState<'none' | 'scheduler'>('none')
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
+  const [isMobileViewport, setIsMobileViewport] = useState(
+    typeof window !== 'undefined' ? window.matchMedia('(max-width: 980px)').matches : false,
+  )
   const [passwordInput, setPasswordInput] = useState('')
   const [assistantUsernameInput, setAssistantUsernameInput] = useState('')
   const [assistantIdentityInput, setAssistantIdentityInput] = useState('')
@@ -1321,6 +1843,9 @@ function App() {
   const cloudSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const [assistantInput, setAssistantInput] = useState('')
+  const [assistantRankInput, setAssistantRankInput] = useState<SeniorityLevel>(1)
+  const [newLocationSite, setNewLocationSite] = useState<DutySite>('Sancaktepe')
+  const [newLocationName, setNewLocationName] = useState('')
 
   const [ownersMonth, setOwnersMonth] = useState(currentMonthISO)
   const [ownersEditMode, setOwnersEditMode] = useState(false)
@@ -1329,7 +1854,6 @@ function App() {
   const [ownerSelectionDrafts, setOwnerSelectionDrafts] = useState<Record<string, string[]>>({})
 
   const [dutyMonth, setDutyMonth] = useState(currentMonthISO)
-  const [dutyPerDay, setDutyPerDay] = useState(2)
   const [dutyQuickText, setDutyQuickText] = useState('')
   const [dutyImportIssues, setDutyImportIssues] = useState<string[]>([])
   const [cellDrafts, setCellDrafts] = useState<Record<string, string>>({})
@@ -1340,75 +1864,165 @@ function App() {
   const [observerMonth, setObserverMonth] = useState(currentMonthISO)
   const [activeObserverWeek, setActiveObserverWeek] = useState('')
   const [observerDay, setObserverDay] = useState('')
-  const [observerLocation, setObserverLocation] = useState('')
+  const [observerWeekRoom, setObserverWeekRoom] = useState('')
   const [observerLookupName, setObserverLookupName] = useState('')
   const [observerLookupDay, setObserverLookupDay] = useState('')
+  const [observerLookupMonth, setObserverLookupMonth] = useState(currentMonthISO)
   const [plannerMonth, setPlannerMonth] = useState(currentMonthISO)
   const [activePlannerDay, setActivePlannerDay] = useState(todayISO)
+  const [plannerWeeklyExportOpen, setPlannerWeeklyExportOpen] = useState(false)
+  const [plannerWeeklyExportWeekStartISO, setPlannerWeeklyExportWeekStartISO] = useState(
+    currentWeekStartISO,
+  )
+  const [plannerDraftAssignments, setPlannerDraftAssignments] = useState<ManualAssignments>({})
+  const [plannerEditModes, setPlannerEditModes] = useState<Record<string, boolean>>({})
 
   const weekDays = useMemo(() => buildWeek(data.weekStartISO), [data.weekStartISO])
   const plannerMonthDays = useMemo(() => listMonthDays(plannerMonth), [plannerMonth])
   const dutyMonthDays = useMemo(() => listMonthDays(dutyMonth), [dutyMonth])
+  const observerLookupMonthDays = useMemo(
+    () => listMonthDays(observerLookupMonth),
+    [observerLookupMonth],
+  )
   const observerWeekGroups = useMemo(() => buildWeekGroupsForMonth(observerMonth), [observerMonth])
   const observerActiveWeekDays = useMemo(
     () => observerWeekGroups.find((group) => group.weekStartISO === activeObserverWeek)?.days ?? [],
     [activeObserverWeek, observerWeekGroups],
   )
-  const sortedLocations = useMemo(() => [...data.locations], [data.locations])
+  const sortedLocations = useMemo(() => sortLocationsForState(data.locations, todayISO), [data.locations, todayISO])
   const roomLocations = useMemo(
-    () => data.locations.filter((location) => location.kind === 'normal'),
-    [data.locations],
+    () =>
+      sortLocationsForState(
+        data.locations.filter(
+          (location) => location.kind === 'normal' && isLocationActiveOnDay(location, todayISO),
+        ),
+        todayISO,
+      ),
+    [data.locations, todayISO],
   )
-  const statusLocations = useMemo(
-    () => data.locations.filter((location) => location.kind === 'leave'),
-    [data.locations],
+  const plannerReferenceDay = activePlannerDay || todayISO
+  const plannerLocations = useMemo(
+    () => getLocationsForDay(data, plannerReferenceDay),
+    [data, plannerReferenceDay],
+  )
+  const plannerRoomLocations = useMemo(
+    () => plannerLocations.filter((location) => location.kind === 'normal'),
+    [plannerLocations],
+  )
+  const plannerStatusLocations = useMemo(
+    () => plannerLocations.filter((location) => location.kind === 'leave'),
+    [plannerLocations],
   )
 
-  const groupBySite = (locations: WorkLocation[]) => {
+  const groupBySite = (locations: WorkLocation[], dayKey = todayISO) => {
+    const orderedLocations = sortLocationsForState(locations, dayKey)
     const map = new Map<string, WorkLocation[]>()
-    locations.forEach((location) => {
+    orderedLocations.forEach((location) => {
       map.set(location.site, [...(map.get(location.site) ?? []), location])
     })
-    const siteOrder = ['Sancaktepe', 'Çekmeköy', 'Feriha Öz', 'Diğer']
     return [...map.entries()].sort(
-      (a, b) => siteOrder.indexOf(a[0]) - siteOrder.indexOf(b[0]) || a[0].localeCompare(b[0], 'tr'),
+      (a, b) => getSiteDisplayRank(a[0]) - getSiteDisplayRank(b[0]) || a[0].localeCompare(b[0], 'tr'),
     )
   }
 
-  const groupedRoomLocations = useMemo(() => groupBySite(roomLocations), [roomLocations])
-  const groupedStatusLocations = useMemo(() => groupBySite(statusLocations), [statusLocations])
-  const groupedObserverLocations = useMemo(() => groupBySite(sortedLocations), [sortedLocations])
-  const ownersForSelectedMonth = useMemo(
-    () => getLocationOwnersForMonth(data, ownersMonth),
-    [data, ownersMonth],
-  )
-  const visibleOwnersForMonth = ownersEditMode ? ownersWorking : ownersForSelectedMonth
-  const ownersMonthOptions = useMemo(() => {
+  const buildRelativeMonthOptions = (anchorMonth: string, extraMonths: string[]) => {
     const months = new Set<string>()
-    const anchorMonth = isValidMonthISO(ownersMonth) ? ownersMonth : currentMonthISO
+    const normalizedAnchor = isValidMonthISO(anchorMonth) ? anchorMonth : currentMonthISO
     for (let offset = -3; offset <= 3; offset += 1) {
-      months.add(shiftMonthISO(anchorMonth, offset))
+      months.add(shiftMonthISO(normalizedAnchor, offset))
     }
     months.add(currentMonthISO)
-    Object.keys(data.locationOwnersByMonth)
-      .filter(isValidMonthISO)
-      .forEach((monthISO) => months.add(monthISO))
+    extraMonths.filter(isValidMonthISO).forEach((monthISO) => months.add(monthISO))
 
-    const selectedYear = Number(anchorMonth.slice(0, 4))
+    const selectedYear = Number(normalizedAnchor.slice(0, 4))
     return [...months]
       .sort()
       .map((monthISO) => ({
         value: monthISO,
         label: formatMonthSelectLabel(monthISO, Number.isNaN(selectedYear) ? undefined : selectedYear),
       }))
+  }
+
+  const groupedRoomLocations = useMemo(() => groupBySite(roomLocations, todayISO), [roomLocations, todayISO])
+  const groupedPlannerRoomLocations = useMemo(
+    () => groupBySite(plannerRoomLocations, plannerReferenceDay),
+    [plannerReferenceDay, plannerRoomLocations],
+  )
+  const groupedStatusLocations = useMemo(
+    () => groupBySite(plannerStatusLocations, plannerReferenceDay),
+    [plannerReferenceDay, plannerStatusLocations],
+  )
+  const groupedObserverLocations = useMemo(
+    () => groupBySite(sortedLocations, todayISO),
+    [sortedLocations, todayISO],
+  )
+  const observerWeekRoomOptions = useMemo(
+    () => sortedLocations.filter((location) => location.kind === 'normal'),
+    [sortedLocations],
+  )
+  const assistantGroupLevels = useMemo(
+    () => buildSeniorityLevels(data.assistants, data.assistantRanks, false),
+    [data.assistantRanks, data.assistants],
+  )
+  const assistantInputLevels = useMemo(
+    () => buildSeniorityLevels(data.assistants, data.assistantRanks, true),
+    [data.assistantRanks, data.assistants],
+  )
+  const assistantsBySeniority = useMemo(
+    () =>
+      assistantGroupLevels.map((level) => ({
+        level,
+        names: data.assistants.filter((assistant) => data.assistantRanks[assistant] === level),
+      })),
+    [assistantGroupLevels, data.assistantRanks, data.assistants],
+  )
+  const ownersForSelectedMonth = useMemo(
+    () => getLocationOwnersForMonth(data, ownersMonth),
+    [data, ownersMonth],
+  )
+  const visibleOwnersForMonth = ownersEditMode ? ownersWorking : ownersForSelectedMonth
+  const ownersMonthOptions = useMemo(() => {
+    return buildRelativeMonthOptions(ownersMonth, Object.keys(data.locationOwnersByMonth))
   }, [currentMonthISO, data.locationOwnersByMonth, ownersMonth])
+  const dutyMonthOptions = useMemo(() => {
+    const dutyMonths = Object.keys(data.dutyRoster)
+      .filter((dayKey) => /^\d{4}-\d{2}-\d{2}$/.test(dayKey))
+      .map((dayKey) => dayKey.slice(0, 7))
+    return buildRelativeMonthOptions(dutyMonth, dutyMonths)
+  }, [currentMonthISO, data.dutyRoster, dutyMonth])
+  const plannerMonthOptions = useMemo(() => {
+    const plannerMonths = [
+      ...Object.keys(data.manualAssignments)
+        .filter((dayKey) => /^\d{4}-\d{2}-\d{2}$/.test(dayKey))
+        .map((dayKey) => dayKey.slice(0, 7)),
+      ...Object.keys(data.dutyRoster)
+        .filter((dayKey) => /^\d{4}-\d{2}-\d{2}$/.test(dayKey))
+        .map((dayKey) => dayKey.slice(0, 7)),
+    ]
+    return buildRelativeMonthOptions(plannerMonth, plannerMonths)
+  }, [currentMonthISO, data.dutyRoster, data.manualAssignments, plannerMonth])
+  const observerLookupMonthOptions = useMemo(() => {
+    const monthsFromSchedules = [
+      ...Object.keys(data.manualAssignments)
+        .filter((dayKey) => /^\d{4}-\d{2}-\d{2}$/.test(dayKey))
+        .map((dayKey) => dayKey.slice(0, 7)),
+      ...Object.keys(data.dutyRoster)
+        .filter((dayKey) => /^\d{4}-\d{2}-\d{2}$/.test(dayKey))
+        .map((dayKey) => dayKey.slice(0, 7)),
+    ]
+    return buildRelativeMonthOptions(observerLookupMonth, monthsFromSchedules)
+  }, [currentMonthISO, data.dutyRoster, data.manualAssignments, observerLookupMonth])
   const roomLeftGroups = useMemo(
-    () => groupedRoomLocations.filter(([siteName]) => siteName !== 'Feriha Öz'),
-    [groupedRoomLocations],
+    () => groupedPlannerRoomLocations.filter(([siteName]) => siteName === 'Sancaktepe'),
+    [groupedPlannerRoomLocations],
+  )
+  const roomMiddleGroups = useMemo(
+    () => groupedPlannerRoomLocations.filter(([siteName]) => siteName === 'Çekmeköy'),
+    [groupedPlannerRoomLocations],
   )
   const roomRightGroups = useMemo(
-    () => groupedRoomLocations.filter(([siteName]) => siteName === 'Feriha Öz'),
-    [groupedRoomLocations],
+    () => groupedPlannerRoomLocations.filter(([siteName]) => siteName === 'Feriha Öz'),
+    [groupedPlannerRoomLocations],
   )
   const plannerDayOptions = useMemo(
     () =>
@@ -1422,6 +2036,7 @@ function App() {
             weekday: 'short',
           }),
           dayTypeLabel: getDayTypeLabel(dayKey),
+          roomAssignmentBlocked: !isRoomAssignableDay(date),
         }
       }),
     [plannerMonthDays],
@@ -1628,6 +2243,29 @@ function App() {
   }, [currentWeekStartISO])
 
   useEffect(() => {
+    if (typeof window === 'undefined') {
+      return
+    }
+
+    const media = window.matchMedia('(max-width: 980px)')
+    const applyViewport = () => {
+      setIsMobileViewport(media.matches)
+      if (!media.matches) {
+        setMobileMenuOpen(false)
+      }
+    }
+
+    applyViewport()
+    if (typeof media.addEventListener === 'function') {
+      media.addEventListener('change', applyViewport)
+      return () => media.removeEventListener('change', applyViewport)
+    }
+
+    media.addListener(applyViewport)
+    return () => media.removeListener(applyViewport)
+  }, [])
+
+  useEffect(() => {
     if (!session) {
       return
     }
@@ -1690,9 +2328,29 @@ function App() {
 
   useEffect(() => {
     if (!observerLookupDay) {
-      setObserverLookupDay(todayISO)
+      return
     }
-  }, [observerLookupDay, todayISO])
+    const dayMonth = observerLookupDay.slice(0, 7)
+    if (isValidMonthISO(dayMonth) && dayMonth !== observerLookupMonth) {
+      setObserverLookupMonth(dayMonth)
+    }
+  }, [observerLookupDay, observerLookupMonth])
+
+  useEffect(() => {
+    if (!observerLookupMonthDays.length) {
+      if (observerLookupDay) {
+        setObserverLookupDay('')
+      }
+      return
+    }
+
+    if (!observerLookupDay || !observerLookupMonthDays.includes(observerLookupDay)) {
+      const preferredDay = observerLookupMonthDays.includes(todayISO)
+        ? todayISO
+        : observerLookupMonthDays[0]
+      setObserverLookupDay(preferredDay)
+    }
+  }, [observerLookupDay, observerLookupMonthDays, todayISO])
 
   useEffect(() => {
     if (!plannerMonthDays.length) {
@@ -1725,13 +2383,56 @@ function App() {
   }, [data.assistants, observerLookupName, session])
 
   useEffect(() => {
-    if (!data.locations.some((location) => location.id === observerLocation)) {
-      setObserverLocation(data.locations[0]?.id ?? '')
+    if (!observerWeekRoomOptions.length) {
+      if (observerWeekRoom) {
+        setObserverWeekRoom('')
+      }
+      return
     }
-  }, [data.locations, observerLocation])
+
+    if (!observerWeekRoomOptions.some((location) => location.id === observerWeekRoom)) {
+      setObserverWeekRoom(observerWeekRoomOptions[0]?.id ?? '')
+    }
+  }, [observerWeekRoom, observerWeekRoomOptions])
+
+  useEffect(() => {
+    if (!assistantInputLevels.length) {
+      if (assistantRankInput !== 1) {
+        setAssistantRankInput(1)
+      }
+      return
+    }
+
+    if (!assistantInputLevels.includes(assistantRankInput)) {
+      setAssistantRankInput(assistantInputLevels[assistantInputLevels.length - 1] ?? 1)
+    }
+  }, [assistantInputLevels, assistantRankInput])
 
   const showWarning = (text: string) => setNotice({ type: 'warn', text })
   const showSuccess = (text: string) => setNotice({ type: 'ok', text })
+  const isPlannerDayInEditMode = (dayKey: string): boolean => Boolean(plannerEditModes[dayKey])
+  const ensurePlannerDayInEditMode = (dayKey: string): boolean => {
+    if (isPlannerDayInEditMode(dayKey)) {
+      return true
+    }
+    showWarning(`${dayKey} için önce "Değiştir" butonuna bas.`)
+    return false
+  }
+  const getPlannerStateForDay = (dayKey: string): PlannerState => {
+    if (!isPlannerDayInEditMode(dayKey)) {
+      return data
+    }
+    const dayDraftAssignments = cloneDayLocationAssignments(
+      plannerDraftAssignments[dayKey] ?? data.manualAssignments[dayKey],
+    )
+    return {
+      ...data,
+      manualAssignments: {
+        ...data.manualAssignments,
+        [dayKey]: dayDraftAssignments,
+      },
+    }
+  }
 
   const normalizedAssistantUsername = assistantUsernameInput.trim().toLocaleLowerCase('tr')
   const linkedAssistant = userBindings[normalizedAssistantUsername] ?? ''
@@ -1743,6 +2444,7 @@ function App() {
     }
 
     setSession({ role: 'admin' })
+    setSelectedPortalApp('none')
     setPasswordInput('')
     setNotice(null)
   }
@@ -1776,6 +2478,7 @@ function App() {
       username: normalizedAssistantUsername,
       assistantName: selectedAssistantName,
     })
+    setSelectedPortalApp('none')
     if (typeof window !== 'undefined') {
       localStorage.setItem(LAST_ASSISTANT_USER_KEY, normalizedAssistantUsername)
     }
@@ -1786,12 +2489,26 @@ function App() {
 
   const logout = () => {
     setSession(null)
+    setEntryStep('welcome')
     setLoginView('choose')
+    setSelectedPortalApp('none')
+    setPlannerWeeklyExportOpen(false)
+    setMobileMenuOpen(false)
     setMode('admin')
     setPasswordInput('')
     setAssistantUsernameInput('')
     setAssistantIdentityInput('')
     setNotice(null)
+  }
+
+  const selectAdminSection = (section: AdminSection) => {
+    setAdminSection(section)
+    setMobileMenuOpen(false)
+  }
+
+  const selectObserverSection = (section: ObserverSection) => {
+    setObserverSection(section)
+    setMobileMenuOpen(false)
   }
 
   useEffect(() => {
@@ -1802,6 +2519,7 @@ function App() {
     if (!session.assistantName || !data.assistants.includes(session.assistantName)) {
       showWarning('Asistan eşleşmesi bulunamadı. Lütfen tekrar giriş yapıp asistan seç.')
       setSession(null)
+      setEntryStep('login')
       setLoginView('assistant')
       setAssistantUsernameInput(session.username ?? '')
       setAssistantIdentityInput('')
@@ -1834,12 +2552,111 @@ function App() {
     person: string,
   ): DutyAssignment | null => getDutyAssignments(state, dayKey).find((entry) => entry.name === person) ?? null
 
-  const getAssistantOptionLabel = (assistant: string, dayKey: string): string => {
-    const dutyAssignment = getDutyAssignmentForPerson(data, dayKey, assistant)
-    if (!dutyAssignment) {
+  const getAssistantPlacementDetail = (
+    state: PlannerState,
+    dayKey: string,
+    assistant: string,
+  ): string => {
+    const normalLocation = state.locations.find(
+      (location) =>
+        location.kind === 'normal' &&
+        getAssignmentsForLocation(state, dayKey, location).includes(assistant),
+    )
+    if (normalLocation) {
+      return `${normalLocation.site} / ${normalLocation.name}`
+    }
+
+    const dutyAssignment = getDutyAssignmentForPerson(state, dayKey, assistant)
+    if (dutyAssignment) {
+      return `Nöbet (${dutyAssignment.site})`
+    }
+
+    const previousDay = toISODate(addDays(fromISODate(dayKey), -1))
+    const postDutyAssignment = (state.dutyRoster[previousDay] ?? []).find(
+      (entry) => entry.name === assistant,
+    )
+    if (postDutyAssignment) {
+      return `Nöbet Ertesi (${postDutyAssignment.site})`
+    }
+
+    const leaveLocation = state.locations.find(
+      (location) =>
+        location.kind === 'leave' &&
+        getAssignmentsForLocation(state, dayKey, location).includes(assistant),
+    )
+    if (leaveLocation) {
+      return leaveLocation.name
+    }
+
+    return 'Atama yok'
+  }
+
+  const getAssistantOwnerSectionsForDay = (
+    state: PlannerState,
+    dayKey: string,
+    assistant: string,
+  ): DutySite[] => {
+    const ownersForDay = getLocationOwnersForDay(state, dayKey)
+    const ownedSites = new Set<DutySite>()
+
+    state.locations.forEach((location) => {
+      if (location.kind !== 'normal' || !isLocationActiveOnDay(location, dayKey)) {
+        return
+      }
+      const isOwner = (ownersForDay[location.id] ?? []).includes(assistant)
+      if (!isOwner) {
+        return
+      }
+      const normalizedSite = normalizeDutySite(location.site)
+      if (normalizedSite) {
+        ownedSites.add(normalizedSite)
+      }
+    })
+
+    return [...ownedSites]
+  }
+
+  const getAssistantOwnerSectionForPlannerList = (
+    state: PlannerState,
+    dayKey: string,
+    assistant: string,
+    sectionOrder: Array<DutySite | 'Diğer'>,
+  ): DutySite | 'Diğer' => {
+    const ownedSites = getAssistantOwnerSectionsForDay(state, dayKey, assistant)
+    if (!ownedSites.length) {
+      return 'Diğer'
+    }
+
+    const preferredByOrder = sectionOrder.find(
+      (section): section is DutySite => section !== 'Diğer' && ownedSites.includes(section),
+    )
+    if (preferredByOrder) {
+      return preferredByOrder
+    }
+
+    return ownedSites[0] ?? 'Diğer'
+  }
+
+  const getPlannerAssistantSectionOrder = (locationSite: string): Array<DutySite | 'Diğer'> => {
+    if (locationSite === 'Çekmeköy') {
+      return ['Çekmeköy', 'Sancaktepe', 'Feriha Öz', 'Diğer']
+    }
+    if (locationSite === 'Feriha Öz') {
+      return ['Feriha Öz', 'Sancaktepe', 'Çekmeköy', 'Diğer']
+    }
+    return ['Sancaktepe', 'Feriha Öz', 'Çekmeköy', 'Diğer']
+  }
+
+  const getAssistantOptionLabelForState = (
+    state: PlannerState,
+    assistant: string,
+    dayKey: string,
+  ): string => {
+    const detail = getAssistantPlacementDetail(state, dayKey, assistant)
+    if (detail === 'Atama yok') {
       return assistant
     }
-    return `${assistant} (nöbet: ${dutyAssignment.site})`
+    return `${assistant} - ${detail}`
   }
 
   const getDisplayAssignmentsForLocation = (
@@ -1848,17 +2665,20 @@ function App() {
     location: WorkLocation,
   ): string[] => {
     if (location.kind === 'duty') {
-      return sortDutyAssignments(state.dutyRoster[dayKey] ?? []).map(
+      return sortDutyAssignments(state.dutyRoster[dayKey] ?? [], state.assistantRanks).map(
         (entry) => `${entry.name} (${entry.site})`,
       )
     }
     if (location.kind === 'postDuty') {
       const previousDay = toISODate(addDays(fromISODate(dayKey), -1))
-      return sortDutyAssignments(state.dutyRoster[previousDay] ?? []).map(
+      return sortDutyAssignments(state.dutyRoster[previousDay] ?? [], state.assistantRanks).map(
         (entry) => `${entry.name} (${entry.site})`,
       )
     }
-    return getAssignmentsForLocation(state, dayKey, location)
+    return sortAssistantNamesByRank(
+      getAssignmentsForLocation(state, dayKey, location),
+      state.assistantRanks,
+    )
   }
 
   const startOwnersEdit = () => {
@@ -1902,6 +2722,38 @@ function App() {
       return
     }
     setOwnersMonth(shiftMonthISO(ownersMonth, delta))
+  }
+
+  const goObserverLookupMonth = (delta: number) => {
+    if (!isValidMonthISO(observerLookupMonth)) {
+      setObserverLookupMonth(currentMonthISO)
+      return
+    }
+    const nextMonth = shiftMonthISO(observerLookupMonth, delta)
+    setObserverLookupMonth(nextMonth)
+    const nextMonthDays = listMonthDays(nextMonth)
+    if (!nextMonthDays.length) {
+      return
+    }
+    const preferredDay = nextMonthDays.includes(todayISO) ? todayISO : nextMonthDays[0]
+    setObserverLookupDay(preferredDay)
+  }
+
+  const openPlannerWeeklyExport = () => {
+    const anchorDay = hasIsoShape(activePlannerDay) ? activePlannerDay : todayISO
+    const weekStart = toISODate(startOfISOWeek(fromISODate(anchorDay)))
+    setPlannerWeeklyExportWeekStartISO(weekStart)
+    setPlannerWeeklyExportOpen(true)
+  }
+
+  const closePlannerWeeklyExport = () => {
+    setPlannerWeeklyExportOpen(false)
+  }
+
+  const shiftPlannerWeeklyExportWeek = (deltaWeeks: number) => {
+    setPlannerWeeklyExportWeekStartISO((previous) =>
+      toISODate(addDays(fromISODate(previous), deltaWeeks * 7)),
+    )
   }
 
   const saveOwnersMonth = () => {
@@ -1992,31 +2844,243 @@ function App() {
   }
 
   const addAssistant = () => {
-    const candidate = assistantInput.trim()
+    const candidate = normalizeAssistantName(assistantInput)
     if (!candidate) {
       showWarning('Lütfen eklenecek asistan adını gir.')
       return
     }
 
     setData((previous) => {
-      if (previous.assistants.includes(candidate)) {
+      const hasDuplicate = previous.assistants.some(
+        (assistant) => assistant.toLocaleLowerCase('tr') === candidate.toLocaleLowerCase('tr'),
+      )
+      if (hasDuplicate) {
         showWarning(`${candidate} zaten listede var.`)
         return previous
       }
 
-      showSuccess(`${candidate} asistan havuzuna eklendi.`)
+      const nextAssistants = uniqueSortedNames([...previous.assistants, candidate])
+      const nextAssistantRanks = compactAssistantRanks(nextAssistants, {
+        ...previous.assistantRanks,
+        [candidate]: toSafeSeniorityLevel(assistantRankInput, 1),
+      })
+
+      showSuccess(`${candidate} ${assistantRankInput}. kıdem olarak asistan havuzuna eklendi.`)
       return {
         ...previous,
-        assistants: uniqueSortedNames([...previous.assistants, candidate]),
+        assistants: nextAssistants,
+        assistantRanks: nextAssistantRanks,
       }
     })
 
     setAssistantInput('')
+    setAssistantRankInput(1)
+  }
+
+  const addLocation = () => {
+    const candidateName = newLocationName.trim()
+    if (!DUTY_SITES.includes(newLocationSite)) {
+      showWarning('Alan sadece Sancaktepe, Feriha Öz veya Çekmeköy için eklenebilir.')
+      return
+    }
+    if (!candidateName) {
+      showWarning('Lütfen alan adını gir.')
+      return
+    }
+    if (ownersEditMode) {
+      showWarning('Alan eklemek için önce oda asistanı düzenlemesini Kaydet veya İptal et.')
+      return
+    }
+
+    setData((previous) => {
+      const hasSameLocation = previous.locations.some(
+        (location) =>
+          location.kind === 'normal' &&
+          location.site === newLocationSite &&
+          location.name.trim().toLocaleLowerCase('tr') === candidateName.toLocaleLowerCase('tr'),
+      )
+      if (hasSameLocation) {
+        showWarning(`${newLocationSite} için "${candidateName}" zaten mevcut.`)
+        return previous
+      }
+
+      const nextLocation: WorkLocation = withResolvedTone({
+        id: buildUniqueLocationId(newLocationSite, candidateName, previous.locations),
+        site: newLocationSite,
+        name: candidateName,
+        kind: 'normal',
+        tone: 'sand',
+        order:
+          previous.locations.filter(
+            (location) =>
+              location.kind === 'normal' &&
+              location.site === newLocationSite &&
+              isLocationActiveOnDay(location, todayISO),
+          ).length + 1,
+        orderHistory: [
+          {
+            from: todayISO,
+            value:
+              previous.locations.filter(
+                (location) =>
+                  location.kind === 'normal' &&
+                  location.site === newLocationSite &&
+                  isLocationActiveOnDay(location, todayISO),
+              ).length + 1,
+          },
+        ],
+        activeFrom: todayISO,
+        activeUntil: null,
+      })
+
+      const nextLocations = normalizeAndSortLocations([...previous.locations, nextLocation])
+      const nextLocationOwners = {
+        ...previous.locationOwners,
+        [nextLocation.id]: [],
+      }
+
+      const months = Object.keys(previous.locationOwnersByMonth).length
+        ? previous.locationOwnersByMonth
+        : { [currentMonthISO]: previous.locationOwners }
+      const nextLocationOwnersByMonth = Object.fromEntries(
+        Object.entries(months).map(([monthISO, owners]) => [
+          monthISO,
+          {
+            ...owners,
+            [nextLocation.id]: owners[nextLocation.id] ?? [],
+          },
+        ]),
+      )
+
+      showSuccess(`${newLocationSite} / ${candidateName} alanı eklendi.`)
+      return {
+        ...previous,
+        locations: nextLocations,
+        locationOwners: nextLocationOwners,
+        locationOwnersByMonth: nextLocationOwnersByMonth,
+      }
+    })
+
+    setNewLocationName('')
+  }
+
+  const removeLocation = (locationId: string) => {
+    if (ownersEditMode) {
+      showWarning('Alan silmek için önce oda asistanı düzenlemesini Kaydet veya İptal et.')
+      return
+    }
+
+    setData((previous) => {
+      const target = previous.locations.find((location) => location.id === locationId)
+      if (!target || target.kind !== 'normal') {
+        return previous
+      }
+
+      if (
+        target.activeUntil &&
+        hasIsoShape(target.activeUntil) &&
+        target.activeUntil <= todayISO
+      ) {
+        showWarning(`${target.site} / ${target.name} alanı zaten kapatılmış.`)
+        return previous
+      }
+
+      const nextLocations = normalizeAndSortLocations(
+        previous.locations.map((location) =>
+          location.id === locationId
+            ? {
+                ...location,
+                activeUntil: todayISO,
+              }
+            : location,
+        ),
+      )
+
+      showSuccess(
+        `${target.site} / ${target.name} alanı ${todayISO} ve sonrasına kapatıldı. Önceki tarihlerde görünmeye devam eder.`,
+      )
+      return {
+        ...previous,
+        locations: nextLocations,
+      }
+    })
+
+    setOwnerSelectionDrafts((previous) =>
+      Object.fromEntries(
+        Object.entries(previous).filter(([draftKey]) => !draftKey.endsWith(`-${locationId}`)),
+      ),
+    )
+    setCellDrafts((previous) =>
+      Object.fromEntries(
+        Object.entries(previous).filter(([draftKey]) => !draftKey.endsWith(`-${locationId}`)),
+      ),
+    )
+  }
+
+  const updateLocationOrder = (locationId: string, rawOrder: string) => {
+    const parsedOrder = Math.floor(Number(rawOrder))
+    if (!Number.isFinite(parsedOrder) || parsedOrder < 1) {
+      showWarning('Sıra numarası 1 veya daha büyük olmalı.')
+      return
+    }
+
+    setData((previous) => {
+      const target = previous.locations.find((location) => location.id === locationId)
+      if (!target || target.kind !== 'normal') {
+        return previous
+      }
+
+      const siteLocations = sortLocationsForState(previous.locations).filter(
+        (location) =>
+          location.kind === 'normal' &&
+          location.site === target.site &&
+          isLocationActiveOnDay(location, todayISO),
+      )
+      const currentIndex = siteLocations.findIndex((location) => location.id === locationId)
+      if (currentIndex === -1) {
+        return previous
+      }
+
+      const clampedOrder = Math.min(parsedOrder, siteLocations.length)
+      const targetIndex = clampedOrder - 1
+      if (currentIndex === targetIndex) {
+        return previous
+      }
+
+      const reorderedSiteLocations = [...siteLocations]
+      const [moved] = reorderedSiteLocations.splice(currentIndex, 1)
+      reorderedSiteLocations.splice(targetIndex, 0, moved)
+
+      const siteOrderMap = new Map(
+        reorderedSiteLocations.map((location, index) => [location.id, index + 1]),
+      )
+      const nextLocations = normalizeAndSortLocations(
+        previous.locations.map((location) =>
+          location.kind === 'normal' &&
+          location.site === target.site &&
+          isLocationActiveOnDay(location, todayISO)
+            ? setLocationOrderFromDay(location, todayISO, siteOrderMap.get(location.id) ?? location.order ?? 1)
+            : location,
+        ),
+      )
+
+      showSuccess(`${target.site} alan sırası ${todayISO} ve sonrasına güncellendi.`)
+      return {
+        ...previous,
+        locations: nextLocations,
+      }
+    })
   }
 
   const removeAssistant = (name: string) => {
     setData((previous) => {
       const remainingAssistants = previous.assistants.filter((assistant) => assistant !== name)
+      const nextAssistantRanks = compactAssistantRanks(
+        remainingAssistants,
+        Object.fromEntries(
+          Object.entries(previous.assistantRanks).filter(([assistantName]) => assistantName !== name),
+        ) as AssistantRanks,
+      )
       const nextOwners = Object.fromEntries(
         Object.entries(previous.locationOwners).map(([locationId, owners]) => [
           locationId,
@@ -2039,6 +3103,7 @@ function App() {
       return {
         ...previous,
         assistants: remainingAssistants,
+        assistantRanks: nextAssistantRanks,
         locationOwners: nextOwners,
         locationOwnersByMonth: nextOwnersByMonth,
         manualAssignments: removeNameFromManual(previous.manualAssignments, name),
@@ -2148,74 +3213,6 @@ function App() {
     })
   }
 
-  const generateDutySchedule = () => {
-    const normalizedMonth = dutyMonth.trim()
-    const monthDays = listMonthDays(normalizedMonth)
-    if (!monthDays.length) {
-      showWarning('Geçerli bir ay seç. Örnek: 2026-05')
-      return
-    }
-
-    const normalizedPerDay = Math.max(1, Math.min(Number(dutyPerDay) || 0, data.assistants.length || 1))
-
-    setData((previous) => {
-      const generated = generateDutyRosterForMonth(previous.assistants, normalizedMonth, normalizedPerDay)
-      if (!Object.keys(generated).length) {
-        showWarning('Nöbet üretilemedi. Asistan listesi boş olabilir.')
-        return previous
-      }
-
-      const withoutMonth = removeMonthFromDutyRoster(previous.dutyRoster, normalizedMonth)
-      const nextDutyRoster = {
-        ...withoutMonth,
-        ...generated,
-      }
-
-      const sanitized = sanitizeManualAssignments(
-        previous.manualAssignments,
-        nextDutyRoster,
-        previous.locations,
-      )
-
-      const generatedCount = Object.values(generated).reduce((count, names) => count + names.length, 0)
-      if (sanitized.removedCount > 0) {
-        showWarning(
-          `${normalizedMonth} için ${generatedCount} nöbet ataması üretildi. ${sanitized.removedCount} normal atama nöbet kuralı nedeniyle temizlendi.`,
-        )
-      } else {
-        showSuccess(`${normalizedMonth} için ${generatedCount} nöbet ataması otomatik üretildi.`)
-      }
-
-      return {
-        ...previous,
-        dutyRoster: nextDutyRoster,
-        manualAssignments: sanitized.manualAssignments,
-      }
-    })
-
-    setDutyImportIssues([])
-  }
-
-  const clearMonthDutySchedule = () => {
-    const normalizedMonth = dutyMonth.trim()
-    const monthDays = listMonthDays(normalizedMonth)
-    if (!monthDays.length) {
-      showWarning('Temizlemek için geçerli bir ay seç.')
-      return
-    }
-
-    setData((previous) => {
-      const nextDutyRoster = removeMonthFromDutyRoster(previous.dutyRoster, normalizedMonth)
-      showSuccess(`${normalizedMonth} ayı nöbet kayıtları temizlendi.`)
-      return {
-        ...previous,
-        dutyRoster: nextDutyRoster,
-      }
-    })
-
-    setDutyImportIssues([])
-  }
-
   const importDutyQuickLines = () => {
     const yearFromMonth = Number(dutyMonth.slice(0, 4))
     const fallbackYear = Number.isNaN(yearFromMonth) ? new Date().getFullYear() : yearFromMonth
@@ -2311,7 +3308,96 @@ function App() {
     setDutyQuickText('')
   }
 
+  const startPlannerDayEdit = (dayKey: string) => {
+    setPlannerDraftAssignments((previous) => ({
+      ...previous,
+      [dayKey]: cloneDayLocationAssignments(
+        previous[dayKey] ?? data.manualAssignments[dayKey],
+      ),
+    }))
+    setPlannerEditModes((previous) => ({
+      ...previous,
+      [dayKey]: true,
+    }))
+    showSuccess(`${dayKey} planı düzenlemeye açıldı.`)
+  }
+
+  const cancelPlannerDayEdit = (dayKey: string) => {
+    setPlannerEditModes((previous) => {
+      const next = { ...previous }
+      delete next[dayKey]
+      return next
+    })
+    setPlannerDraftAssignments((previous) => {
+      const next = { ...previous }
+      delete next[dayKey]
+      return next
+    })
+    setOwnerSelectionDrafts((previous) =>
+      Object.fromEntries(
+        Object.entries(previous).filter(([draftKey]) => !draftKey.startsWith(`${dayKey}-`)),
+      ),
+    )
+    showWarning(`${dayKey} için taslak değişiklikler iptal edildi.`)
+  }
+
+  const savePlannerDay = (dayKey: string) => {
+    if (!isPlannerDayInEditMode(dayKey)) {
+      showWarning('Kaydetmek için önce Değiştir ile düzenlemeyi aç.')
+      return
+    }
+
+    const dayDraftAssignments = cloneDayLocationAssignments(
+      plannerDraftAssignments[dayKey] ?? data.manualAssignments[dayKey],
+    )
+
+    setData((previous) => {
+      const nextManualAssignments = {
+        ...previous.manualAssignments,
+        [dayKey]: dayDraftAssignments,
+      }
+      const sanitized = sanitizeManualAssignments(
+        nextManualAssignments,
+        previous.dutyRoster,
+        previous.locations,
+      )
+
+      if (sanitized.removedCount > 0) {
+        showWarning(
+          `${dayKey} kaydedildi. Kural nedeniyle ${sanitized.removedCount} atama temizlendi.`,
+        )
+      } else {
+        showSuccess(`${dayKey} kaydedildi ve sisteme yayınlandı.`)
+      }
+
+      return {
+        ...previous,
+        manualAssignments: sanitized.manualAssignments,
+      }
+    })
+
+    setPlannerEditModes((previous) => {
+      const next = { ...previous }
+      delete next[dayKey]
+      return next
+    })
+    setPlannerDraftAssignments((previous) => {
+      const next = { ...previous }
+      delete next[dayKey]
+      return next
+    })
+    setOwnerSelectionDrafts((previous) =>
+      Object.fromEntries(
+        Object.entries(previous).filter(([draftKey]) => !draftKey.startsWith(`${dayKey}-`)),
+      ),
+    )
+  }
+
   const addAssignment = (dayKey: string, locationId: string) => {
+    if (!ensurePlannerDayInEditMode(dayKey)) {
+      return
+    }
+
     const draftKey = `${dayKey}-${locationId}`
     const candidate = cellDrafts[draftKey]
 
@@ -2324,83 +3410,75 @@ function App() {
       return
     }
 
-    setData((previous) => {
-      const location = previous.locations.find((item) => item.id === locationId)
-      if (!location) {
-        return previous
-      }
-      const workingDay = !isNonWorkingDay(fromISODate(dayKey))
+    const plannerState = getPlannerStateForDay(dayKey)
+    const location = plannerState.locations.find((item) => item.id === locationId)
+    if (!location) {
+      return
+    }
+    const workingDay = isRoomAssignableDay(fromISODate(dayKey))
 
-      if (!EDITABLE_KINDS.has(location.kind)) {
-        showWarning(`${location.name} alanı otomatik yönetiliyor, manuel atama kapalı.`)
-        return previous
-      }
-      if (!workingDay && (location.kind === 'normal' || location.kind === 'leave')) {
+    if (!EDITABLE_KINDS.has(location.kind)) {
+      showWarning(`${location.name} alanı otomatik yönetiliyor, manuel atama kapalı.`)
+      return
+    }
+    if (!workingDay && (location.kind === 'normal' || location.kind === 'leave')) {
+      showWarning(
+        `${location.site} / ${location.name} sadece hafta içi veya yarım gün resmi tatillerde atanabilir.`,
+      )
+      return
+    }
+
+    const dayAssignments = cloneDayLocationAssignments(plannerState.manualAssignments[dayKey])
+    const currentNames = dayAssignments[locationId] ?? []
+    if (currentNames.includes(candidate)) {
+      showWarning(`${candidate} zaten bu alanda görünüyor.`)
+      return
+    }
+
+    if (location.kind === 'normal') {
+      const occupiedNormalLocation = plannerState.locations.find((item) => {
+        if (item.kind !== 'normal' || item.id === location.id) {
+          return false
+        }
+        return getAssignmentsForLocation(plannerState, dayKey, item).includes(candidate)
+      })
+      if (occupiedNormalLocation) {
         showWarning(
-          `${location.site} / ${location.name} sadece hafta içi ve resmi tatil olmayan günlerde atanabilir.`,
+          `${candidate} aynı gün birden fazla odaya yazılamaz. Şu an: ${occupiedNormalLocation.site} / ${occupiedNormalLocation.name}`,
         )
-        return previous
+        return
       }
 
-      const dayAssignments = {
-        ...(previous.manualAssignments[dayKey] ?? {}),
-      }
-
-      const currentNames = dayAssignments[locationId] ?? []
-      if (currentNames.includes(candidate)) {
-        showWarning(`${candidate} zaten bu alanda görünüyor.`)
-        return previous
-      }
-
-      if (location.kind === 'normal') {
-        const occupiedNormalLocation = previous.locations.find((item) => {
-          if (item.kind !== 'normal' || item.id === location.id) {
-            return false
-          }
-          return getAssignmentsForLocation(previous, dayKey, item).includes(candidate)
-        })
-        if (occupiedNormalLocation) {
-          showWarning(
-            `${candidate} aynı gün birden fazla odaya yazılamaz. Şu an: ${occupiedNormalLocation.site} / ${occupiedNormalLocation.name}`,
-          )
-          return previous
+      const blockedStatusLocation = plannerState.locations.find((item) => {
+        if (item.kind === 'normal' || item.kind === 'duty') {
+          return false
         }
-
-        const blockedStatusLocation = previous.locations.find((item) => {
-          if (item.kind === 'normal' || item.kind === 'duty') {
-            return false
-          }
-          return getAssignmentsForLocation(previous, dayKey, item).includes(candidate)
-        })
-        if (blockedStatusLocation) {
-          showWarning(
-            `${candidate} ${blockedStatusLocation.site} / ${blockedStatusLocation.name} durumunda olduğu için odaya yazılamaz.`,
-          )
-          return previous
-        }
-      } else {
-        const existing = findAssignedLocationForPerson(previous, dayKey, candidate, locationId)
-        if (existing) {
-          showWarning(
-            `${candidate} aynı gün sadece bir yerde olabilir. Şu an: ${existing.site} / ${existing.name}`,
-          )
-          return previous
-        }
+        return getAssignmentsForLocation(plannerState, dayKey, item).includes(candidate)
+      })
+      if (blockedStatusLocation) {
+        showWarning(
+          `${candidate} ${blockedStatusLocation.site} / ${blockedStatusLocation.name} durumunda olduğu için odaya yazılamaz.`,
+        )
+        return
       }
-
-      dayAssignments[locationId] = uniqueSortedNames([...currentNames, candidate])
-
-      const nextManualAssignments: ManualAssignments = {
-        ...previous.manualAssignments,
-        [dayKey]: dayAssignments,
+    } else {
+      const existing = findAssignedLocationForPerson(plannerState, dayKey, candidate, locationId)
+      if (existing) {
+        showWarning(
+          `${candidate} aynı gün sadece bir yerde olabilir. Şu an: ${existing.site} / ${existing.name}`,
+        )
+        return
       }
+    }
 
-      showSuccess(`${candidate} -> ${location.site} / ${location.name} (${dayKey}) atandı.`)
-      return {
-        ...previous,
-        manualAssignments: nextManualAssignments,
-      }
-    })
+    dayAssignments[locationId] = uniqueSortedNames([...currentNames, candidate])
+    setPlannerDraftAssignments((previous) => ({
+      ...previous,
+      [dayKey]: dayAssignments,
+    }))
+    showSuccess(
+      `${candidate} -> ${location.site} / ${location.name} (${dayKey}) taslağa eklendi. Kaydet ile yayınla.`,
+    )
 
     setCellDrafts((previous) => ({
       ...previous,
@@ -2424,6 +3502,10 @@ function App() {
   }
 
   const applyOwnerSelections = (dayKey: string, locationId: string) => {
+    if (!ensurePlannerDayInEditMode(dayKey)) {
+      return
+    }
+
     const draftKey = `${dayKey}-${locationId}`
     const selectedOwners = uniqueSortedNames(ownerSelectionDrafts[draftKey] ?? [])
     if (!selectedOwners.length) {
@@ -2431,82 +3513,74 @@ function App() {
       return
     }
 
-    setData((previous) => {
-      const location = previous.locations.find((item) => item.id === locationId)
-      if (!location || location.kind !== 'normal') {
-        return previous
+    const plannerState = getPlannerStateForDay(dayKey)
+    const location = plannerState.locations.find((item) => item.id === locationId)
+    if (!location || location.kind !== 'normal') {
+      return
+    }
+    if (!isRoomAssignableDay(fromISODate(dayKey))) {
+      showWarning(`${location.site} / ${location.name} hafta sonu veya tam gün resmi tatilde planlanamaz.`)
+      return
+    }
+
+    const dayAssignments = cloneDayLocationAssignments(plannerState.manualAssignments[dayKey])
+    const currentNames = dayAssignments[locationId] ?? []
+    const nextNames = [...currentNames]
+    const blockedByStatus: string[] = []
+    const blockedByRoom: string[] = []
+    let addedCount = 0
+
+    selectedOwners.forEach((owner) => {
+      if (nextNames.includes(owner)) {
+        return
       }
-      if (isNonWorkingDay(fromISODate(dayKey))) {
-        showWarning(`${location.site} / ${location.name} hafta sonu veya resmi tatilde planlanamaz.`)
-        return previous
-      }
 
-      const dayAssignments = {
-        ...(previous.manualAssignments[dayKey] ?? {}),
-      }
-      const currentNames = dayAssignments[locationId] ?? []
-      const nextNames = [...currentNames]
-      const blockedByStatus: string[] = []
-      const blockedByRoom: string[] = []
-      let addedCount = 0
-
-      selectedOwners.forEach((owner) => {
-        if (nextNames.includes(owner)) {
-          return
+      const blockedStatusLocation = plannerState.locations.find((item) => {
+        if (item.kind === 'normal' || item.kind === 'duty') {
+          return false
         }
-
-        const blockedStatusLocation = previous.locations.find((item) => {
-          if (item.kind === 'normal' || item.kind === 'duty') {
-            return false
-          }
-          return getAssignmentsForLocation(previous, dayKey, item).includes(owner)
-        })
-        if (blockedStatusLocation) {
-          blockedByStatus.push(owner)
-          return
-        }
-
-        const occupiedRoom = previous.locations.find((item) => {
-          if (item.kind !== 'normal' || item.id === locationId) {
-            return false
-          }
-          return getAssignmentsForLocation(previous, dayKey, item).includes(owner)
-        })
-        if (occupiedRoom) {
-          blockedByRoom.push(owner)
-          return
-        }
-
-        nextNames.push(owner)
-        addedCount += 1
+        return getAssignmentsForLocation(plannerState, dayKey, item).includes(owner)
       })
-
-      if (!addedCount) {
-        showWarning('Seçilen oda asistanları bu gün için uygun değil.')
-        return previous
+      if (blockedStatusLocation) {
+        blockedByStatus.push(owner)
+        return
       }
 
-      dayAssignments[locationId] = uniqueSortedNames(nextNames)
-      const nextManualAssignments: ManualAssignments = {
-        ...previous.manualAssignments,
-        [dayKey]: dayAssignments,
+      const occupiedRoom = plannerState.locations.find((item) => {
+        if (item.kind !== 'normal' || item.id === locationId) {
+          return false
+        }
+        return getAssignmentsForLocation(plannerState, dayKey, item).includes(owner)
+      })
+      if (occupiedRoom) {
+        blockedByRoom.push(owner)
+        return
       }
 
-      if (blockedByStatus.length || blockedByRoom.length) {
-        showWarning(
-          `${dayKey} için ${addedCount} kişi eklendi. Atlananlar: ${
-            blockedByStatus.length ? `durum engeli ${blockedByStatus.join(', ')}` : ''
-          } ${blockedByRoom.length ? `oda çakışması ${blockedByRoom.join(', ')}` : ''}`.trim(),
-        )
-      } else {
-        showSuccess(`${dayKey} için ${addedCount} oda asistanı eklendi.`)
-      }
-
-      return {
-        ...previous,
-        manualAssignments: nextManualAssignments,
-      }
+      nextNames.push(owner)
+      addedCount += 1
     })
+
+    if (!addedCount) {
+      showWarning('Seçilen oda asistanları bu gün için uygun değil.')
+      return
+    }
+
+    dayAssignments[locationId] = uniqueSortedNames(nextNames)
+    setPlannerDraftAssignments((previous) => ({
+      ...previous,
+      [dayKey]: dayAssignments,
+    }))
+
+    if (blockedByStatus.length || blockedByRoom.length) {
+      showWarning(
+        `${dayKey} taslağına ${addedCount} kişi eklendi. Atlananlar: ${
+          blockedByStatus.length ? `durum engeli ${blockedByStatus.join(', ')}` : ''
+        } ${blockedByRoom.length ? `oda çakışması ${blockedByRoom.join(', ')}` : ''}`.trim(),
+      )
+    } else {
+      showSuccess(`${dayKey} taslağına ${addedCount} oda asistanı eklendi. Kaydet ile yayınla.`)
+    }
 
     setOwnerSelectionDrafts((previous) => ({
       ...previous,
@@ -2515,128 +3589,127 @@ function App() {
   }
 
   const removeAssignment = (dayKey: string, locationId: string, name: string) => {
-    setData((previous) => {
-      const dayAssignments = {
-        ...(previous.manualAssignments[dayKey] ?? {}),
-      }
+    if (!ensurePlannerDayInEditMode(dayKey)) {
+      return
+    }
 
-      dayAssignments[locationId] = (dayAssignments[locationId] ?? []).filter((item) => item !== name)
-
-      showSuccess(`${name} atamadan çıkarıldı.`)
-      return {
-        ...previous,
-        manualAssignments: {
-          ...previous.manualAssignments,
-          [dayKey]: dayAssignments,
-        },
-      }
-    })
+    const plannerState = getPlannerStateForDay(dayKey)
+    const dayAssignments = cloneDayLocationAssignments(plannerState.manualAssignments[dayKey])
+    dayAssignments[locationId] = (dayAssignments[locationId] ?? []).filter((item) => item !== name)
+    setPlannerDraftAssignments((previous) => ({
+      ...previous,
+      [dayKey]: dayAssignments,
+    }))
+    showSuccess(`${name} atamadan çıkarıldı. Kaydet ile yayınla.`)
   }
 
   const autoFillDay = (dayKey: string) => {
+    if (!ensurePlannerDayInEditMode(dayKey)) {
+      return
+    }
+
+    if (!isRoomAssignableDay(fromISODate(dayKey))) {
+      showWarning('Bu gün hafta sonu veya tam gün resmi tatil. Oda varsayılanı yazılamaz.')
+      return
+    }
+
     const nextOwnerDrafts: Record<string, string[]> = {}
+    const plannerState = getPlannerStateForDay(dayKey)
+    const dayAssignments = cloneDayLocationAssignments(plannerState.manualAssignments[dayKey])
+    const previousDay = toISODate(addDays(fromISODate(dayKey), -1))
+    const monthOwners = getLocationOwnersForDay(plannerState, dayKey)
 
-    setData((previous) => {
-      const dayAssignments = {
-        ...(previous.manualAssignments[dayKey] ?? {}),
+    const blocked = new Set<string>([
+      ...dutyAssignmentsToNames(plannerState.dutyRoster[previousDay] ?? []),
+    ])
+
+    const normalLocations = plannerState.locations.filter((location) => location.kind === 'normal')
+    const assignedToday = new Set<string>()
+
+    plannerState.locations.forEach((location) => {
+      if (location.kind === 'duty') {
+        return
       }
-      const previousDay = toISODate(addDays(fromISODate(dayKey), -1))
-      const monthOwners = getLocationOwnersForDay(previous, dayKey)
-
-      const blocked = new Set<string>([
-        ...dutyAssignmentsToNames(previous.dutyRoster[previousDay] ?? []),
-      ])
-
-      const normalLocations = previous.locations.filter((location) => location.kind === 'normal')
-      const assignedToday = new Set<string>()
-
-      previous.locations.forEach((location) => {
-        if (location.kind === 'duty') {
-          return
-        }
-        getAssignmentsForLocation(previous, dayKey, location).forEach((name) =>
-          assignedToday.add(name),
-        )
-      })
-
-      let updatedCount = 0
-      let skippedNoOwner = 0
-      let skippedBlocked = 0
-      let skippedAssigned = 0
-      let promptedRoomCount = 0
-
-      normalLocations.forEach((location) => {
-        const current = uniqueSortedNames(dayAssignments[location.id] ?? [])
-        const owners = (monthOwners[location.id] ?? [])
-          .map((owner) => owner.trim())
-          .filter(Boolean)
-
-        if (!owners.length) {
-          skippedNoOwner += 1
-          return
-        }
-
-        if (owners.length > 1) {
-          nextOwnerDrafts[`${dayKey}-${location.id}`] = owners
-          promptedRoomCount += 1
-          return
-        }
-
-        const nextRoomNames = [...current]
-        owners.forEach((owner) => {
-          if (nextRoomNames.includes(owner)) {
-            return
-          }
-          if (blocked.has(owner)) {
-            skippedBlocked += 1
-            return
-          }
-          const assignedLocation = findAssignedLocationForPerson(
-            previous,
-            dayKey,
-            owner,
-            location.id,
-            false,
-          )
-          if (assignedLocation || assignedToday.has(owner)) {
-            skippedAssigned += 1
-            return
-          }
-          nextRoomNames.push(owner)
-          assignedToday.add(owner)
-          updatedCount += 1
-        })
-
-        const ownerSet = new Set(owners)
-        const ownerFirst = owners.filter((owner) => nextRoomNames.includes(owner))
-        const others = nextRoomNames.filter((name) => !ownerSet.has(name))
-        dayAssignments[location.id] = [...ownerFirst, ...others]
-      })
-
-      if (!updatedCount && !promptedRoomCount) {
-        showWarning(
-          'Varsayılan oda ataması yapılamadı. Oda asistanı eksik veya kişi uygun olmayabilir.',
-        )
-        return previous
-      }
-
-      if (promptedRoomCount) {
-        showSuccess(
-          `${dayKey} için ${updatedCount} otomatik atama yapıldı. ${promptedRoomCount} odada birden fazla oda asistanı var; alttaki seçeneklerden işaretleyip onaylayabilirsin.`,
-        )
-      } else {
-        showSuccess(
-          `${dayKey} için ${updatedCount} odada varsayılan asistan yazıldı. Atlanan: oda asistanı yok ${skippedNoOwner}, müsait değil ${skippedBlocked}, başka yerde atanmış ${skippedAssigned}.`,
-        )
-      }
-      return {
-        ...previous,
-        manualAssignments: {
-          ...previous.manualAssignments,
-          [dayKey]: dayAssignments,
-        },
-      }
+      getAssignmentsForLocation(plannerState, dayKey, location).forEach((name) =>
+        assignedToday.add(name),
+      )
     })
+
+    let updatedCount = 0
+    let skippedNoOwner = 0
+    let skippedBlocked = 0
+    let skippedAssigned = 0
+    let promptedRoomCount = 0
+
+    normalLocations.forEach((location) => {
+      const current = uniqueSortedNames(dayAssignments[location.id] ?? [])
+      const owners = (monthOwners[location.id] ?? [])
+        .map((owner) => owner.trim())
+        .filter(Boolean)
+
+      if (!owners.length) {
+        skippedNoOwner += 1
+        return
+      }
+
+      if (owners.length > 1) {
+        nextOwnerDrafts[`${dayKey}-${location.id}`] = owners
+        promptedRoomCount += 1
+        return
+      }
+
+      const nextRoomNames = [...current]
+      owners.forEach((owner) => {
+        if (nextRoomNames.includes(owner)) {
+          return
+        }
+        if (blocked.has(owner)) {
+          skippedBlocked += 1
+          return
+        }
+        const assignedLocation = findAssignedLocationForPerson(
+          plannerState,
+          dayKey,
+          owner,
+          location.id,
+          false,
+        )
+        if (assignedLocation || assignedToday.has(owner)) {
+          skippedAssigned += 1
+          return
+        }
+        nextRoomNames.push(owner)
+        assignedToday.add(owner)
+        updatedCount += 1
+      })
+
+      const ownerSet = new Set(owners)
+      const ownerFirst = owners.filter((owner) => nextRoomNames.includes(owner))
+      const others = nextRoomNames.filter((name) => !ownerSet.has(name))
+      dayAssignments[location.id] = [...ownerFirst, ...others]
+    })
+
+    if (!updatedCount && !promptedRoomCount) {
+      showWarning(
+        'Varsayılan oda ataması yapılamadı. Oda asistanı eksik veya kişi uygun olmayabilir.',
+      )
+      return
+    }
+
+    setPlannerDraftAssignments((previous) => ({
+      ...previous,
+      [dayKey]: dayAssignments,
+    }))
+
+    if (promptedRoomCount) {
+      showSuccess(
+        `${dayKey} taslağı için ${updatedCount} otomatik atama yapıldı. ${promptedRoomCount} odada birden fazla oda asistanı var; alttaki seçeneklerden işaretleyip onaylayabilirsin.`,
+      )
+    } else {
+      showSuccess(
+        `${dayKey} taslağı için ${updatedCount} odada varsayılan asistan yazıldı. Atlanan: oda asistanı yok ${skippedNoOwner}, müsait değil ${skippedBlocked}, başka yerde atanmış ${skippedAssigned}.`,
+      )
+    }
 
     if (Object.keys(nextOwnerDrafts).length) {
       setOwnerSelectionDrafts((previous) => ({
@@ -2647,25 +3720,23 @@ function App() {
   }
 
   const clearDayAssignments = (dayKey: string) => {
-    setData((previous) => {
-      const dayAssignments = {
-        ...(previous.manualAssignments[dayKey] ?? {}),
-      }
-      previous.locations
-        .filter((location) => EDITABLE_KINDS.has(location.kind))
-        .forEach((location) => {
-          dayAssignments[location.id] = []
-        })
+    if (!ensurePlannerDayInEditMode(dayKey)) {
+      return
+    }
 
-      showSuccess(`${dayKey} için manuel atamalar temizlendi.`)
-      return {
-        ...previous,
-        manualAssignments: {
-          ...previous.manualAssignments,
-          [dayKey]: dayAssignments,
-        },
-      }
-    })
+    const plannerState = getPlannerStateForDay(dayKey)
+    const dayAssignments = cloneDayLocationAssignments(plannerState.manualAssignments[dayKey])
+    plannerState.locations
+      .filter((location) => EDITABLE_KINDS.has(location.kind))
+      .forEach((location) => {
+        dayAssignments[location.id] = []
+      })
+
+    setPlannerDraftAssignments((previous) => ({
+      ...previous,
+      [dayKey]: dayAssignments,
+    }))
+    showSuccess(`${dayKey} için taslak manuel atamalar temizlendi. Kaydet ile yayınla.`)
   }
 
   const weekAssignmentsForPerson = useMemo(() => {
@@ -2687,13 +3758,22 @@ function App() {
     })
   }, [data, observerAssistant, sortedLocations, weekDays])
 
-  const selectedLocationWorkers = useMemo(() => {
-    const location = data.locations.find((item) => item.id === observerLocation)
-    if (!location || !observerDay) {
+  const weekAssignmentsForRoom = useMemo(() => {
+    const room = sortedLocations.find((location) => location.id === observerWeekRoom)
+    if (!room) {
       return []
     }
-    return getDisplayAssignmentsForLocation(data, observerDay, location)
-  }, [data, observerDay, observerLocation])
+
+    return weekDays.map((day) => {
+      const names = getDisplayAssignmentsForLocation(data, day.key, room)
+      const dayTypeLabel = getDayTypeLabel(day.key)
+      return {
+        day,
+        names,
+        dayTypeLabel,
+      }
+    })
+  }, [data, observerWeekRoom, sortedLocations, weekDays])
 
   const observerLookupResult = useMemo(() => {
     if (!observerLookupDay || !observerLookupName) {
@@ -2750,6 +3830,14 @@ function App() {
     })
     return counts
   }, [myMonthlyDuties])
+  const myMonthlyOvertimeHours = useMemo(
+    () =>
+      myMonthlyDuties.reduce(
+        (total, duty) => total + calculateDutyOvertimeHoursForDay(fromISODate(duty.dayKey)),
+        0,
+      ),
+    [myMonthlyDuties],
+  )
 
   const myCalendarWeeks = useMemo(() => buildMonthCalendarGrid(observerMonth), [observerMonth])
   const myCalendarMonthTitle = useMemo(() => {
@@ -2834,12 +3922,12 @@ function App() {
   }, [data, loggedAssistantName, myCalendarWeeks, sortedLocations])
 
   const adminDutyTableModel = useMemo(
-    () => buildDutyTableModel(data.dutyRoster, dutyMonth),
-    [data.dutyRoster, dutyMonth],
+    () => buildDutyTableModel(data.dutyRoster, dutyMonth, data.assistantRanks),
+    [data.assistantRanks, data.dutyRoster, dutyMonth],
   )
   const observerDutyTableModel = useMemo(
-    () => buildDutyTableModel(data.dutyRoster, observerMonth),
-    [data.dutyRoster, observerMonth],
+    () => buildDutyTableModel(data.dutyRoster, observerMonth, data.assistantRanks),
+    [data.assistantRanks, data.dutyRoster, observerMonth],
   )
   const selectedPlannerDay = useMemo(() => {
     if (!activePlannerDay) {
@@ -2854,8 +3942,104 @@ function App() {
         weekday: 'long',
       }),
       dayTypeLabel: getDayTypeLabel(activePlannerDay),
+      roomAssignmentBlocked: !isRoomAssignableDay(date),
     }
   }, [activePlannerDay])
+
+  const plannerWeeklyExportDays = useMemo<WeeklyRotaExportDay[]>(() => {
+    const fullWeek = buildWeek(plannerWeeklyExportWeekStartISO)
+    const workingDays = fullWeek.filter((day) => isRoomAssignableDay(fromISODate(day.key)))
+    const daysForExport = workingDays.length ? workingDays : fullWeek
+    return daysForExport.map((day) => ({
+      key: day.key,
+      label: fromISODate(day.key).toLocaleDateString('tr-TR', { weekday: 'short' }),
+      shortDate: fromISODate(day.key).toLocaleDateString('tr-TR', {
+        day: '2-digit',
+        month: '2-digit',
+      }),
+    }))
+  }, [plannerWeeklyExportWeekStartISO])
+
+  const plannerWeeklyExportWeekLabel = useMemo(() => {
+    if (!plannerWeeklyExportDays.length) {
+      return plannerWeeklyExportWeekStartISO
+    }
+    const firstDay = fromISODate(plannerWeeklyExportDays[0].key)
+    const lastDay = fromISODate(plannerWeeklyExportDays[plannerWeeklyExportDays.length - 1].key)
+    const firstLabel = firstDay.toLocaleDateString('tr-TR', { day: 'numeric', month: 'long' })
+    const lastLabel = lastDay.toLocaleDateString('tr-TR', { day: 'numeric', month: 'long' })
+    return `${firstLabel} - ${lastLabel} haftası`
+  }, [plannerWeeklyExportDays, plannerWeeklyExportWeekStartISO])
+
+  const plannerWeeklyExportGroups = useMemo<WeeklyRotaExportGroup[]>(() => {
+    const dayKeys = plannerWeeklyExportDays.map((day) => day.key)
+    const isActiveAnyDay = (location: WorkLocation) =>
+      dayKeys.some((dayKey) => isLocationActiveOnDay(location, dayKey))
+
+    const buildRowModel = (location: WorkLocation): WeeklyRotaExportRow => ({
+      id: location.id,
+      unitLabel: getWeeklyExportUnitLabel(location),
+      cells: plannerWeeklyExportDays.map((day) =>
+        sortAssistantNamesByRank(
+          getAssignmentsForLocation(data, day.key, location),
+          data.assistantRanks,
+        ),
+      ),
+    })
+
+    const normalLocationsBySite = (site: string) =>
+      sortLocationsForState(
+        data.locations.filter(
+          (location) => location.kind === 'normal' && location.site === site && isActiveAnyDay(location),
+        ),
+        plannerWeeklyExportWeekStartISO,
+      )
+
+    const groups: WeeklyRotaExportGroup[] = [
+      {
+        id: 'sancaktepe',
+        title: 'SANCAKTEPE',
+        tone: 'sancak',
+        rows: normalLocationsBySite('Sancaktepe').map(buildRowModel),
+      },
+      {
+        id: 'cekmekoy',
+        title: 'ÇEKMEKÖY',
+        tone: 'cekmekoy',
+        rows: normalLocationsBySite('Çekmeköy').map(buildRowModel),
+      },
+      {
+        id: 'feriha-oz',
+        title: 'FERİHA ÖZ',
+        tone: 'feriha',
+        rows: normalLocationsBySite('Feriha Öz').map(buildRowModel),
+      },
+    ]
+
+    const leaveOrder = new Map<string, number>([
+      [LEAVE_LOCATION_IDS.excuse, 1],
+      [LEAVE_LOCATION_IDS.annual, 2],
+      [LEAVE_LOCATION_IDS.rotation, 3],
+    ])
+    const leaveRows = data.locations
+      .filter((location) => location.kind === 'leave' && isActiveAnyDay(location))
+      .sort(
+        (left, right) =>
+          (leaveOrder.get(left.id) ?? 99) - (leaveOrder.get(right.id) ?? 99) ||
+          left.name.localeCompare(right.name, 'tr'),
+      )
+      .map(buildRowModel)
+    if (leaveRows.length) {
+      groups.push({
+        id: 'diger',
+        title: 'İZİNLİ / ROT',
+        tone: 'diger',
+        rows: leaveRows,
+      })
+    }
+
+    return groups.filter((group) => group.rows.length > 0)
+  }, [data, plannerWeeklyExportDays, plannerWeeklyExportWeekStartISO])
 
   const renderDutyListTable = (tableModel: DutyTableModel, keyPrefix: string) => (
     <div className="duty-list-table-wrap">
@@ -2928,21 +4112,57 @@ function App() {
   )
 
   const renderPlannerGroups = (dayKey: string, groups: Array<[string, WorkLocation[]]>) => {
-    const ownersForDay = getLocationOwnersForDay(data, dayKey)
+    const plannerState = getPlannerStateForDay(dayKey)
+    const isEditableDay = isPlannerDayInEditMode(dayKey)
+    const ownersForDay = getLocationOwnersForDay(plannerState, dayKey)
     return groups.map(([siteName, locations]) => (
       <div className="site-block" key={`${dayKey}-${siteName}-${plannerView}`}>
         <h4>{siteName}</h4>
         {locations.map((location) => {
-          const names = getAssignmentsForLocation(data, dayKey, location)
+          const names = getDisplayAssignmentsForLocation(plannerState, dayKey, location)
           const draftKey = `${dayKey}-${location.id}`
           const owners = location.kind === 'normal' ? ownersForDay[location.id] ?? [] : []
           const uniqueOwners = [...new Set(owners)]
-          const orderedAssistants = uniqueOwners.length
-            ? [
-                ...uniqueOwners,
-                ...data.assistants.filter((assistant) => !uniqueOwners.includes(assistant)),
-              ]
-            : data.assistants
+          const sectionOrder = getPlannerAssistantSectionOrder(location.site)
+          const groupedAssistantOptions = sectionOrder.map((section) => ({
+            section,
+            items: [] as Array<{ assistant: string; label: string; isOwner: boolean }>,
+          }))
+          const sectionMap = new Map(
+            groupedAssistantOptions.map((group) => [group.section, group.items]),
+          )
+
+          plannerState.assistants.forEach((assistant) => {
+            const ownerSection = getAssistantOwnerSectionForPlannerList(
+              plannerState,
+              dayKey,
+              assistant,
+              sectionOrder,
+            )
+            const section =
+              sectionMap.has(ownerSection) ? ownerSection : ('Diğer' as const)
+            const isOwner = uniqueOwners.includes(assistant)
+            const label = isOwner
+              ? `${getAssistantOptionLabelForState(plannerState, assistant, dayKey)} (odanın asistanı)`
+              : getAssistantOptionLabelForState(plannerState, assistant, dayKey)
+            sectionMap.get(section)?.push({
+              assistant,
+              label,
+              isOwner,
+            })
+          })
+
+          groupedAssistantOptions.forEach((group) => {
+            group.items.sort(
+              (a, b) =>
+                Number(b.isOwner) - Number(a.isOwner) ||
+                compareAssistantNamesByRank(
+                  a.assistant,
+                  b.assistant,
+                  plannerState.assistantRanks,
+                ),
+            )
+          })
 
           return (
             <div
@@ -2970,6 +4190,7 @@ function App() {
                       key={`${dayKey}-${location.id}-${name}`}
                       type="button"
                       className="chip removable"
+                      disabled={!isEditableDay}
                       onClick={() => removeAssignment(dayKey, location.id, name)}
                     >
                       {name}
@@ -2982,6 +4203,7 @@ function App() {
 
               <div className="form-row compact">
                 <select
+                  disabled={!isEditableDay}
                   value={cellDrafts[draftKey] ?? ''}
                   onChange={(event) =>
                     setCellDrafts((previous) => ({
@@ -2991,17 +4213,33 @@ function App() {
                   }
                 >
                   <option value="">Kişi seç</option>
-                  {orderedAssistants.map((assistant, index) => (
-                    <option key={assistant} value={assistant}>
-                      {index < uniqueOwners.length && uniqueOwners.includes(assistant)
-                        ? `${getAssistantOptionLabel(assistant, dayKey)} (odanın asistanı)`
-                        : getAssistantOptionLabel(assistant, dayKey)}
-                    </option>
-                  ))}
+                  {groupedAssistantOptions.map((group) => {
+                    if (!group.items.length) {
+                      return null
+                    }
+                    const groupLabel =
+                      group.section === 'Diğer' ? 'Diğer / Ataması Olmayan' : group.section
+                    return (
+                      <optgroup
+                        key={`${dayKey}-${location.id}-group-${group.section}`}
+                        label={groupLabel}
+                      >
+                        {group.items.map((item) => (
+                          <option
+                            key={`${dayKey}-${location.id}-${group.section}-${item.assistant}`}
+                            value={item.assistant}
+                          >
+                            {item.label}
+                          </option>
+                        ))}
+                      </optgroup>
+                    )
+                  })}
                 </select>
                 <button
                   type="button"
                   className="secondary"
+                  disabled={!isEditableDay}
                   onClick={() => addAssignment(dayKey, location.id)}
                 >
                   Ekle
@@ -3023,10 +4261,13 @@ function App() {
                         <label key={`${draftKey}-owner-choice-${ownerName}`}>
                           <input
                             type="checkbox"
+                            disabled={!isEditableDay}
                             checked={isSelected}
                             onChange={() => toggleOwnerSelection(dayKey, location.id, ownerName)}
                           />
-                          <span>{getAssistantOptionLabel(ownerName, dayKey)}</span>
+                          <span>
+                            {getAssistantOptionLabelForState(plannerState, ownerName, dayKey)}
+                          </span>
                         </label>
                       )
                     })}
@@ -3034,6 +4275,7 @@ function App() {
                   <button
                     type="button"
                     className="secondary"
+                    disabled={!isEditableDay}
                     onClick={() => applyOwnerSelections(dayKey, location.id)}
                   >
                     Seçilenleri Onayla
@@ -3047,12 +4289,213 @@ function App() {
     ))
   }
 
+  const renderPlannerSidePanel = (dayKey: string) => {
+    const plannerState = getPlannerStateForDay(dayKey)
+    const previousDayKey = toISODate(addDays(fromISODate(dayKey), -1))
+    const dutyEntries = sortDutyAssignments(
+      plannerState.dutyRoster[dayKey] ?? [],
+      plannerState.assistantRanks,
+    )
+    const postDutyEntries = sortDutyAssignments(
+      plannerState.dutyRoster[previousDayKey] ?? [],
+      plannerState.assistantRanks,
+    )
+    const normalLocations = plannerState.locations.filter((location) => location.kind === 'normal')
+    const leaveLocations = plannerState.locations.filter((location) => location.kind === 'leave')
+    const excuseLeaveNames = sortAssistantNamesByRank(
+      uniqueSortedNames(
+      leaveLocations
+        .filter(
+          (location) =>
+            location.id === LEAVE_LOCATION_IDS.excuse ||
+            location.name.toLocaleLowerCase('tr').includes('mazeret') ||
+            location.id === LEGACY_LEAVE_LOCATION_ID ||
+            location.name.toLocaleLowerCase('tr').includes('izinli'),
+        )
+        .flatMap((location) => getAssignmentsForLocation(plannerState, dayKey, location)),
+      ),
+      plannerState.assistantRanks,
+    )
+    const annualLeaveNames = sortAssistantNamesByRank(
+      uniqueSortedNames(
+      leaveLocations
+        .filter(
+          (location) =>
+            location.id === LEAVE_LOCATION_IDS.annual ||
+            location.name
+              .toLocaleLowerCase('tr')
+              .replace(/ı/g, 'i')
+              .includes('yillik'),
+        )
+        .flatMap((location) => getAssignmentsForLocation(plannerState, dayKey, location)),
+      ),
+      plannerState.assistantRanks,
+    )
+    const rotationNames = sortAssistantNamesByRank(
+      uniqueSortedNames(
+      leaveLocations
+        .filter(
+          (location) =>
+            location.id === LEAVE_LOCATION_IDS.rotation ||
+            location.name.toLocaleLowerCase('tr').includes('rotasyon'),
+        )
+        .flatMap((location) => getAssignmentsForLocation(plannerState, dayKey, location)),
+      ),
+      plannerState.assistantRanks,
+    )
+    const blockedStatusLocations = plannerState.locations.filter(
+      (location) => location.kind === 'leave' || location.kind === 'postDuty',
+    )
+    const unplacedAssignableNames = sortAssistantNamesByRank(
+      uniqueSortedNames(
+      plannerState.assistants.filter((assistant) => {
+        const alreadyInRoom = normalLocations.some((location) =>
+          getAssignmentsForLocation(plannerState, dayKey, location).includes(assistant),
+        )
+        if (alreadyInRoom) {
+          return false
+        }
+
+        const blockedByStatus = blockedStatusLocations.some((location) =>
+          getAssignmentsForLocation(plannerState, dayKey, location).includes(assistant),
+        )
+        if (blockedByStatus) {
+          return false
+        }
+
+        return true
+      }),
+      ),
+      plannerState.assistantRanks,
+    )
+
+    return (
+      <>
+        <h4>Nöbetçiler</h4>
+        <div className="chip-wrap">
+          {dutyEntries.length ? (
+            dutyEntries.map((entry) => (
+              <span
+                key={`planner-duty-${dayKey}-${entry.name}-${entry.site}`}
+                className={`chip duty-site-chip duty-site-${dutySiteClassName(entry.site)}`}
+              >
+                {entry.name} ({entry.site})
+              </span>
+            ))
+          ) : (
+            <span className="empty">Nöbetçi yok</span>
+          )}
+        </div>
+
+        <h4>Nöbet Ertesiler</h4>
+        <div className="chip-wrap">
+          {postDutyEntries.length ? (
+            postDutyEntries.map((entry) => (
+              <span
+                key={`planner-post-duty-${dayKey}-${entry.name}-${entry.site}`}
+                className={`chip duty-site-chip duty-site-${dutySiteClassName(entry.site)}`}
+              >
+                {entry.name} ({entry.site})
+              </span>
+            ))
+          ) : (
+            <span className="empty">Nöbet ertesi yok</span>
+          )}
+        </div>
+
+        <h4>Mazeret İznindekiler</h4>
+        <div className="stack-list">
+          {excuseLeaveNames.length ? (
+            excuseLeaveNames.map((name) => (
+              <span key={`planner-excuse-leave-${dayKey}-${name}`} className="chip">
+                {name}
+              </span>
+            ))
+          ) : (
+            <span className="empty">Mazeret izninde kimse yok</span>
+          )}
+        </div>
+
+        <h4>Yıllık İznindekiler</h4>
+        <div className="stack-list">
+          {annualLeaveNames.length ? (
+            annualLeaveNames.map((name) => (
+              <span key={`planner-annual-leave-${dayKey}-${name}`} className="chip">
+                {name}
+              </span>
+            ))
+          ) : (
+            <span className="empty">Yıllık izinde kimse yok</span>
+          )}
+        </div>
+
+        <h4>Rotasyondakiler</h4>
+        <div className="stack-list">
+          {rotationNames.length ? (
+            rotationNames.map((name) => (
+              <span key={`planner-rotation-${dayKey}-${name}`} className="chip">
+                {name}
+              </span>
+            ))
+          ) : (
+            <span className="empty">Rotasyonda kimse yok</span>
+          )}
+        </div>
+
+        <h4>Yerleştirilmeyenler (Odaya Yazılabilir)</h4>
+        <div className="chip-wrap">
+          {unplacedAssignableNames.length ? (
+            unplacedAssignableNames.map((assistantName) => {
+              const dutyEntry = dutyEntries.find((entry) => entry.name === assistantName)
+              return (
+                <span
+                  key={`planner-unplaced-assignable-${dayKey}-${assistantName}`}
+                  className={`chip ${
+                    dutyEntry ? `duty-site-chip duty-site-${dutySiteClassName(dutyEntry.site)}` : ''
+                  }`}
+                >
+                  {dutyEntry
+                    ? `${assistantName} (nöbet: ${dutyEntry.site})`
+                    : assistantName}
+                </span>
+              )
+            })
+          ) : (
+            <span className="empty">Yerleştirilmeyen uygun kişi yok</span>
+          )}
+        </div>
+      </>
+    )
+  }
+
   if (!session) {
+    if (entryStep === 'welcome') {
+      return (
+        <div className="page-shell login-shell">
+          <section className="card login-card portal-welcome-card fade-up">
+            <p className="eyebrow">Portal</p>
+            <h1>Asistan Portalı</h1>
+            <p className="subtext">Günlük çalışma ve nöbet yönetimine güvenli giriş.</p>
+            <button
+              type="button"
+              onClick={() => {
+                setEntryStep('login')
+                setLoginView('choose')
+                setNotice(null)
+              }}
+            >
+              Girişe Geç
+            </button>
+          </section>
+        </div>
+      )
+    }
+
     return (
       <div className="page-shell login-shell">
         <section className="card login-card fade-up">
           <p className="eyebrow">Giriş</p>
-          <h1>Çalışma Listesi Portalı</h1>
+          <h1>Asistan Portalı</h1>
           <p className="subtext">Giriş türünü seçip devam et.</p>
 
           {loginView === 'choose' ? (
@@ -3090,7 +4533,7 @@ function App() {
                     setPasswordInput('')
                   }}
                 >
-                  Geri
+                  Tür Seçimine Dön
                 </button>
               </div>
             </>
@@ -3166,11 +4609,26 @@ function App() {
                     setAssistantIdentityInput('')
                   }}
                 >
-                  Geri
+                  Tür Seçimine Dön
                 </button>
               </div>
             </>
           ) : null}
+
+          <button
+            type="button"
+            className="ghost-button"
+            onClick={() => {
+              setEntryStep('welcome')
+              setLoginView('choose')
+              setPasswordInput('')
+              setAssistantUsernameInput('')
+              setAssistantIdentityInput('')
+              setNotice(null)
+            }}
+          >
+            Ana Sayfaya Dön
+          </button>
 
           {notice ? (
             <div className={`notice ${notice.type === 'ok' ? 'success' : 'warning'}`}>
@@ -3182,15 +4640,110 @@ function App() {
     )
   }
 
+  if (selectedPortalApp !== 'scheduler') {
+    return (
+      <div className="page-shell login-shell">
+        <section className="card portal-hub-card fade-up">
+          <div className="portal-hub-head">
+            <p className="eyebrow">Uygulamalar</p>
+            <h1>Asistan Portalı</h1>
+            <p className="subtext">Kullanmak istediğin modülü seç.</p>
+          </div>
+
+          <div className="portal-app-grid">
+            <button
+              type="button"
+              className="portal-app-card portal-app-card-active"
+              onClick={() => setSelectedPortalApp('scheduler')}
+            >
+              <span className="portal-app-icon-shell">
+                <span className="portal-app-icon-ring">
+                  <img src={portalCalendarIcon} alt="Günlük Çalışma ve Nöbet Listesi" />
+                </span>
+              </span>
+              <strong>Günlük Çalışma/Nöbet Listesi</strong>
+              <small>Atama, nöbet ve haftalık planlama ekranı</small>
+            </button>
+
+            <div className="portal-app-card portal-app-card-soon">
+              <span className="portal-app-soon-badge">Yakında</span>
+              <strong>Soru Bankası</strong>
+              <small>Sonraki aşamada eklenecek</small>
+            </div>
+
+            <div className="portal-app-card portal-app-card-soon">
+              <span className="portal-app-soon-badge">Yakında</span>
+              <strong>Hızlı Bilgiler</strong>
+              <small>Sonraki aşamada eklenecek</small>
+            </div>
+          </div>
+
+          <div className="portal-hub-actions">
+            <button type="button" className="ghost-button" onClick={logout}>
+              Çıkış Yap
+            </button>
+          </div>
+        </section>
+      </div>
+    )
+  }
+
+  if (session.role === 'admin' && plannerWeeklyExportOpen) {
+    return (
+      <div className="page-shell weekly-export-shell">
+        <WeeklyRotaExportView
+          title="HAFTALIK ASİSTAN ÇALIŞMA LİSTESİ"
+          weekRangeLabel={plannerWeeklyExportWeekLabel}
+          days={plannerWeeklyExportDays}
+          groups={plannerWeeklyExportGroups}
+          onClose={closePlannerWeeklyExport}
+          onPrevWeek={() => shiftPlannerWeeklyExportWeek(-1)}
+          onNextWeek={() => shiftPlannerWeeklyExportWeek(1)}
+          onPrint={() => window.print()}
+        />
+      </div>
+    )
+  }
+
   return (
-    <div className="page-shell">
+    <div className="page-shell app-shell">
+      {mobileMenuOpen ? (
+        <button
+          type="button"
+          className="mobile-menu-backdrop"
+          aria-label="Menüyü kapat"
+          onClick={() => setMobileMenuOpen(false)}
+        />
+      ) : null}
+
       <header className="topbar card fade-up">
-        <div>
-          <p className="eyebrow">Planlama</p>
-          <h1>Çalışma Listesi Portalı</h1>
+        <div className="topbar-title">
+          <div>
+            <p className="eyebrow">Planlama</p>
+            <h1>Çalışma Listesi Portalı</h1>
+          </div>
+          <button
+            type="button"
+            className="ghost-button mobile-menu-trigger"
+            aria-label="Hızlı menü"
+            onClick={() => setMobileMenuOpen((previous) => !previous)}
+          >
+            Menü
+          </button>
         </div>
 
-        <div className="top-controls">
+        <div className={`top-controls ${mobileMenuOpen ? 'open' : ''}`}>
+          <div className="mobile-menu-head">
+            <strong>Hızlı Menü</strong>
+            <button
+              type="button"
+              className="ghost-button"
+              onClick={() => setMobileMenuOpen(false)}
+            >
+              Kapat
+            </button>
+          </div>
+
           <div className="session-role">
             <span>Aktif Giriş</span>
             <strong>
@@ -3219,26 +4772,35 @@ function App() {
             ) : null}
           </div>
 
-          <div className="date-control">
-            <label htmlFor="assistant-focus">Kişi Görünümü</label>
-            <select
-              id="assistant-focus"
-              value={observerAssistant}
-              onChange={(event) => {
-                setObserverAssistant(event.target.value)
-                setObserverLookupName(event.target.value)
-              }}
-            >
-              {data.assistants.map((assistant) => (
-                <option key={`focus-top-${assistant}`} value={assistant}>
-                  {assistant}
-                </option>
-              ))}
-            </select>
-          </div>
+          {session.role === 'assistant' ? (
+            <div className="date-control">
+              <label htmlFor="assistant-focus">Kişi Görünümü</label>
+              <select
+                id="assistant-focus"
+                value={observerAssistant}
+                onChange={(event) => {
+                  setObserverAssistant(event.target.value)
+                  setObserverLookupName(event.target.value)
+                }}
+              >
+                {data.assistants.map((assistant) => (
+                  <option key={`focus-top-${assistant}`} value={assistant}>
+                    {assistant}
+                  </option>
+                ))}
+              </select>
+            </div>
+          ) : null}
 
           <div className="header-actions">
-            <button type="button" className="ghost-button" onClick={logout}>
+            <button
+              type="button"
+              className="ghost-button"
+              onClick={() => {
+                setMobileMenuOpen(false)
+                logout()
+              }}
+            >
               Çıkış Yap
             </button>
           </div>
@@ -3249,16 +4811,80 @@ function App() {
         <div className={`notice ${notice.type === 'ok' ? 'success' : 'warning'}`}>{notice.text}</div>
       ) : null}
 
-      <section className="stats-grid fade-up delay-1">
-        <article className="stat-card">
-          <span>Toplam Asistan</span>
-          <strong>{data.assistants.length}</strong>
-        </article>
-        <article className="stat-card">
-          <span>Toplam Çalışma Alanı</span>
-          <strong>{data.locations.length}</strong>
-        </article>
-      </section>
+      {isMobileViewport ? (
+        <nav className="mobile-module-nav" aria-label="Mobil modül seçimi">
+          {mode === 'admin' ? (
+            <>
+              <button
+                type="button"
+                className={adminSection === 'assistants' ? 'active' : ''}
+                onClick={() => selectAdminSection('assistants')}
+              >
+                Asistanlar
+              </button>
+              <button
+                type="button"
+                className={adminSection === 'locations' ? 'active' : ''}
+                onClick={() => selectAdminSection('locations')}
+              >
+                Alanlar
+              </button>
+              <button
+                type="button"
+                className={adminSection === 'duty' ? 'active' : ''}
+                onClick={() => selectAdminSection('duty')}
+              >
+                Nöbet
+              </button>
+              <button
+                type="button"
+                className={adminSection === 'planner' ? 'active' : ''}
+                onClick={() => selectAdminSection('planner')}
+              >
+                Planlama
+              </button>
+            </>
+          ) : (
+            <>
+              <button
+                type="button"
+                className={observerSection === 'myPanel' ? 'active' : ''}
+                onClick={() => selectObserverSection('myPanel')}
+              >
+                Kendi Modülüm
+              </button>
+              <button
+                type="button"
+                className={observerSection === 'personWeek' ? 'active' : ''}
+                onClick={() => selectObserverSection('personWeek')}
+              >
+                Haftalık Görünüm
+              </button>
+              <button
+                type="button"
+                className={observerSection === 'dailyMap' ? 'active' : ''}
+                onClick={() => selectObserverSection('dailyMap')}
+              >
+                Günlük Harita
+              </button>
+              <button
+                type="button"
+                className={observerSection === 'dutyList' ? 'active' : ''}
+                onClick={() => selectObserverSection('dutyList')}
+              >
+                Nöbet Listesi
+              </button>
+              <button
+                type="button"
+                className={observerSection === 'personLookup' ? 'active' : ''}
+                onClick={() => selectObserverSection('personLookup')}
+              >
+                Kişi Sorgu
+              </button>
+            </>
+          )}
+        </nav>
+      ) : null}
 
       {mode === 'admin' ? (
         <main className="stack-layout">
@@ -3268,28 +4894,28 @@ function App() {
               <button
                 type="button"
                 className={adminSection === 'assistants' ? 'active' : ''}
-                onClick={() => setAdminSection('assistants')}
+                onClick={() => selectAdminSection('assistants')}
               >
                 Asistanlar
               </button>
               <button
                 type="button"
                 className={adminSection === 'locations' ? 'active' : ''}
-                onClick={() => setAdminSection('locations')}
+                onClick={() => selectAdminSection('locations')}
               >
                 Alanlar
               </button>
               <button
                 type="button"
                 className={adminSection === 'duty' ? 'active' : ''}
-                onClick={() => setAdminSection('duty')}
+                onClick={() => selectAdminSection('duty')}
               >
                 Nöbet
               </button>
               <button
                 type="button"
                 className={adminSection === 'planner' ? 'active' : ''}
-                onClick={() => setAdminSection('planner')}
+                onClick={() => selectAdminSection('planner')}
               >
                 Planlama
               </button>
@@ -3297,36 +4923,62 @@ function App() {
           </section>
 
           {adminSection === 'assistants' ? (
-            <section className="card fade-up delay-2">
-            <h2>Asistan Havuzu</h2>
-            <p className="subtext">
-              Kişi sayısını buradan tek tek artırabilirsin. Her alan için kişi sayısı sınırsızdır.
-            </p>
+            <section className="card fade-up delay-2 assistant-section-card">
+              <div className="assistant-section-head">
+                <h2>Asistan Havuzu</h2>
+                <span className="assistant-count-pill">{data.assistants.length} kişi</span>
+              </div>
+              <p className="subtext">
+                Eklerken kıdem seçilir. Üst kıdem boş kalırsa alt kıdemler otomatik bir üst kıdeme taşınır.
+              </p>
 
-            <div className="form-row">
-              <input
-                value={assistantInput}
-                onChange={(event) => setAssistantInput(event.target.value)}
-                placeholder="Yeni asistan adı"
-              />
-              <button type="button" onClick={addAssistant}>
-                Asistan Ekle
-              </button>
-            </div>
-
-            <div className="chip-wrap">
-              {data.assistants.map((assistant) => (
-                <button
-                  key={assistant}
-                  type="button"
-                  className="chip removable"
-                  onClick={() => removeAssistant(assistant)}
-                  title="Listeden çıkar"
+              <div className="form-row assistant-add-row">
+                <input
+                  value={assistantInput}
+                  onChange={(event) => setAssistantInput(event.target.value)}
+                  placeholder="Yeni asistan adı soyadı"
+                />
+                <select
+                  value={String(assistantRankInput)}
+                  onChange={(event) => setAssistantRankInput(toSafeSeniorityLevel(Number(event.target.value), 1))}
                 >
-                  {assistant}
+                  {assistantInputLevels.map((level) => (
+                    <option key={`assistant-rank-option-${level}`} value={String(level)}>
+                      {level}. Kıdem
+                    </option>
+                  ))}
+                </select>
+                <button type="button" onClick={addAssistant}>
+                  Asistan Ekle
                 </button>
+              </div>
+
+              {assistantsBySeniority.map((group) => (
+                <section key={`assistant-rank-group-${group.level}`} className="assistant-rank-group">
+                  <header className="assistant-rank-head">
+                    <h3>{group.level}. Kıdem</h3>
+                    <span>{group.names.length} kişi</span>
+                  </header>
+                  {group.names.length ? (
+                    <div className="assistant-chip-grid">
+                      {group.names.map((assistant) => (
+                        <button
+                          key={assistant}
+                          type="button"
+                          className="assistant-chip"
+                          onClick={() => removeAssistant(assistant)}
+                          title="Listeden çıkar"
+                        >
+                          <span className="assistant-chip-name">{assistant}</span>
+                          <span className="assistant-chip-remove">Kaldır</span>
+                        </button>
+                      ))}
+                    </div>
+                  ) : (
+                    <span className="empty">Bu kıdemde kişi yok</span>
+                  )}
+                </section>
               ))}
-            </div>
             </section>
           ) : null}
 
@@ -3334,9 +4986,34 @@ function App() {
             <section className="card fade-up delay-3">
             <h2>Çalışma Alanları</h2>
             <p className="subtext">
-              Çalışma alanları sabit. Oda asistanlarını ay bazlı kaydedebilirsin. Her ay farklı
-              tanımlanabilir ve planlamada seçilen tarihin ayındaki liste kullanılır.
+              Sancaktepe, Feriha Öz ve Çekmeköy için yeni alan ekleyebilirsin. Oda asistanlarını
+              ay bazlı kaydedebilirsin; planlamada seçilen tarihin ayındaki liste kullanılır.
+              Alan ekleme/kapatma ve sıra değişikliği bugünden itibaren geçerli olur, geçmiş
+              tarihlerde eski düzen korunur.
             </p>
+
+            <div className="form-row responsive">
+              <select
+                value={newLocationSite}
+                disabled={ownersEditMode}
+                onChange={(event) => setNewLocationSite(event.target.value as DutySite)}
+              >
+                {DUTY_SITES.map((site) => (
+                  <option key={`location-site-option-${site}`} value={site}>
+                    {site}
+                  </option>
+                ))}
+              </select>
+              <input
+                value={newLocationName}
+                disabled={ownersEditMode}
+                onChange={(event) => setNewLocationName(event.target.value)}
+                placeholder="Yeni alan adı"
+              />
+              <button type="button" disabled={ownersEditMode} onClick={addLocation}>
+                Alan Ekle
+              </button>
+            </div>
 
             <div className="form-row owners-month-row">
               <button
@@ -3400,12 +5077,35 @@ function App() {
               <section key={`location-group-${siteName}`} className="site-group-card">
                 <h3 className="site-group-title">{siteName}</h3>
                 <div className="location-chip-grid">
-                  {locations.map((location) => (
+                  {locations.map((location, siteIndex) => (
                     <article
                       key={location.id}
                       className={`location-pill tone-${location.tone} kind-${location.kind}`}
                     >
-                      <div>
+                      <div className="location-pill-head">
+                        <label className="location-order-control">
+                          <span>Sıra</span>
+                          <input
+                            type="number"
+                            min={1}
+                            max={locations.length}
+                            value={siteIndex + 1}
+                            disabled={ownersEditMode}
+                            onChange={(event) => updateLocationOrder(location.id, event.target.value)}
+                          />
+                        </label>
+                        <button
+                          type="button"
+                          className="ghost-button location-delete-button"
+                          disabled={ownersEditMode}
+                          onClick={() => removeLocation(location.id)}
+                          title="Alanı kaldır"
+                          aria-label="Alanı kaldır"
+                        >
+                          🗑
+                        </button>
+                      </div>
+                      <div className="location-pill-main">
                         <p>
                           {location.name}
                           {(visibleOwnersForMonth[location.id] ?? []).length > 0 ? (
@@ -3475,32 +5175,28 @@ function App() {
 
           {adminSection === 'duty' ? (
             <section className="card fade-up delay-4">
-            <h2>Otomatik Aylık Nöbet</h2>
+            <h2>Aylık Nöbet</h2>
             <p className="subtext">
-              Nöbet listesini manuel girmek yerine seçtiğin ay için otomatik üret. Üretim sonrası
-              nöbet ertesi kuralı ve normal alan filtreleri otomatik uygulanır. Nöbetler her gün
-              yazılır; hafta sonu ve resmi tatiller dahildir.
+              Ay seçip nöbetleri satırdan veya günlük kartlardan ekle. Nöbetler her gün yazılır;
+              hafta sonu ve resmi tatiller dahildir.
             </p>
-            <div className="form-row responsive">
-              <input
-                type="month"
+            <div className="form-row month-only-row">
+              <select
+                className="my-calendar-month-select"
                 value={dutyMonth}
-                onChange={(event) => setDutyMonth(event.target.value)}
-              />
-              <input
-                type="number"
-                min={1}
-                max={Math.max(1, data.assistants.length)}
-                value={dutyPerDay}
-                onChange={(event) => setDutyPerDay(Number(event.target.value))}
-                placeholder="Günlük nöbetçi sayısı"
-              />
-              <button type="button" onClick={generateDutySchedule}>
-                Otomatik Üret
-              </button>
-              <button type="button" className="ghost-button" onClick={clearMonthDutySchedule}>
-                Ayı Temizle
-              </button>
+                onChange={(event) => {
+                  const nextMonth = event.target.value
+                  if (isValidMonthISO(nextMonth)) {
+                    setDutyMonth(nextMonth)
+                  }
+                }}
+              >
+                {dutyMonthOptions.map((option) => (
+                  <option key={`duty-month-${option.value}`} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
             </div>
 
             <p className="subtext">
@@ -3537,7 +5233,7 @@ function App() {
                   month: '2-digit',
                   weekday: 'long',
                 })
-                const dayDuty = sortDutyAssignments(data.dutyRoster[dayKey] ?? [])
+                const dayDuty = sortDutyAssignments(data.dutyRoster[dayKey] ?? [], data.assistantRanks)
                 return (
                   <article key={dayKey} className="duty-day-card">
                     <h3>{dayLabel}</h3>
@@ -3619,20 +5315,20 @@ function App() {
             <h2>Aylık Atama Editörü</h2>
             <p className="subtext">
               Ay ve tarih seçerek planlamayı yönetebilirsin. İşlem yapılmamış tarihler de görünür.
-              Nöbet ertesi, izinli ve rotasyondakiler odalara yazılamaz. Nöbetçiler aynı gün odaya
-              yazılabilir.
+              Nöbet ertesi, mazeret/yıllık izin ve rotasyondakiler odalara yazılamaz. Nöbetçiler
+              aynı gün odaya yazılabilir.
             </p>
 
-            <div className="form-row responsive planner-date-controls">
-              <input
-                type="month"
+            <div className="form-row month-only-row planner-date-controls">
+              <select
+                className="my-calendar-month-select"
                 value={plannerMonth}
                 onChange={(event) => {
                   const nextMonth = event.target.value
-                  setPlannerMonth(nextMonth)
-                  if (!nextMonth) {
+                  if (!isValidMonthISO(nextMonth)) {
                     return
                   }
+                  setPlannerMonth(nextMonth)
                   const nextMonthDays = listMonthDays(nextMonth)
                   if (!nextMonthDays.length) {
                     return
@@ -3642,22 +5338,23 @@ function App() {
                     setActivePlannerDay(preferred)
                   }
                 }}
-              />
-              <input
-                type="date"
-                value={activePlannerDay}
-                onChange={(event) => {
-                  const normalized = normalizeDateToken(event.target.value)
-                  if (!normalized) {
-                    return
-                  }
-                  setActivePlannerDay(normalized)
-                  const nextMonth = normalized.slice(0, 7)
-                  if (nextMonth !== plannerMonth) {
-                    setPlannerMonth(nextMonth)
-                  }
-                }}
-              />
+              >
+                {plannerMonthOptions.map((option) => (
+                  <option key={`planner-month-${option.value}`} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="form-row planner-export-row">
+              <button
+                type="button"
+                className="ghost-button planner-export-open"
+                onClick={openPlannerWeeklyExport}
+              >
+                Haftalık Çıktı / Yazdırılabilir Liste
+              </button>
             </div>
 
             <div className="planner-day-tabs planner-month-tabs">
@@ -3666,7 +5363,7 @@ function App() {
                   key={`planner-tab-${day.key}`}
                   type="button"
                   className={`${activePlannerDay === day.key ? 'active' : ''}${
-                    day.dayTypeLabel ? ' nonworking' : ''
+                    day.roomAssignmentBlocked ? ' nonworking' : ''
                   }`}
                   onClick={() => setActivePlannerDay(day.key)}
                 >
@@ -3678,6 +5375,7 @@ function App() {
             {selectedPlannerDay ? (
               (() => {
                 const day = selectedPlannerDay
+                const isDayEditable = isPlannerDayInEditMode(day.key)
                 return (
                   <div className="week-grid">
                     <article key={day.key} className="day-card">
@@ -3688,26 +5386,62 @@ function App() {
 
                   {day.dayTypeLabel ? (
                     <p className="hint-text planner-hint">
-                      {day.dayTypeLabel} günü: normal oda ve izin/rotasyon ataması yapılamaz.
+                      {day.roomAssignmentBlocked
+                        ? `${day.dayTypeLabel} günü: normal oda ve mazeret/yıllık izin/rotasyon ataması yapılamaz.`
+                        : `${day.dayTypeLabel} günü: normal oda ataması yapılabilir.`}
                     </p>
                   ) : null}
 
                   <div className="day-tools">
+                    {!isDayEditable ? (
+                      <button
+                        type="button"
+                        className="secondary"
+                        onClick={() => startPlannerDayEdit(day.key)}
+                      >
+                        Değiştir
+                      </button>
+                    ) : null}
+                    {isDayEditable ? (
+                      <button
+                        type="button"
+                        className="secondary"
+                        onClick={() => savePlannerDay(day.key)}
+                      >
+                        Kaydet
+                      </button>
+                    ) : null}
+                    {isDayEditable ? (
+                      <button
+                        type="button"
+                        className="ghost-button"
+                        onClick={() => cancelPlannerDayEdit(day.key)}
+                      >
+                        İptal
+                      </button>
+                    ) : null}
                     <button
                       type="button"
-                      className="secondary"
+                      className="ghost-button day-mini-action"
+                      disabled={!isDayEditable}
                       onClick={() => autoFillDay(day.key)}
                     >
                       Varsayılanları Yaz
                     </button>
                     <button
                       type="button"
-                      className="ghost-button"
+                      className="ghost-button day-mini-action"
+                      disabled={!isDayEditable}
                       onClick={() => clearDayAssignments(day.key)}
                     >
                       Manueli Temizle
                     </button>
                   </div>
+                  <p className="hint-text planner-hint">
+                    {isDayEditable
+                      ? 'Düzenleme açık. Değişiklikler sadece taslakta; diğer kullanıcılar Kaydet sonrası görür.'
+                      : 'Bu gün kilitli. Değişiklik yapmak için önce Değiştir butonuna bas.'}
+                  </p>
                   <div className="planner-mode-tabs">
                     <button
                       type="button"
@@ -3721,7 +5455,7 @@ function App() {
                       className={plannerView === 'status' ? 'active' : ''}
                       onClick={() => setPlannerView('status')}
                     >
-                      İzin / Rotasyon
+                      İzinler / Rotasyon
                     </button>
                   </div>
 
@@ -3730,161 +5464,31 @@ function App() {
                       plannerView === 'rooms' ? 'planner-layout-rooms' : 'planner-layout-status'
                     }`}
                   >
-                    <div className="planner-main-column">
-                      {plannerView === 'rooms'
-                        ? renderPlannerGroups(day.key, roomLeftGroups)
-                        : renderPlannerGroups(day.key, groupedStatusLocations)}
-                    </div>
-
-                    <aside className="planner-side-panel">
-                      {(() => {
-                        const previousDayKey = toISODate(addDays(fromISODate(day.key), -1))
-                        const dutyEntries = sortDutyAssignments(data.dutyRoster[day.key] ?? [])
-                        const postDutyEntries = sortDutyAssignments(data.dutyRoster[previousDayKey] ?? [])
-                        const normalLocations = data.locations.filter(
-                          (location) => location.kind === 'normal',
-                        )
-                        const leaveLocations = data.locations.filter(
-                          (location) => location.kind === 'leave',
-                        )
-                        const leaveNames = uniqueSortedNames(
-                          leaveLocations
-                            .filter(
-                              (location) =>
-                                !location.name.toLocaleLowerCase('tr').includes('rotasyon'),
-                            )
-                            .flatMap((location) =>
-                              getAssignmentsForLocation(data, day.key, location),
-                            ),
-                        )
-                        const rotationNames = uniqueSortedNames(
-                          leaveLocations
-                            .filter((location) =>
-                              location.name.toLocaleLowerCase('tr').includes('rotasyon'),
-                            )
-                            .flatMap((location) =>
-                              getAssignmentsForLocation(data, day.key, location),
-                            ),
-                        )
-                        const blockedStatusLocations = data.locations.filter(
-                          (location) => location.kind === 'leave' || location.kind === 'postDuty',
-                        )
-                        const unplacedAssignableNames = uniqueSortedNames(
-                          data.assistants.filter((assistant) => {
-                            const alreadyInRoom = normalLocations.some((location) =>
-                              getAssignmentsForLocation(data, day.key, location).includes(assistant),
-                            )
-                            if (alreadyInRoom) {
-                              return false
-                            }
-
-                            const blockedByStatus = blockedStatusLocations.some((location) =>
-                              getAssignmentsForLocation(data, day.key, location).includes(assistant),
-                            )
-                            if (blockedByStatus) {
-                              return false
-                            }
-
-                            return true
-                          }),
-                        )
-
-                        return (
-                          <>
-                      <h4>Nöbetçiler</h4>
-                      <div className="chip-wrap">
-                            {dutyEntries.length ? (
-                              dutyEntries.map((entry) => (
-                            <span
-                              key={`planner-duty-${day.key}-${entry.name}-${entry.site}`}
-                              className={`chip duty-site-chip duty-site-${dutySiteClassName(entry.site)}`}
-                            >
-                              {entry.name} ({entry.site})
-                            </span>
-                              ))
-                            ) : (
-                          <span className="empty">Nöbetçi yok</span>
-                            )}
-                      </div>
-
-                      <h4>Nöbet Ertesiler</h4>
-                      <div className="chip-wrap">
-                            {postDutyEntries.length ? (
-                              postDutyEntries.map((entry) => (
-                            <span
-                              key={`planner-post-duty-${day.key}-${entry.name}-${entry.site}`}
-                              className={`chip duty-site-chip duty-site-${dutySiteClassName(entry.site)}`}
-                            >
-                              {entry.name} ({entry.site})
-                            </span>
-                              ))
-                            ) : (
-                          <span className="empty">Nöbet ertesi yok</span>
-                            )}
-                          </div>
-
-                          <h4>İzinliler</h4>
-                          <div className="stack-list">
-                            {leaveNames.length ? (
-                              leaveNames.map((name) => (
-                                <span key={`planner-leave-${day.key}-${name}`} className="chip">
-                                  {name}
-                                </span>
-                              ))
-                            ) : (
-                              <span className="empty">İzinli yok</span>
-                            )}
-                          </div>
-
-                          <h4>Rotasyondakiler</h4>
-                          <div className="stack-list">
-                            {rotationNames.length ? (
-                              rotationNames.map((name) => (
-                                <span key={`planner-rotation-${day.key}-${name}`} className="chip">
-                                  {name}
-                                </span>
-                              ))
-                            ) : (
-                              <span className="empty">Rotasyonda kimse yok</span>
-                            )}
-                          </div>
-
-                          <h4>Yerleştirilmeyenler (Odaya Yazılabilir)</h4>
-                          <div className="chip-wrap">
-                            {unplacedAssignableNames.length ? (
-                              unplacedAssignableNames.map((assistantName) => {
-                                const dutyEntry = dutyEntries.find(
-                                  (entry) => entry.name === assistantName,
-                                )
-                                return (
-                                <span
-                                  key={`planner-unplaced-assignable-${day.key}-${assistantName}`}
-                                  className={`chip ${
-                                    dutyEntry
-                                      ? `duty-site-chip duty-site-${dutySiteClassName(dutyEntry.site)}`
-                                      : ''
-                                  }`}
-                                >
-                                  {dutyEntry
-                                    ? `${assistantName} (nöbet: ${dutyEntry.site})`
-                                    : assistantName}
-                                </span>
-                                )
-                              })
-                            ) : (
-                              <span className="empty">Yerleştirilmeyen yok</span>
-                            )}
-                          </div>
-                          </>
-                        )
-                      })()}
-                    </aside>
-
                     {plannerView === 'rooms' ? (
-                      <div className="planner-main-column planner-right-column">
-                        {renderPlannerGroups(day.key, roomRightGroups)}
-                      </div>
-                    ) : null}
+                      <>
+                        <div className="planner-main-column">
+                          {renderPlannerGroups(day.key, roomLeftGroups)}
+                        </div>
+                        <div className="planner-main-column planner-middle-column">
+                          {renderPlannerGroups(day.key, roomMiddleGroups)}
+                          <aside className="planner-side-panel planner-side-panel-under-middle">
+                            {renderPlannerSidePanel(day.key)}
+                          </aside>
+                        </div>
+                        <div className="planner-main-column planner-right-column">
+                          {renderPlannerGroups(day.key, roomRightGroups)}
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <div className="planner-main-column">
+                          {renderPlannerGroups(day.key, groupedStatusLocations)}
+                        </div>
+                        <aside className="planner-side-panel">
+                          {renderPlannerSidePanel(day.key)}
+                        </aside>
+                      </>
+                    )}
                   </div>
                     </article>
                   </div>
@@ -3909,35 +5513,35 @@ function App() {
               <button
                 type="button"
                 className={observerSection === 'myPanel' ? 'active' : ''}
-                onClick={() => setObserverSection('myPanel')}
+                onClick={() => selectObserverSection('myPanel')}
               >
                 Kendi Modülüm
               </button>
               <button
                 type="button"
                 className={observerSection === 'personWeek' ? 'active' : ''}
-                onClick={() => setObserverSection('personWeek')}
+                onClick={() => selectObserverSection('personWeek')}
               >
-                Kişi Haftası
+                Haftalık Görünüm
               </button>
               <button
                 type="button"
                 className={observerSection === 'dailyMap' ? 'active' : ''}
-                onClick={() => setObserverSection('dailyMap')}
+                onClick={() => selectObserverSection('dailyMap')}
               >
                 Günlük Harita
               </button>
               <button
                 type="button"
                 className={observerSection === 'dutyList' ? 'active' : ''}
-                onClick={() => setObserverSection('dutyList')}
+                onClick={() => selectObserverSection('dutyList')}
               >
                 Nöbet Listesi
               </button>
               <button
                 type="button"
                 className={observerSection === 'personLookup' ? 'active' : ''}
-                onClick={() => setObserverSection('personLookup')}
+                onClick={() => selectObserverSection('personLookup')}
               >
                 Kişi Sorgu
               </button>
@@ -3965,7 +5569,7 @@ function App() {
                   <span>Nöbet Dağılımı</span>
                   <strong>
                     S:{myMonthlyDutyBySite.Sancaktepe} F:{myMonthlyDutyBySite['Feriha Öz']} Ç:
-                    {myMonthlyDutyBySite['Çekmeköy']}
+                    {myMonthlyDutyBySite['Çekmeköy']} | FM: {myMonthlyOvertimeHours} saat
                   </strong>
                 </article>
               </div>
@@ -4060,48 +5664,88 @@ function App() {
 
           {observerSection === 'personWeek' ? (
             <section className="card fade-up delay-2">
-            <h2>Kişi Bazlı Hızlı Görünüm</h2>
-            <p className="subtext">
-              Bir kişi bu hafta nerede çalışıyor sorusunu tek ekranda takip edebilirsin.
-            </p>
+              <h2>Haftalık Görünüm</h2>
+              <p className="subtext">
+                Bu haftayı kişi bazlı veya oda bazlı olarak tek ekranda takip edebilirsin.
+              </p>
 
-            <div className="form-row">
-              <select
-                value={observerAssistant}
-                onChange={(event) => setObserverAssistant(event.target.value)}
-              >
-                <option value="">Kişi seç</option>
-                {data.assistants.map((assistant) => (
-                  <option key={assistant} value={assistant}>
-                    {assistant}
-                  </option>
+              <h3 className="observer-tab-title">Kişi Bazlı</h3>
+              <div className="form-row">
+                <select
+                  value={observerAssistant}
+                  onChange={(event) => setObserverAssistant(event.target.value)}
+                >
+                  <option value="">Kişi seç</option>
+                  {data.assistants.map((assistant) => (
+                    <option key={assistant} value={assistant}>
+                      {assistant}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="timeline-grid">
+                {weekAssignmentsForPerson.map(({ day, locations, dayTypeLabel }) => (
+                  <article key={`timeline-${day.key}`} className="timeline-card">
+                    <header>
+                      <strong>{day.shortLabel}</strong>
+                      <small>{day.key}</small>
+                    </header>
+                    <div className="chip-wrap">
+                      {locations.length ? (
+                        locations.map((location) => (
+                          <span key={`${day.key}-${location.id}`} className="chip soft">
+                            {location.site} / {location.name}
+                          </span>
+                        ))
+                      ) : dayTypeLabel ? (
+                        <span className="empty offday-text">{dayTypeLabel} günü</span>
+                      ) : (
+                        <span className="empty">Atama görünmüyor</span>
+                      )}
+                    </div>
+                  </article>
                 ))}
-              </select>
-            </div>
+              </div>
 
-            <div className="timeline-grid">
-              {weekAssignmentsForPerson.map(({ day, locations, dayTypeLabel }) => (
-                <article key={`timeline-${day.key}`} className="timeline-card">
-                  <header>
-                    <strong>{day.shortLabel}</strong>
-                    <small>{day.key}</small>
-                  </header>
-                  <div className="chip-wrap">
-                    {locations.length ? (
-                      locations.map((location) => (
-                        <span key={`${day.key}-${location.id}`} className="chip soft">
-                          {location.site} / {location.name}
-                        </span>
-                      ))
-                    ) : dayTypeLabel ? (
-                      <span className="empty offday-text">{dayTypeLabel} günü</span>
-                    ) : (
-                      <span className="empty">Atama görünmüyor</span>
-                    )}
-                  </div>
-                </article>
-              ))}
-            </div>
+              <h3 className="observer-tab-title observer-room-title">Oda Bazlı</h3>
+              <div className="form-row">
+                <select
+                  value={observerWeekRoom}
+                  onChange={(event) => setObserverWeekRoom(event.target.value)}
+                >
+                  <option value="">Oda seç</option>
+                  {observerWeekRoomOptions.map((location) => (
+                    <option key={`observer-week-room-${location.id}`} value={location.id}>
+                      {location.site} / {location.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="timeline-grid">
+                {weekAssignmentsForRoom.map(({ day, names, dayTypeLabel }) => (
+                  <article key={`timeline-room-${day.key}`} className="timeline-card">
+                    <header>
+                      <strong>{day.shortLabel}</strong>
+                      <small>{day.key}</small>
+                    </header>
+                    <div className="chip-wrap">
+                      {names.length ? (
+                        names.map((name) => (
+                          <span key={`${day.key}-${observerWeekRoom}-${name}`} className="chip soft">
+                            {name}
+                          </span>
+                        ))
+                      ) : dayTypeLabel ? (
+                        <span className="empty offday-text">{dayTypeLabel} günü</span>
+                      ) : (
+                        <span className="empty">Bu odada atama görünmüyor</span>
+                      )}
+                    </div>
+                  </article>
+                ))}
+              </div>
             </section>
           ) : null}
 
@@ -4124,16 +5768,6 @@ function App() {
                 {myCalendarMonthOptions.map((option) => (
                   <option key={`observer-month-${option.value}`} value={option.value}>
                     {option.label}
-                  </option>
-                ))}
-              </select>
-              <select
-                value={observerLocation}
-                onChange={(event) => setObserverLocation(event.target.value)}
-              >
-                {sortedLocations.map((location) => (
-                  <option key={`filter-${location.id}`} value={location.id}>
-                    {location.site} / {location.name}
                   </option>
                 ))}
               </select>
@@ -4173,33 +5807,6 @@ function App() {
             ) : (
               <p className="hint-text planner-hint">Bu ay için gösterilecek gün bulunamadı.</p>
             )}
-
-            <article className="focus-location">
-              <h3>Burada Kim Çalışıyor?</h3>
-              <p className="subtext">
-                {observerDay
-                  ? new Date(observerDay).toLocaleDateString('tr-TR', {
-                      day: '2-digit',
-                      month: '2-digit',
-                      weekday: 'long',
-                    })
-                  : 'Gün seçilmedi'}{' '}
-                -{' '}
-                {sortedLocations.find((location) => location.id === observerLocation)?.site} /{' '}
-                {sortedLocations.find((location) => location.id === observerLocation)?.name}
-              </p>
-              <div className="chip-wrap">
-                {selectedLocationWorkers.length ? (
-                  selectedLocationWorkers.map((name) => (
-                    <span className="chip" key={`focus-${observerDay}-${observerLocation}-${name}`}>
-                      {name}
-                    </span>
-                  ))
-                ) : (
-                  <span className="empty">Bu tarih ve alanda kimse görünmüyor.</span>
-                )}
-              </div>
-            </article>
 
             {groupedObserverLocations.map(([siteName, siteLocations]) => (
               <section key={`observer-site-group-${siteName}`} className="site-group-card">
@@ -4272,12 +5879,55 @@ function App() {
                 Seçtiğin gün için herhangi bir kişinin tüm konumlarını ve durumunu tek kartta gör.
               </p>
 
-              <div className="form-row responsive">
-                <input
-                  type="date"
+              <div className="form-row month-nav-row lookup-date-row">
+                <button type="button" className="ghost-button" onClick={() => goObserverLookupMonth(-1)}>
+                  Önceki Ay
+                </button>
+                <select
+                  className="my-calendar-month-select"
+                  value={observerLookupMonth}
+                  onChange={(event) => {
+                    const nextMonth = event.target.value
+                    if (!isValidMonthISO(nextMonth)) {
+                      return
+                    }
+                    setObserverLookupMonth(nextMonth)
+                    const nextMonthDays = listMonthDays(nextMonth)
+                    if (!nextMonthDays.length) {
+                      return
+                    }
+                    const preferred = nextMonthDays.includes(todayISO) ? todayISO : nextMonthDays[0]
+                    setObserverLookupDay(preferred)
+                  }}
+                >
+                  {observerLookupMonthOptions.map((option) => (
+                    <option key={`lookup-month-${option.value}`} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+                <button type="button" className="ghost-button" onClick={() => goObserverLookupMonth(1)}>
+                  Sonraki Ay
+                </button>
+                <select
                   value={observerLookupDay}
                   onChange={(event) => setObserverLookupDay(event.target.value)}
-                />
+                >
+                  {observerLookupMonthDays.map((dayKey) => {
+                    const date = fromISODate(dayKey)
+                    const label = date.toLocaleDateString('tr-TR', {
+                      day: '2-digit',
+                      month: '2-digit',
+                      weekday: 'short',
+                    })
+                    const dayTypeLabel = getDayTypeLabel(dayKey)
+                    return (
+                      <option key={`lookup-day-${dayKey}`} value={dayKey}>
+                        {label} {dayTypeLabel ? `- ${dayTypeLabel}` : ''}
+                      </option>
+                    )
+                  })}
+                </select>
                 <select
                   value={observerLookupName}
                   onChange={(event) => setObserverLookupName(event.target.value)}
