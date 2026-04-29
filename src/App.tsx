@@ -19,7 +19,7 @@ import AssistantMonthlyTableView, {
 
 type PanelMode = 'admin' | 'observer'
 type AdminSection = 'assistants' | 'locations' | 'duty' | 'planner'
-type ObserverSection = 'myPanel' | 'personWeek' | 'dailyMap' | 'dutyList'
+type ObserverSection = 'myPanel' | 'personWeek' | 'dailyMap'
 type PlannerView = 'rooms' | 'status'
 type LocationKind = 'normal' | 'leave' | 'duty' | 'postDuty'
 type LocationTone = 'sand' | 'sage' | 'amber' | 'sky' | 'rose'
@@ -5501,7 +5501,7 @@ function App() {
                 className={observerSection === 'myPanel' ? 'active' : ''}
                 onClick={() => selectObserverSection('myPanel')}
               >
-                Kendi Modülüm
+                Toplu Görünüm
               </button>
               <button
                 type="button"
@@ -5517,19 +5517,12 @@ function App() {
               >
                 Günlük Harita
               </button>
-              <button
-                type="button"
-                className={observerSection === 'dutyList' ? 'active' : ''}
-                onClick={() => selectObserverSection('dutyList')}
-              >
-                Nöbet Listesi
-              </button>
             </div>
           </section>
 
           {observerSection === 'myPanel' ? (
             <section className="card fade-up delay-2">
-              <h2>Kendi İsmim</h2>
+              <h2>Toplu Görünüm</h2>
               <p className="subtext">
                 Bu bölüm sadece giriş yapan asistan hekimin seçili aydaki günlük çalışma yerlerini ve
                 nöbetlerini takvim üzerinde gösterir.
@@ -5569,6 +5562,27 @@ function App() {
                     ))}
                   </select>
                   <button type="button" className="secondary" onClick={openAssistantMonthlyTable}>
+                    Görüntüle
+                  </button>
+                </div>
+              </article>
+
+              <article className="focus-location my-calendar-export-launch">
+                <h3>Nöbet Listesi</h3>
+                <p className="subtext">Ayı seçip Görüntüle dediğinde nöbet tablosu ayrı sayfada açılır.</p>
+                <div className="form-row duty-list-launch-row">
+                  <select
+                    className="my-calendar-month-select"
+                    value={observerDutyMonthDraft}
+                    onChange={(event) => setObserverDutyMonthDraft(event.target.value)}
+                  >
+                    {myCalendarMonthOptions.map((option) => (
+                      <option key={`observer-duty-month-launch-${option.value}`} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                  <button type="button" className="secondary" onClick={openObserverDutyList}>
                     Görüntüle
                   </button>
                 </div>
@@ -5876,32 +5890,6 @@ function App() {
                 </div>
               </section>
             ))}
-            </section>
-          ) : null}
-
-          {observerSection === 'dutyList' ? (
-            <section className="card fade-up delay-3">
-              <h2>Nöbet Listesi</h2>
-              <p className="subtext">
-                Ayı seçip Görüntüle dediğinde nöbet tablosu ayrı sayfada açılır.
-              </p>
-
-              <div className="form-row duty-list-launch-row">
-                <select
-                  className="my-calendar-month-select"
-                  value={observerDutyMonthDraft}
-                  onChange={(event) => setObserverDutyMonthDraft(event.target.value)}
-                >
-                  {myCalendarMonthOptions.map((option) => (
-                    <option key={`observer-duty-month-launch-${option.value}`} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-                <button type="button" className="secondary" onClick={openObserverDutyList}>
-                  Görüntüle
-                </button>
-              </div>
             </section>
           ) : null}
 

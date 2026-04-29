@@ -11,11 +11,20 @@
   -moz-osx-font-smoothing: grayscale;
 }
 
+html,
+body,
+#root {
+  width: 100%;
+  max-width: 100%;
+}
+
 body {
   margin: 0;
   min-width: 320px;
   min-height: 100vh;
   overflow-x: hidden;
+  touch-action: pan-y pinch-zoom;
+  overscroll-behavior-x: none;
   background:
     radial-gradient(circle at 8% 5%, rgba(245, 182, 162, 0.35), transparent 30%),
     radial-gradient(circle at 88% 16%, rgba(184, 223, 242, 0.4), transparent 35%),
