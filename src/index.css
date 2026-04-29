@@ -15,6 +15,7 @@ body {
   margin: 0;
   min-width: 320px;
   min-height: 100vh;
+  overflow-x: hidden;
   background:
     radial-gradient(circle at 8% 5%, rgba(245, 182, 162, 0.35), transparent 30%),
     radial-gradient(circle at 88% 16%, rgba(184, 223, 242, 0.4), transparent 35%),
@@ -39,6 +40,7 @@ body::before {
 
 #root {
   min-height: 100vh;
+  overflow-x: clip;
 }
 
 h1,

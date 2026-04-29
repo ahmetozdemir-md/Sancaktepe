@@ -294,23 +294,58 @@ h4 {
   gap: 0.55rem;
 }
 
-.quick-user-list {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.45rem;
+.login-actions button.active {
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.22);
+  transform: translateY(-1px);
 }
 
-.quick-user-list button {
-  background: rgba(47, 143, 115, 0.1);
-  color: var(--mint-strong);
-  border: 1px solid rgba(47, 143, 115, 0.25);
-  padding: 0.42rem 0.62rem;
-  font-size: 0.82rem;
+.assistant-user-picker {
+  position: relative;
 }
 
-.quick-user-list button.active {
-  background: linear-gradient(135deg, #226f5a, #2f8f73);
-  color: #fff;
+.assistant-user-picker-list {
+  position: absolute;
+  z-index: 30;
+  left: 0;
+  right: 0;
+  top: calc(100% + 0.32rem);
+  max-height: 260px;
+  overflow-y: auto;
+  border: 1px solid rgba(108, 119, 113, 0.4);
+  border-radius: 12px;
+  background: #fffdf9;
+  box-shadow: 0 16px 30px rgba(33, 42, 37, 0.16);
+  padding: 0.34rem;
+  display: grid;
+  gap: 0.24rem;
+}
+
+.assistant-user-picker-list button {
+  width: 100%;
+  display: grid;
+  justify-items: start;
+  text-align: left;
+  gap: 0.12rem;
+  border-radius: 10px;
+  border: 1px solid rgba(82, 127, 110, 0.28);
+  background: rgba(227, 244, 236, 0.55);
+  color: var(--ink-900);
+  padding: 0.42rem 0.56rem;
+}
+
+.assistant-user-picker-list button strong {
+  font-size: 0.86rem;
+  font-weight: 700;
+}
+
+.assistant-user-picker-list button small {
+  font-size: 0.72rem;
+  color: var(--ink-500);
+}
+
+.assistant-user-picker-list .empty {
+  padding: 0.35rem 0.46rem;
+  font-size: 0.78rem;
 }
 
 .section-switcher {
@@ -1428,6 +1463,52 @@ button.assistant-chip:active {
   font-size: 0.8rem;
 }
 
+.assistant-monthly-table-page {
+  display: grid;
+  gap: 0.7rem;
+}
+
+.assistant-monthly-table-toolbar {
+  display: grid;
+  grid-template-columns: auto minmax(180px, 260px) auto;
+  gap: 0.45rem;
+  align-items: center;
+  justify-content: start;
+}
+
+.assistant-monthly-table-sheet {
+  border: 1px solid rgba(70, 81, 75, 0.28);
+  border-radius: 14px;
+  background: #fff;
+  padding: 0.65rem;
+}
+
+.assistant-monthly-table-sheet h1 {
+  margin: 0;
+  font-size: clamp(1.2rem, 2vw, 1.75rem);
+  color: #1d2a26;
+}
+
+.assistant-monthly-table-sheet > p {
+  margin: 0.2rem 0 0.55rem;
+  color: #5f7169;
+  font-weight: 600;
+  text-transform: capitalize;
+}
+
+.assistant-monthly-calendar-scroll {
+  margin-top: 0.28rem;
+}
+
+.assistant-monthly-table-sheet .my-calendar-weekdays,
+.assistant-monthly-table-sheet .my-calendar-grid {
+  min-width: 980px;
+}
+
+.assistant-monthly-table-sheet .my-calendar-cell {
+  min-height: 124px;
+}
+
 .my-summary-grid {
   margin-top: 0.7rem;
   display: grid;
@@ -1540,6 +1621,29 @@ button.assistant-chip:active {
 
 .my-calendar-panel {
   margin-top: 0.95rem;
+}
+
+.my-calendar-export-launch {
+  margin-top: 0.9rem;
+}
+
+.my-calendar-export-launch h3 {
+  margin: 0 0 0.25rem;
+}
+
+.my-calendar-export-row {
+  grid-template-columns: minmax(170px, 250px) auto;
+  align-items: center;
+}
+
+.my-calendar-export-row .secondary {
+  min-height: 36px;
+  padding: 0.4rem 0.9rem;
+}
+
+.duty-list-launch-row {
+  grid-template-columns: minmax(170px, 260px) auto;
+  align-items: center;
 }
 
 .my-calendar-toolbar {
@@ -1857,7 +1961,7 @@ code {
   }
 
   .app-shell {
-    padding-bottom: calc(4.8rem + env(safe-area-inset-bottom));
+    padding-bottom: 0;
   }
 
   .topbar {
@@ -1868,115 +1972,14 @@ code {
     align-items: center;
   }
 
-  .mobile-menu-trigger {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-  }
-
   .top-controls {
-    display: none;
-  }
-
-  .top-controls.open {
-    position: fixed;
     display: grid;
     gap: 0.55rem;
-    left: 0.65rem;
-    right: 0.65rem;
-    top: 0.7rem;
-    z-index: 60;
-    padding: 0.75rem;
-    border-radius: 16px;
-    border: 1px solid rgba(112, 120, 116, 0.3);
-    background: rgba(255, 253, 247, 0.98);
-    box-shadow: 0 14px 34px rgba(18, 38, 31, 0.2);
-    backdrop-filter: blur(8px);
-  }
-
-  .mobile-menu-head {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 0.5rem;
-  }
-
-  .mobile-menu-head strong {
-    color: var(--ink-900);
-    font-size: 0.84rem;
-    letter-spacing: 0.03em;
-  }
-
-  .mobile-menu-head .ghost-button {
-    min-height: 32px;
-    padding: 0.32rem 0.55rem;
-    font-size: 0.78rem;
-  }
-
-  .mobile-menu-backdrop {
-    display: block;
-    position: fixed;
-    inset: 0;
-    z-index: 55;
-    background: rgba(21, 29, 26, 0.34);
-    border: none;
-    border-radius: 0;
     padding: 0;
   }
 
-  .mobile-menu-backdrop:hover,
-  .mobile-menu-backdrop:active {
-    transform: none;
-    box-shadow: none;
-  }
-
   .section-switcher {
-    display: none;
-  }
-
-  .mobile-module-nav {
-    position: fixed;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    z-index: 46;
-    display: flex;
-    flex-wrap: nowrap;
-    gap: 0.45rem;
-    overflow-x: auto;
-    padding: 0.52rem 0.65rem calc(0.52rem + env(safe-area-inset-bottom));
-    background: rgba(255, 253, 247, 0.98);
-    border-top: 1px solid rgba(112, 120, 116, 0.25);
-    -webkit-overflow-scrolling: touch;
-    scrollbar-width: thin;
-    backdrop-filter: blur(8px);
-  }
-
-  .mobile-module-nav button {
-    flex: 0 0 auto;
-    min-width: 108px;
-    padding: 0.5rem 0.6rem;
-    border-radius: 10px;
-    background: #eef2eb;
-    border: 1px solid rgba(87, 98, 92, 0.2);
-    color: var(--ink-900);
-    font-size: 0.76rem;
-    line-height: 1.2;
-    text-align: center;
-    box-shadow: none;
-    transform: none;
-  }
-
-  .mobile-module-nav button:hover,
-  .mobile-module-nav button:active {
-    transform: none;
-    box-shadow: none;
-  }
-
-  .mobile-module-nav button.active {
-    background: linear-gradient(135deg, #226f5a, #2f8f73);
-    color: #fff;
-    border-color: rgba(47, 143, 115, 0.45);
+    display: block;
   }
 
   .session-role {
@@ -2170,14 +2173,12 @@ code {
     font-size: 0.68rem;
   }
 
-  .quick-user-list {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+  .assistant-user-picker-list {
+    max-height: 220px;
   }
 
-  .quick-user-list button {
-    width: 100%;
-    text-align: center;
+  .assistant-user-picker-list button {
+    padding: 0.38rem 0.5rem;
   }
 
   .assistant-chip-name {
@@ -2203,12 +2204,44 @@ code {
   .planner-day-tabs button,
   .subpanel-toggle button {
     flex: 0 0 auto;
-    min-width: 140px;
+    min-width: 120px;
     white-space: nowrap;
     text-align: center;
   }
 
   .planner-day-tabs button {
+    text-align: left;
+  }
+
+  .subpanel-toggle.observer-toggle {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    overflow: visible;
+    gap: 0.45rem;
+    padding-bottom: 0;
+  }
+
+  .subpanel-toggle.observer-toggle button {
+    min-width: 0;
+    white-space: normal;
+    text-align: center;
+    line-height: 1.2;
+  }
+
+  .planner-day-tabs.observer-week-tabs,
+  .planner-day-tabs.observer-day-tabs {
+    display: grid;
+    grid-template-columns: 1fr;
+    overflow: visible;
+    gap: 0.4rem;
+    padding-bottom: 0;
+  }
+
+  .planner-day-tabs.observer-week-tabs button,
+  .planner-day-tabs.observer-day-tabs button {
+    min-width: 0;
+    white-space: normal;
+    line-height: 1.25;
     text-align: left;
   }
 
@@ -2237,6 +2270,28 @@ code {
   .my-calendar-toolbar select {
     min-width: 100%;
     max-width: 100%;
+  }
+
+  .my-calendar-export-row {
+    grid-template-columns: 1fr;
+  }
+
+  .duty-list-launch-row {
+    grid-template-columns: 1fr;
+  }
+
+  .assistant-monthly-table-toolbar {
+    grid-template-columns: 1fr;
+    justify-items: stretch;
+  }
+
+  .assistant-monthly-table-sheet .my-calendar-weekdays,
+  .assistant-monthly-table-sheet .my-calendar-grid {
+    min-width: 760px;
+  }
+
+  .assistant-monthly-table-sheet .my-calendar-cell {
+    min-height: 96px;
   }
 
   .my-calendar-cell {
@@ -2357,6 +2412,10 @@ code {
     gap: 0.35rem;
   }
 
+  .assistant-monthly-table-page {
+    gap: 0.35rem;
+  }
+
   .weekly-export-sheet {
     border: none;
     border-radius: 0;
@@ -2404,5 +2463,33 @@ code {
   .weekly-export-name-stack span {
     font-size: 0.95rem;
     font-weight: 800;
+  }
+
+  .assistant-monthly-table-sheet {
+    border: none;
+    border-radius: 0;
+    box-shadow: none;
+    padding: 0;
+    background: #fff !important;
+  }
+
+  .assistant-monthly-table-sheet .my-calendar-scroll {
+    overflow: visible;
+    border: none !important;
+  }
+
+  .assistant-monthly-table-sheet .my-calendar-weekdays,
+  .assistant-monthly-table-sheet .my-calendar-grid {
+    min-width: 100%;
+  }
+
+  .assistant-monthly-table-sheet .my-calendar-cell,
+  .assistant-monthly-table-sheet .my-calendar-weekdays span,
+  .assistant-monthly-table-sheet .my-calendar-location,
+  .assistant-monthly-table-sheet .my-calendar-duty,
+  .assistant-monthly-table-sheet .my-calendar-holiday-reason {
+    color: #000 !important;
+    border-color: #000 !important;
+    background: #fff !important;
   }
 }

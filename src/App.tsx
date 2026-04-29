@@ -7,12 +7,15 @@ import {
   REMOTE_STATE_TABLE,
   supabase,
 } from './supabase'
-import portalCalendarIcon from './assets/calendar-portal.png'
 import WeeklyRotaExportView, {
   type WeeklyRotaExportDay,
   type WeeklyRotaExportGroup,
   type WeeklyRotaExportRow,
 } from './WeeklyRotaExportView'
+import AssistantMonthlyTableView, {
+  type AssistantMonthlyCalendarCell,
+  type AssistantMonthlyCalendarDayData,
+} from './AssistantMonthlyTableView'
 
 type PanelMode = 'admin' | 'observer'
 type AdminSection = 'assistants' | 'locations' | 'duty' | 'planner'
@@ -109,6 +112,11 @@ interface DutyParseIssue {
   rawLine: string
 }
 
+interface AssistantAccount {
+  assistantName: string
+  username: string
+}
+
 interface RemotePortalPayload {
   plannerState?: unknown
   userBindings?: unknown
@@ -119,7 +127,6 @@ const USER_BINDING_KEY = 'assistant-user-binding-v1'
 const LAST_ASSISTANT_USER_KEY = 'assistant-last-user-v1'
 const CLOUD_READ_ONLY_TEXT = 'Bulut salt-okunur modda (yerelden buluta yazma kapalı).'
 const APP_PASSWORD = '1234'
-const ALLOWED_ASSISTANT_USERS = ['ahmetozdemir', 'ilkerermis', 'ebubekirozgur'] as const
 const DUTY_SITES: DutySite[] = ['Sancaktepe', 'Feriha Öz', 'Çekmeköy']
 const REMOTE_SAVE_DEBOUNCE_MS = 900
 const DUTY_SITE_ORDER = new Map<DutySite, number>(
@@ -559,6 +566,13 @@ function normalizeAssistantName(rawName: string): string {
         .join(''),
     )
     .join(' ')
+}
+
+function buildAssistantAccounts(assistants: string[]): AssistantAccount[] {
+  return uniqueSortedNames(assistants).map((assistantName) => ({
+    assistantName,
+    username: assistantName.toLocaleLowerCase('tr'),
+  }))
 }
 
 function hashString(value: string): number {
@@ -1786,12 +1800,12 @@ function sanitizeUserBindings(raw: unknown): Record<string, string> {
     Object.entries(raw as Record<string, unknown>)
       .filter(([username, assistantName]) => {
         return (
-          ALLOWED_ASSISTANT_USERS.includes(username as (typeof ALLOWED_ASSISTANT_USERS)[number]) &&
+          username.trim().length > 0 &&
           typeof assistantName === 'string' &&
           assistantName.trim().length > 0
         )
       })
-      .map(([username, assistantName]) => [username, String(assistantName).trim()]),
+      .map(([username, assistantName]) => [username.trim().toLocaleLowerCase('tr'), String(assistantName).trim()]),
   )
 }
 
@@ -1824,16 +1838,10 @@ function App() {
   const [observerSection, setObserverSection] = useState<ObserverSection>('myPanel')
   const [plannerView, setPlannerView] = useState<PlannerView>('rooms')
   const [session, setSession] = useState<SessionInfo | null>(null)
-  const [entryStep, setEntryStep] = useState<'welcome' | 'login'>('welcome')
   const [loginView, setLoginView] = useState<'choose' | 'admin' | 'assistant'>('choose')
-  const [selectedPortalApp, setSelectedPortalApp] = useState<'none' | 'scheduler'>('none')
-  const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
-  const [isMobileViewport, setIsMobileViewport] = useState(
-    typeof window !== 'undefined' ? window.matchMedia('(max-width: 980px)').matches : false,
-  )
   const [passwordInput, setPasswordInput] = useState('')
   const [assistantUsernameInput, setAssistantUsernameInput] = useState('')
-  const [assistantIdentityInput, setAssistantIdentityInput] = useState('')
+  const [assistantUserPickerOpen, setAssistantUserPickerOpen] = useState(false)
   const [data, setData] = useState<PlannerState>(() => safeReadState())
   const [userBindings, setUserBindings] = useState<Record<string, string>>(() => safeReadUserBindings())
   const [notice, setNotice] = useState<Notice | null>(null)
@@ -1871,9 +1879,16 @@ function App() {
 
   const [observerAssistant, setObserverAssistant] = useState('')
   const [observerMonth, setObserverMonth] = useState(currentMonthISO)
+  const [assistantTableMonthDraft, setAssistantTableMonthDraft] = useState(currentMonthISO)
+  const [assistantTableMonthActive, setAssistantTableMonthActive] = useState(currentMonthISO)
+  const [assistantMonthlyTableOpen, setAssistantMonthlyTableOpen] = useState(false)
+  const [observerDutyMonthDraft, setObserverDutyMonthDraft] = useState(currentMonthISO)
+  const [observerDutyMonthActive, setObserverDutyMonthActive] = useState(currentMonthISO)
+  const [observerDutyListOpen, setObserverDutyListOpen] = useState(false)
   const [activeObserverWeek, setActiveObserverWeek] = useState('')
   const [observerDay, setObserverDay] = useState('')
   const [observerWeekRoom, setObserverWeekRoom] = useState('')
+  const [observerWeekDutySite, setObserverWeekDutySite] = useState<DutySite>('Sancaktepe')
   const [plannerMonth, setPlannerMonth] = useState(currentMonthISO)
   const [activePlannerDay, setActivePlannerDay] = useState(todayISO)
   const [plannerWeeklyExportOpen, setPlannerWeeklyExportOpen] = useState(false)
@@ -1977,6 +1992,26 @@ function App() {
         names: data.assistants.filter((assistant) => data.assistantRanks[assistant] === level),
       })),
     [assistantGroupLevels, data.assistantRanks, data.assistants],
+  )
+  const assistantAccounts = useMemo(() => buildAssistantAccounts(data.assistants), [data.assistants])
+  const assistantLoginQuery = assistantUsernameInput.trim().toLocaleLowerCase('tr')
+  const assistantLoginQueryCanonical = normalizeAssistantName(assistantUsernameInput).toLocaleLowerCase('tr')
+  const filteredAssistantAccounts = useMemo(() => {
+    if (!assistantLoginQuery) {
+      return assistantAccounts
+    }
+    return assistantAccounts.filter((account) => {
+      const name = account.assistantName.toLocaleLowerCase('tr')
+      return name.includes(assistantLoginQuery)
+    })
+  }, [assistantAccounts, assistantLoginQuery])
+  const matchedAssistantAccount = useMemo(
+    () =>
+      assistantAccounts.find((account) => {
+        const lowerName = account.assistantName.toLocaleLowerCase('tr')
+        return lowerName === assistantLoginQuery || lowerName === assistantLoginQueryCanonical
+      }) ?? null,
+    [assistantAccounts, assistantLoginQuery, assistantLoginQueryCanonical],
   )
   const ownersForSelectedMonth = useMemo(
     () => getLocationOwnersForMonth(data, ownersMonth),
@@ -2214,21 +2249,72 @@ function App() {
   }, [cloudPayload])
 
   useEffect(() => {
-    if (loginView !== 'assistant' || assistantUsernameInput.trim()) {
+    if ((loginView !== 'assistant' && loginView !== 'choose') || assistantUsernameInput.trim()) {
       return
     }
     if (typeof window === 'undefined') {
       return
     }
 
-    const lastUser = localStorage.getItem(LAST_ASSISTANT_USER_KEY)?.trim().toLocaleLowerCase('tr') ?? ''
-    if (
-      lastUser &&
-      ALLOWED_ASSISTANT_USERS.includes(lastUser as (typeof ALLOWED_ASSISTANT_USERS)[number])
-    ) {
-      setAssistantUsernameInput(lastUser)
+    const lastUser = localStorage.getItem(LAST_ASSISTANT_USER_KEY)?.trim() ?? ''
+    if (!lastUser) {
+      return
     }
-  }, [assistantUsernameInput, loginView])
+    const lowerLastUser = lastUser.toLocaleLowerCase('tr')
+    const exactByName = data.assistants.find((assistant) => assistant.toLocaleLowerCase('tr') === lowerLastUser)
+    if (exactByName) {
+      if (loginView === 'choose') {
+        setLoginView('assistant')
+      }
+      setAssistantUsernameInput(exactByName)
+      return
+    }
+    const byAccount = assistantAccounts.find((account) => account.username === lowerLastUser)
+    if (byAccount) {
+      if (loginView === 'choose') {
+        setLoginView('assistant')
+      }
+      setAssistantUsernameInput(byAccount.assistantName)
+    }
+  }, [assistantAccounts, assistantUsernameInput, data.assistants, loginView])
+
+  useEffect(() => {
+    setUserBindings((previous) => {
+      const validNameByKey = new Map(
+        data.assistants.map((assistant) => [assistant.toLocaleLowerCase('tr'), assistant] as const),
+      )
+      const next = Object.fromEntries(
+        Object.entries(previous).flatMap(([rawKey, rawValue]) => {
+          const key = rawKey.trim().toLocaleLowerCase('tr')
+          const value = normalizeAssistantName(String(rawValue))
+          if (!value) {
+            return []
+          }
+          const validName = validNameByKey.get(value.toLocaleLowerCase('tr'))
+          if (!validName || key !== validName.toLocaleLowerCase('tr')) {
+            return []
+          }
+          return [[validName.toLocaleLowerCase('tr'), validName] as const]
+        }),
+      ) as Record<string, string>
+
+      const previousKeys = Object.keys(previous)
+      const nextKeys = Object.keys(next)
+      if (
+        previousKeys.length === nextKeys.length &&
+        previousKeys.every((key) => previous[key] === next[key])
+      ) {
+        return previous
+      }
+      return next
+    })
+  }, [data.assistants])
+
+  useEffect(() => {
+    if (loginView !== 'assistant' && assistantUserPickerOpen) {
+      setAssistantUserPickerOpen(false)
+    }
+  }, [assistantUserPickerOpen, loginView])
 
   useEffect(() => {
     setData((previous) =>
@@ -2242,29 +2328,6 @@ function App() {
   }, [currentWeekStartISO])
 
   useEffect(() => {
-    if (typeof window === 'undefined') {
-      return
-    }
-
-    const media = window.matchMedia('(max-width: 980px)')
-    const applyViewport = () => {
-      setIsMobileViewport(media.matches)
-      if (!media.matches) {
-        setMobileMenuOpen(false)
-      }
-    }
-
-    applyViewport()
-    if (typeof media.addEventListener === 'function') {
-      media.addEventListener('change', applyViewport)
-      return () => media.removeEventListener('change', applyViewport)
-    }
-
-    media.addListener(applyViewport)
-    return () => media.removeListener(applyViewport)
-  }, [])
-
-  useEffect(() => {
     if (!session) {
       return
     }
@@ -2272,6 +2335,12 @@ function App() {
     setMode(session.role === 'admin' ? 'admin' : 'observer')
     if (session.role === 'assistant') {
       setObserverSection('myPanel')
+      setAssistantMonthlyTableOpen(false)
+      setObserverDutyListOpen(false)
+      setAssistantTableMonthDraft(observerMonth)
+      setAssistantTableMonthActive(observerMonth)
+      setObserverDutyMonthDraft(observerMonth)
+      setObserverDutyMonthActive(observerMonth)
       if (session.assistantName) {
         setObserverAssistant(session.assistantName)
       }
@@ -2390,9 +2459,6 @@ function App() {
     }
   }
 
-  const normalizedAssistantUsername = assistantUsernameInput.trim().toLocaleLowerCase('tr')
-  const linkedAssistant = userBindings[normalizedAssistantUsername] ?? ''
-
   const loginAsAdmin = () => {
     if (passwordInput.trim() !== APP_PASSWORD) {
       showWarning('Şifre hatalı. Lütfen tekrar dene.')
@@ -2400,70 +2466,59 @@ function App() {
     }
 
     setSession({ role: 'admin' })
-    setSelectedPortalApp('none')
     setPasswordInput('')
     setNotice(null)
   }
 
   const loginAsAssistant = () => {
-    if (!ALLOWED_ASSISTANT_USERS.includes(normalizedAssistantUsername as (typeof ALLOWED_ASSISTANT_USERS)[number])) {
-      showWarning('Bu kullanıcı adı tanımlı değil. Örnek: ahmetozdemir')
+    if (!matchedAssistantAccount) {
+      showWarning('Lütfen listede bulunan bir asistan ismi seç.')
       return
     }
 
-    const existingBinding = userBindings[normalizedAssistantUsername]
-    const hasValidExistingBinding =
-      typeof existingBinding === 'string' && data.assistants.includes(existingBinding)
-
-    const selectedAssistantName = hasValidExistingBinding
-      ? existingBinding
-      : assistantIdentityInput.trim()
-
-    if (!selectedAssistantName || !data.assistants.includes(selectedAssistantName)) {
-      showWarning('Giriş için asistan listesinden bir isim seçmelisin.')
-      return
-    }
+    const selectedAssistantName = matchedAssistantAccount.assistantName
+    const selectedUsername = matchedAssistantAccount.username
 
     setUserBindings((previous) => ({
       ...previous,
-      [normalizedAssistantUsername]: selectedAssistantName,
+      [selectedUsername]: selectedAssistantName,
     }))
 
     setSession({
       role: 'assistant',
-      username: normalizedAssistantUsername,
+      username: selectedUsername,
       assistantName: selectedAssistantName,
     })
-    setSelectedPortalApp('none')
     if (typeof window !== 'undefined') {
-      localStorage.setItem(LAST_ASSISTANT_USER_KEY, normalizedAssistantUsername)
+      localStorage.setItem(LAST_ASSISTANT_USER_KEY, selectedAssistantName)
     }
     setNotice(null)
     setObserverAssistant(selectedAssistantName)
+    setAssistantTableMonthDraft(observerMonth)
+    setAssistantTableMonthActive(observerMonth)
+    setAssistantMonthlyTableOpen(false)
+    setAssistantUserPickerOpen(false)
   }
 
   const logout = () => {
     setSession(null)
-    setEntryStep('welcome')
     setLoginView('choose')
-    setSelectedPortalApp('none')
     setPlannerWeeklyExportOpen(false)
-    setMobileMenuOpen(false)
+    setAssistantMonthlyTableOpen(false)
+    setObserverDutyListOpen(false)
     setMode('admin')
     setPasswordInput('')
     setAssistantUsernameInput('')
-    setAssistantIdentityInput('')
+    setAssistantUserPickerOpen(false)
     setNotice(null)
   }
 
   const selectAdminSection = (section: AdminSection) => {
     setAdminSection(section)
-    setMobileMenuOpen(false)
   }
 
   const selectObserverSection = (section: ObserverSection) => {
     setObserverSection(section)
-    setMobileMenuOpen(false)
   }
 
   useEffect(() => {
@@ -2474,10 +2529,9 @@ function App() {
     if (!session.assistantName || !data.assistants.includes(session.assistantName)) {
       showWarning('Asistan eşleşmesi bulunamadı. Lütfen tekrar giriş yapıp asistan seç.')
       setSession(null)
-      setEntryStep('login')
       setLoginView('assistant')
-      setAssistantUsernameInput(session.username ?? '')
-      setAssistantIdentityInput('')
+      setAssistantUsernameInput(session.assistantName ?? '')
+      setAssistantUserPickerOpen(false)
     }
   }, [data.assistants, session])
 
@@ -2696,6 +2750,48 @@ function App() {
     )
   }
 
+  const openAssistantMonthlyTable = () => {
+    if (!isValidMonthISO(assistantTableMonthDraft)) {
+      showWarning('Önce geçerli bir ay seçmelisin.')
+      return
+    }
+    setAssistantTableMonthActive(assistantTableMonthDraft)
+    setAssistantMonthlyTableOpen(true)
+  }
+
+  const applyAssistantMonthlyTableMonth = () => {
+    if (!isValidMonthISO(assistantTableMonthDraft)) {
+      showWarning('Geçerli bir ay seçmeden görüntüleyemezsin.')
+      return
+    }
+    setAssistantTableMonthActive(assistantTableMonthDraft)
+  }
+
+  const closeAssistantMonthlyTable = () => {
+    setAssistantMonthlyTableOpen(false)
+  }
+
+  const openObserverDutyList = () => {
+    if (!isValidMonthISO(observerDutyMonthDraft)) {
+      showWarning('Önce geçerli bir ay seçmelisin.')
+      return
+    }
+    setObserverDutyMonthActive(observerDutyMonthDraft)
+    setObserverDutyListOpen(true)
+  }
+
+  const applyObserverDutyMonth = () => {
+    if (!isValidMonthISO(observerDutyMonthDraft)) {
+      showWarning('Geçerli bir ay seçmeden görüntüleyemezsin.')
+      return
+    }
+    setObserverDutyMonthActive(observerDutyMonthDraft)
+  }
+
+  const closeObserverDutyList = () => {
+    setObserverDutyListOpen(false)
+  }
+
   const saveOwnersMonth = () => {
     if (!ownersEditMode) {
       return
@@ -2805,7 +2901,7 @@ function App() {
         [candidate]: toSafeSeniorityLevel(assistantRankInput, 1),
       })
 
-      showSuccess(`${candidate} ${assistantRankInput}. kıdem olarak asistan havuzuna eklendi.`)
+      showSuccess(`${candidate} ${assistantRankInput}. kıdem olarak eklendi.`)
       return {
         ...previous,
         assistants: nextAssistants,
@@ -3715,6 +3811,19 @@ function App() {
     })
   }, [data, observerWeekRoom, sortedLocations, weekDays])
 
+  const weekDutyAssignmentsForSite = useMemo(() => {
+    return weekDays.map((day) => {
+      const names = sortDutyAssignments(
+        (data.dutyRoster[day.key] ?? []).filter((entry) => entry.site === observerWeekDutySite),
+        data.assistantRanks,
+      ).map((entry) => entry.name)
+      return {
+        day,
+        names,
+      }
+    })
+  }, [data.assistantRanks, data.dutyRoster, observerWeekDutySite, weekDays])
+
   const loggedAssistantName = session?.role === 'assistant' ? session.assistantName ?? '' : ''
   const myWeekAssignments = useMemo(() => {
     if (!loggedAssistantName) {
@@ -3782,6 +3891,30 @@ function App() {
       year: 'numeric',
     })
   }, [observerMonth])
+  const assistantTableMonthTitle = useMemo(() => {
+    const [yearRaw, monthRaw] = assistantTableMonthActive.split('-')
+    const year = Number(yearRaw)
+    const month = Number(monthRaw)
+    if (Number.isNaN(year) || Number.isNaN(month) || month < 1 || month > 12) {
+      return assistantTableMonthActive
+    }
+    return new Date(year, month - 1, 1).toLocaleDateString('tr-TR', {
+      month: 'long',
+      year: 'numeric',
+    })
+  }, [assistantTableMonthActive])
+  const observerDutyMonthTitle = useMemo(() => {
+    const [yearRaw, monthRaw] = observerDutyMonthActive.split('-')
+    const year = Number(yearRaw)
+    const month = Number(monthRaw)
+    if (Number.isNaN(year) || Number.isNaN(month) || month < 1 || month > 12) {
+      return observerDutyMonthActive
+    }
+    return new Date(year, month - 1, 1).toLocaleDateString('tr-TR', {
+      month: 'long',
+      year: 'numeric',
+    })
+  }, [observerDutyMonthActive])
   const myCalendarSelectedYear = useMemo(() => Number(observerMonth.slice(0, 4)), [observerMonth])
   const myCalendarMonthOptions = useMemo(() => {
     const months = new Set<string>()
@@ -3824,6 +3957,36 @@ function App() {
     }
   }, [currentMonthISO, myCalendarMonthOptions, observerMonth])
 
+  useEffect(() => {
+    if (!myCalendarMonthOptions.length) {
+      return
+    }
+    const availableMonths = myCalendarMonthOptions.map((option) => option.value)
+    if (!availableMonths.includes(assistantTableMonthDraft)) {
+      const fallback = availableMonths[availableMonths.length - 1] ?? currentMonthISO
+      setAssistantTableMonthDraft(fallback)
+    }
+    if (!availableMonths.includes(assistantTableMonthActive)) {
+      const fallback = availableMonths[availableMonths.length - 1] ?? currentMonthISO
+      setAssistantTableMonthActive(fallback)
+    }
+    if (!availableMonths.includes(observerDutyMonthDraft)) {
+      const fallback = availableMonths[availableMonths.length - 1] ?? currentMonthISO
+      setObserverDutyMonthDraft(fallback)
+    }
+    if (!availableMonths.includes(observerDutyMonthActive)) {
+      const fallback = availableMonths[availableMonths.length - 1] ?? currentMonthISO
+      setObserverDutyMonthActive(fallback)
+    }
+  }, [
+    assistantTableMonthActive,
+    assistantTableMonthDraft,
+    currentMonthISO,
+    myCalendarMonthOptions,
+    observerDutyMonthActive,
+    observerDutyMonthDraft,
+  ])
+
   const myCalendarDayMap = useMemo(() => {
     const entries: Record<
       string,
@@ -3850,14 +4013,44 @@ function App() {
 
     return entries
   }, [data, loggedAssistantName, myCalendarWeeks, sortedLocations])
+  const assistantTableCalendarWeeks = useMemo<AssistantMonthlyCalendarCell[][]>(
+    () => buildMonthCalendarGrid(assistantTableMonthActive),
+    [assistantTableMonthActive],
+  )
+  const assistantTableCalendarDayMap = useMemo<Record<string, AssistantMonthlyCalendarDayData>>(() => {
+    if (!loggedAssistantName) {
+      return {}
+    }
+
+    const entries: Record<string, AssistantMonthlyCalendarDayData> = {}
+    assistantTableCalendarWeeks.flat().forEach((cell) => {
+      const dayKey = cell.key
+      const locations = sortedLocations
+        .filter(
+          (location) =>
+            location.kind !== 'duty' &&
+            location.kind !== 'postDuty' &&
+            getAssignmentsForLocation(data, dayKey, location).includes(loggedAssistantName),
+        )
+        .map((location) => `${location.site} / ${location.name}`)
+      const duty = (data.dutyRoster[dayKey] ?? []).find((entry) => entry.name === loggedAssistantName) ?? null
+      entries[dayKey] = {
+        dayTypeLabel: getDayTypeLabel(dayKey),
+        holidayReason: getOfficialHolidayReason(dayKey),
+        locations,
+        dutySite: duty?.site ?? null,
+      }
+    })
+    return entries
+  }, [assistantTableCalendarWeeks, data, loggedAssistantName, sortedLocations])
 
   const adminDutyTableModel = useMemo(
     () => buildDutyTableModel(data.dutyRoster, dutyMonth, data.assistantRanks),
     [data.assistantRanks, data.dutyRoster, dutyMonth],
   )
   const observerDutyTableModel = useMemo(
-    () => buildDutyTableModel(data.dutyRoster, observerMonth, data.assistantRanks),
-    [data.assistantRanks, data.dutyRoster, observerMonth],
+    () => buildDutyTableModel(data.dutyRoster, observerDutyMonthActive, data.assistantRanks),
+    [data.assistantRanks, data.dutyRoster, observerDutyMonthActive],
   )
   const selectedPlannerDay = useMemo(() => {
     if (!activePlannerDay) {
@@ -4399,28 +4592,6 @@ function App() {
   }
 
   if (!session) {
-    if (entryStep === 'welcome') {
-      return (
-        <div className="page-shell login-shell">
-          <section className="card login-card portal-welcome-card fade-up">
-            <p className="eyebrow">Portal</p>
-            <h1>Asistan Portalı</h1>
-            <p className="subtext">Günlük çalışma ve nöbet yönetimine güvenli giriş.</p>
-            <button
-              type="button"
-              onClick={() => {
-                setEntryStep('login')
-                setLoginView('choose')
-                setNotice(null)
-              }}
-            >
-              Girişe Geç
-            </button>
-          </section>
-        </div>
-      )
-    }
-
     return (
       <div className="page-shell login-shell">
         <section className="card login-card fade-up">
@@ -4428,16 +4599,18 @@ function App() {
           <h1>Asistan Portalı</h1>
           <p className="subtext">Giriş türünü seçip devam et.</p>
 
-          {loginView === 'choose' ? (
-            <div className="login-actions">
-              <button type="button" onClick={() => setLoginView('admin')}>
-                Admin
-              </button>
-              <button type="button" className="secondary" onClick={() => setLoginView('assistant')}>
-                Asistan Hekim
-              </button>
-            </div>
-          ) : null}
+          <div className="login-actions">
+            <button type="button" className={loginView === 'admin' ? 'active' : ''} onClick={() => setLoginView('admin')}>
+              Admin
+            </button>
+            <button
+              type="button"
+              className={loginView === 'assistant' ? 'secondary active' : 'secondary'}
+              onClick={() => setLoginView('assistant')}
+            >
+              Asistan Hekim
+            </button>
+          </div>
 
           {loginView === 'admin' ? (
             <>
@@ -4453,17 +4626,7 @@ function App() {
               </div>
               <div className="login-actions">
                 <button type="button" onClick={loginAsAdmin}>
-                  Admin Olarak Gir
-                </button>
-                <button
-                  type="button"
-                  className="ghost-button"
-                  onClick={() => {
-                    setLoginView('choose')
-                    setPasswordInput('')
-                  }}
-                >
-                  Tür Seçimine Dön
+                  Giriş
                 </button>
               </div>
             </>
@@ -4472,147 +4635,72 @@ function App() {
           {loginView === 'assistant' ? (
             <>
               <div className="date-control">
-                <label htmlFor="assistant-user">Kullanıcı Adı</label>
-                <input
-                  id="assistant-user"
-                  list="assistant-user-options"
-                  value={assistantUsernameInput}
-                  onChange={(event) => setAssistantUsernameInput(event.target.value)}
-                  placeholder="Örn: ahmetozdemir"
-                />
-                <datalist id="assistant-user-options">
-                  {ALLOWED_ASSISTANT_USERS.map((username) => (
-                    <option key={`username-option-${username}`} value={username} />
-                  ))}
-                </datalist>
-              </div>
-
-              <div className="quick-user-list">
-                {ALLOWED_ASSISTANT_USERS.map((username) => (
-                  <button
-                    key={`quick-user-${username}`}
-                    type="button"
-                    className={normalizedAssistantUsername === username ? 'active' : ''}
-                    onClick={() => setAssistantUsernameInput(username)}
-                  >
-                    {username}
-                  </button>
-                ))}
-              </div>
-
-              {normalizedAssistantUsername &&
-              ALLOWED_ASSISTANT_USERS.includes(
-                normalizedAssistantUsername as (typeof ALLOWED_ASSISTANT_USERS)[number],
-              ) &&
-              (!linkedAssistant || !data.assistants.includes(linkedAssistant)) ? (
-                <div className="date-control">
-                  <label htmlFor="assistant-identity">Asistan Listesinden Eşleştir</label>
-                  <select
-                    id="assistant-identity"
-                    value={assistantIdentityInput}
-                    onChange={(event) => setAssistantIdentityInput(event.target.value)}
-                  >
-                    <option value="">Asistan seç</option>
-                    {data.assistants.map((assistant) => (
-                      <option key={`identity-${assistant}`} value={assistant}>
-                        {assistant}
-                      </option>
-                    ))}
-                  </select>
+                <label htmlFor="assistant-user">Asistan İsmi</label>
+                <div className="assistant-user-picker">
+                  <input
+                    id="assistant-user"
+                    name="assistant-user-login"
+                    value={assistantUsernameInput}
+                    onFocus={() => setAssistantUserPickerOpen(true)}
+                    onBlur={() => {
+                      setTimeout(() => setAssistantUserPickerOpen(false), 120)
+                    }}
+                    onChange={(event) => {
+                      setAssistantUsernameInput(event.target.value)
+                      setAssistantUserPickerOpen(true)
+                    }}
+                    placeholder="İsim yaz (örn: Ahmet Özdemir)"
+                    autoComplete="new-password"
+                    autoCorrect="off"
+                    spellCheck={false}
+                    autoCapitalize="words"
+                  />
+                  {assistantUserPickerOpen ? (
+                    <div className="assistant-user-picker-list">
+                      {filteredAssistantAccounts.length ? (
+                        filteredAssistantAccounts.map((account) => (
+                          <button
+                            key={`assistant-user-option-${account.username}`}
+                            type="button"
+                            onMouseDown={(event) => event.preventDefault()}
+                            onClick={() => {
+                              setAssistantUsernameInput(account.assistantName)
+                              setAssistantUserPickerOpen(false)
+                            }}
+                          >
+                            <strong>{account.assistantName}</strong>
+                          </button>
+                        ))
+                      ) : (
+                        <span className="empty">Eşleşen kullanıcı yok.</span>
+                      )}
+                    </div>
+                  ) : null}
                 </div>
-              ) : null}
+                <p className="hint-text">
+                  Boşken tıklarsan tüm asistanları görürsün. Harf yazdıkça liste otomatik filtrelenir.
+                </p>
+              </div>
 
-              {linkedAssistant && data.assistants.includes(linkedAssistant) ? (
-                <p className="hint-text">Bu kullanıcı daha önce {linkedAssistant} ile eşleştirilmiş.</p>
+              {matchedAssistantAccount ? (
+                <p className="hint-text">
+                  Seçilen asistan: {matchedAssistantAccount.assistantName}
+                </p>
               ) : null}
 
               <div className="login-actions">
                 <button type="button" onClick={loginAsAssistant}>
-                  Asistan Olarak Gir
-                </button>
-                <button
-                  type="button"
-                  className="ghost-button"
-                  onClick={() => {
-                    setLoginView('choose')
-                    setAssistantUsernameInput('')
-                    setAssistantIdentityInput('')
-                  }}
-                >
-                  Tür Seçimine Dön
+                  Giriş
                 </button>
               </div>
             </>
           ) : null}
-
-          <button
-            type="button"
-            className="ghost-button"
-            onClick={() => {
-              setEntryStep('welcome')
-              setLoginView('choose')
-              setPasswordInput('')
-              setAssistantUsernameInput('')
-              setAssistantIdentityInput('')
-              setNotice(null)
-            }}
-          >
-            Ana Sayfaya Dön
-          </button>
 
           {notice ? (
             <div className={`notice ${notice.type === 'ok' ? 'success' : 'warning'}`}>
               {notice.text}
             </div>
           ) : null}
-        </section>
-      </div>
-    )
-  }
-
-  if (selectedPortalApp !== 'scheduler') {
-    return (
-      <div className="page-shell login-shell">
-        <section className="card portal-hub-card fade-up">
-          <div className="portal-hub-head">
-            <p className="eyebrow">Uygulamalar</p>
-            <h1>Asistan Portalı</h1>
-            <p className="subtext">Kullanmak istediğin modülü seç.</p>
-          </div>
-
-          <div className="portal-app-grid">
-            <button
-              type="button"
-              className="portal-app-card portal-app-card-active"
-              onClick={() => setSelectedPortalApp('scheduler')}
-            >
-              <span className="portal-app-icon-shell">
-                <span className="portal-app-icon-ring">
-                  <img src={portalCalendarIcon} alt="Günlük Çalışma ve Nöbet Listesi" />
-                </span>
-              </span>
-              <strong>Günlük Çalışma/Nöbet Listesi</strong>
-              <small>Atama, nöbet ve haftalık planlama ekranı</small>
-            </button>
-
-            <div className="portal-app-card portal-app-card-soon">
-              <span className="portal-app-soon-badge">Yakında</span>
-              <strong>Soru Bankası</strong>
-              <small>Sonraki aşamada eklenecek</small>
-            </div>
-
-            <div className="portal-app-card portal-app-card-soon">
-              <span className="portal-app-soon-badge">Yakında</span>
-              <strong>Hızlı Bilgiler</strong>
-              <small>Sonraki aşamada eklenecek</small>
-            </div>
-          </div>
-
-          <div className="portal-hub-actions">
-            <button type="button" className="ghost-button" onClick={logout}>
-              Çıkış Yap
-            </button>
-          </div>
         </section>
       </div>
     )
@@ -4635,72 +4723,97 @@ function App() {
     )
   }
 
+  if (session.role === 'assistant' && assistantMonthlyTableOpen) {
+    return (
+      <div className="page-shell weekly-export-shell">
+        <AssistantMonthlyTableView
+          assistantName={session.assistantName ?? loggedAssistantName}
+          monthOptions={myCalendarMonthOptions}
+          selectedMonth={assistantTableMonthDraft}
+          displayMonthLabel={assistantTableMonthTitle}
+          weeks={assistantTableCalendarWeeks}
+          dayDataMap={assistantTableCalendarDayMap}
+          todayISO={todayISO}
+          onSelectMonth={setAssistantTableMonthDraft}
+          onApplyMonth={applyAssistantMonthlyTableMonth}
+          onClose={closeAssistantMonthlyTable}
+        />
+      </div>
+    )
+  }
+
+  if (session.role === 'assistant' && observerDutyListOpen) {
+    return (
+      <div className="page-shell weekly-export-shell">
+        <div className="assistant-monthly-table-page">
+          <div className="assistant-monthly-table-toolbar no-print">
+            <button type="button" className="ghost-button" onClick={closeObserverDutyList}>
+              Geri Dön
+            </button>
+            <select
+              className="my-calendar-month-select"
+              value={observerDutyMonthDraft}
+              onChange={(event) => setObserverDutyMonthDraft(event.target.value)}
+            >
+              {myCalendarMonthOptions.map((option) => (
+                <option key={`observer-duty-page-month-${option.value}`} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+            <button type="button" className="secondary" onClick={applyObserverDutyMonth}>
+              Görüntüle
+            </button>
+          </div>
+
+          <section className="assistant-monthly-table-sheet duty-list-module">
+            <h1>{session.assistantName ?? 'Asistan'} - Aylık Nöbet Listesi</h1>
+            <p>{observerDutyMonthTitle}</p>
+            {renderDutyListTable(observerDutyTableModel, 'observer-duty-page')}
+          </section>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="page-shell app-shell">
-      {mobileMenuOpen ? (
-        <button
-          type="button"
-          className="mobile-menu-backdrop"
-          aria-label="Menüyü kapat"
-          onClick={() => setMobileMenuOpen(false)}
-        />
-      ) : null}
-
       <header className="topbar card fade-up">
         <div className="topbar-title">
           <div>
             <p className="eyebrow">Planlama</p>
             <h1>Çalışma Listesi Portalı</h1>
           </div>
-          <button
-            type="button"
-            className="ghost-button mobile-menu-trigger"
-            aria-label="Hızlı menü"
-            onClick={() => setMobileMenuOpen((previous) => !previous)}
-          >
-            Menü
-          </button>
         </div>
 
-        <div className={`top-controls ${mobileMenuOpen ? 'open' : ''}`}>
-          <div className="mobile-menu-head">
-            <strong>Hızlı Menü</strong>
-            <button
-              type="button"
-              className="ghost-button"
-              onClick={() => setMobileMenuOpen(false)}
-            >
-              Kapat
-            </button>
-          </div>
+        <div className="top-controls">
+          {session.role === 'admin' ? (
+            <>
+              <div className="session-role">
+                <span>Aktif Giriş</span>
+                <strong>Admin</strong>
+              </div>
 
-          <div className="session-role">
-            <span>Aktif Giriş</span>
-            <strong>
-              {session.role === 'admin'
-                ? 'Admin'
-                : `Asistan Hekim (${session.assistantName ?? session.username ?? 'Bilinmiyor'})`}
-            </strong>
-          </div>
-
-          <div className={`session-role cloud-sync cloud-${cloudState}`}>
-            <span>Bulut Senkron</span>
-            <strong>{isCloudSaving ? 'Kaydediliyor...' : cloudStateText}</strong>
-            {cloudLastSavedAt ? (
-              <small>
-                Son kayıt:{' '}
-                {new Date(cloudLastSavedAt).toLocaleDateString('tr-TR', {
-                  day: '2-digit',
-                  month: '2-digit',
-                  year: 'numeric',
-                })}{' '}
-                {new Date(cloudLastSavedAt).toLocaleTimeString('tr-TR', {
-                  hour: '2-digit',
-                  minute: '2-digit',
-                })}
-              </small>
-            ) : null}
-          </div>
+              <div className={`session-role cloud-sync cloud-${cloudState}`}>
+                <span>Bulut Senkron</span>
+                <strong>{isCloudSaving ? 'Kaydediliyor...' : cloudStateText}</strong>
+                {cloudLastSavedAt ? (
+                  <small>
+                    Son kayıt:{' '}
+                    {new Date(cloudLastSavedAt).toLocaleDateString('tr-TR', {
+                      day: '2-digit',
+                      month: '2-digit',
+                      year: 'numeric',
+                    })}{' '}
+                    {new Date(cloudLastSavedAt).toLocaleTimeString('tr-TR', {
+                      hour: '2-digit',
+                      minute: '2-digit',
+                    })}
+                  </small>
+                ) : null}
+              </div>
+            </>
+          ) : null}
 
           {session.role === 'assistant' ? (
             <div className="date-control">
@@ -4726,7 +4839,6 @@ function App() {
               type="button"
               className="ghost-button"
               onClick={() => {
-                setMobileMenuOpen(false)
                 logout()
               }}
             >
@@ -4738,74 +4850,6 @@ function App() {
 
       {notice ? (
         <div className={`notice ${notice.type === 'ok' ? 'success' : 'warning'}`}>{notice.text}</div>
-      ) : null}
-
-      {isMobileViewport ? (
-        <nav className="mobile-module-nav" aria-label="Mobil modül seçimi">
-          {mode === 'admin' ? (
-            <>
-              <button
-                type="button"
-                className={adminSection === 'assistants' ? 'active' : ''}
-                onClick={() => selectAdminSection('assistants')}
-              >
-                Asistanlar
-              </button>
-              <button
-                type="button"
-                className={adminSection === 'locations' ? 'active' : ''}
-                onClick={() => selectAdminSection('locations')}
-              >
-                Alanlar
-              </button>
-              <button
-                type="button"
-                className={adminSection === 'duty' ? 'active' : ''}
-                onClick={() => selectAdminSection('duty')}
-              >
-                Nöbet
-              </button>
-              <button
-                type="button"
-                className={adminSection === 'planner' ? 'active' : ''}
-                onClick={() => selectAdminSection('planner')}
-              >
-                Planlama
-              </button>
-            </>
-          ) : (
-            <>
-              <button
-                type="button"
-                className={observerSection === 'myPanel' ? 'active' : ''}
-                onClick={() => selectObserverSection('myPanel')}
-              >
-                Kendi Modülüm
-              </button>
-              <button
-                type="button"
-                className={observerSection === 'personWeek' ? 'active' : ''}
-                onClick={() => selectObserverSection('personWeek')}
-              >
-                Haftalık Görünüm
-              </button>
-              <button
-                type="button"
-                className={observerSection === 'dailyMap' ? 'active' : ''}
-                onClick={() => selectObserverSection('dailyMap')}
-              >
-                Günlük Harita
-              </button>
-              <button
-                type="button"
-                className={observerSection === 'dutyList' ? 'active' : ''}
-                onClick={() => selectObserverSection('dutyList')}
-              >
-                Nöbet Listesi
-              </button>
-            </>
-          )}
-        </nav>
       ) : null}
 
       {mode === 'admin' ? (
@@ -5489,6 +5533,27 @@ function App() {
                 </article>
               </div>
 
+              <article className="focus-location my-calendar-export-launch">
+                <h3>Takvim Tablosu</h3>
+                <p className="subtext">Ay seçip Görüntüle dediğinde takvim ayrı sayfada sadece tablo olarak açılır.</p>
+                <div className="form-row my-calendar-export-row">
+                  <select
+                    className="my-calendar-month-select"
+                    value={assistantTableMonthDraft}
+                    onChange={(event) => setAssistantTableMonthDraft(event.target.value)}
+                  >
+                    {myCalendarMonthOptions.map((option) => (
+                      <option key={`my-table-month-launch-${option.value}`} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                  <button type="button" className="secondary" onClick={openAssistantMonthlyTable}>
+                    Görüntüle
+                  </button>
+                </div>
+              </article>
+
               <article className="focus-location my-calendar-panel">
                 <div className="my-calendar-toolbar">
                   <h3>{myCalendarMonthTitle}</h3>
@@ -5661,6 +5726,42 @@ function App() {
                   </article>
                 ))}
               </div>
+
+              <h3 className="observer-tab-title observer-room-title">Nöbet Bazlı</h3>
+              <div className="form-row">
+                <select
+                  value={observerWeekDutySite}
+                  onChange={(event) => setObserverWeekDutySite(event.target.value as DutySite)}
+                >
+                  {DUTY_SITES.map((site) => (
+                    <option key={`observer-week-duty-site-${site}`} value={site}>
+                      {site}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="timeline-grid">
+                {weekDutyAssignmentsForSite.map(({ day, names }) => (
+                  <article key={`timeline-duty-${day.key}`} className="timeline-card">
+                    <header>
+                      <strong>{day.shortLabel}</strong>
+                      <small>{day.key}</small>
+                    </header>
+                    <div className="chip-wrap">
+                      {names.length ? (
+                        names.map((name) => (
+                          <span key={`${day.key}-${observerWeekDutySite}-${name}`} className="chip duty-site-chip">
+                            {name}
+                          </span>
+                        ))
+                      ) : (
+                        <span className="empty">Bu hastanede nöbetçi görünmüyor</span>
+                      )}
+                    </div>
+                  </article>
+                ))}
+              </div>
             </section>
           ) : null}
 
@@ -5762,28 +5863,25 @@ function App() {
             <section className="card fade-up delay-3">
               <h2>Nöbet Listesi</h2>
               <p className="subtext">
-                Seçili ayın nöbet dağılımını tablo halinde takip edebilirsin.
+                Ayı seçip Görüntüle dediğinde nöbet tablosu ayrı sayfada açılır.
               </p>
 
-              <div className="form-row">
+              <div className="form-row duty-list-launch-row">
                 <select
                   className="my-calendar-month-select"
-                  value={observerMonth}
-                  onChange={(event) => setObserverMonth(event.target.value)}
+                  value={observerDutyMonthDraft}
+                  onChange={(event) => setObserverDutyMonthDraft(event.target.value)}
                 >
                   {myCalendarMonthOptions.map((option) => (
-                    <option key={`observer-duty-month-${option.value}`} value={option.value}>
+                    <option key={`observer-duty-month-launch-${option.value}`} value={option.value}>
                       {option.label}
                     </option>
                   ))}
                 </select>
+                <button type="button" className="secondary" onClick={openObserverDutyList}>
+                  Görüntüle
+                </button>
               </div>
-
-              <article className="focus-location duty-list-module">
-                <h3>Aylık Nöbet Listesi</h3>
-                <p className="subtext">Excel benzeri görünüm: günler satır, nöbet yerleri sütun grupları.</p>
-                {renderDutyListTable(observerDutyTableModel, 'observer-duty')}
-              </article>
             </section>
           ) : null}
 
