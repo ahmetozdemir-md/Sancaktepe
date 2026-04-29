@@ -7,6 +7,7 @@ const cloudWriteEnv = String(import.meta.env.VITE_CLOUD_WRITE_ENABLED ?? 'true')
 
 export const REMOTE_STATE_TABLE = 'portal_state'
 export const REMOTE_STATE_ROW_ID = 1
+export const REMOTE_STATE_HISTORY_TABLE = 'portal_state_history'
 
 export const isSupabaseConfigured = Boolean(supabaseUrl && supabaseKey)
 export const isCloudWriteEnabled = cloudWriteEnv.toLocaleLowerCase('tr') !== 'false'

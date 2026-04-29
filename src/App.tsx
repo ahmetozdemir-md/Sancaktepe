@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import './App.css'
 import {
   isCloudWriteEnabled,
+  REMOTE_STATE_HISTORY_TABLE,
   isSupabaseConfigured,
   REMOTE_STATE_ROW_ID,
   REMOTE_STATE_TABLE,
@@ -126,6 +127,10 @@ const STORAGE_KEY = 'assistant-scheduler-v1'
 const USER_BINDING_KEY = 'assistant-user-binding-v1'
 const LAST_ASSISTANT_USER_KEY = 'assistant-last-user-v1'
 const CLOUD_READ_ONLY_TEXT = 'Bulut salt-okunur modda (yerelden buluta yazma kapalı).'
+const CLOUD_SAFE_GUARD_TEXT =
+  'Bulut verisi okunamadığı için güvenlik gereği yerelden buluta yazma kapatıldı.'
+const CLOUD_CONFLICT_TEXT =
+  'Bulutta daha yeni bir kayıt var. Güvenlik için üzerine yazma engellendi; sayfayı yenileyip tekrar dene.'
 const APP_PASSWORD = '1234'
 const DUTY_SITES: DutySite[] = ['Sancaktepe', 'Feriha Öz', 'Çekmeköy']
 const REMOTE_SAVE_DEBOUNCE_MS = 900
@@ -1847,6 +1852,8 @@ function App() {
   const [cloudLastSavedAt, setCloudLastSavedAt] = useState<string | null>(null)
   const cloudHydratedRef = useRef(false)
   const cloudPayloadRef = useRef('')
+  const cloudCanWriteRef = useRef(false)
+  const cloudRevisionRef = useRef<string | null>(null)
   const cloudSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const [assistantInput, setAssistantInput] = useState('')
@@ -2082,6 +2089,7 @@ function App() {
     const loadCloudState = async () => {
       if (!isSupabaseConfigured || !supabase) {
         cloudHydratedRef.current = true
+        cloudCanWriteRef.current = false
         setCloudState('offline')
         setCloudStateText('Bulut kaydı kapalı (Supabase ayarı eksik).')
         return
@@ -2102,8 +2110,9 @@ function App() {
 
       if (error) {
         cloudHydratedRef.current = true
+        cloudCanWriteRef.current = false
         setCloudState('error')
-        setCloudStateText('Bulut bağlantısı kurulamadı. Yerel kayıtla devam ediliyor.')
+        setCloudStateText(CLOUD_SAFE_GUARD_TEXT)
         return
       }
 
@@ -2128,6 +2137,8 @@ function App() {
 
         cloudPayloadRef.current = syncedPayload
         cloudHydratedRef.current = true
+        cloudCanWriteRef.current = true
+        cloudRevisionRef.current = typeof row.updated_at === 'string' && row.updated_at ? row.updated_at : null
         setData(nextPlannerState)
         setUserBindings(nextUserBindings)
         setCloudState('ready')
@@ -2141,15 +2152,19 @@ function App() {
       if (!isCloudWriteEnabled) {
         cloudPayloadRef.current = JSON.stringify(currentSnapshot)
         cloudHydratedRef.current = true
+        cloudCanWriteRef.current = false
+        cloudRevisionRef.current = null
         setCloudState('ready')
         setCloudStateText(CLOUD_READ_ONLY_TEXT)
         return
       }
 
+      const seedTimestamp = new Date().toISOString()
       const { error: seedError } = await supabase.from(REMOTE_STATE_TABLE).upsert(
         {
           id: REMOTE_STATE_ROW_ID,
           payload: currentSnapshot,
+          updated_at: seedTimestamp,
         },
         { onConflict: 'id' },
       )
@@ -2160,17 +2175,19 @@ function App() {
 
       if (seedError) {
         cloudHydratedRef.current = true
+        cloudCanWriteRef.current = false
         setCloudState('error')
-        setCloudStateText('Bulut tablosu hazır değil. SQL kurulumunu tamamlayıp yenile.')
+        setCloudStateText('Bulut tablosu hazır değil veya yazılamıyor. SQL kurulumunu tamamlayıp yenile.')
         return
       }
 
-      const nowISO = new Date().toISOString()
       cloudPayloadRef.current = JSON.stringify(currentSnapshot)
       cloudHydratedRef.current = true
+      cloudCanWriteRef.current = true
+      cloudRevisionRef.current = seedTimestamp
       setCloudState('ready')
       setCloudStateText(isCloudWriteEnabled ? 'Bulut kaydı aktif.' : CLOUD_READ_ONLY_TEXT)
-      setCloudLastSavedAt(nowISO)
+      setCloudLastSavedAt(seedTimestamp)
     }
 
     void loadCloudState()
@@ -2182,7 +2199,13 @@ function App() {
   }, [])
 
   useEffect(() => {
-    if (!isSupabaseConfigured || !supabase || !cloudHydratedRef.current || !isCloudWriteEnabled) {
+    if (
+      !isSupabaseConfigured ||
+      !supabase ||
+      !cloudHydratedRef.current ||
+      !isCloudWriteEnabled ||
+      !cloudCanWriteRef.current
+    ) {
       return
     }
     if (cloudPayload === cloudPayloadRef.current) {
@@ -2204,26 +2227,77 @@ function App() {
           plannerState: PlannerState
           userBindings: Record<string, string>
         }
-        const { error } = await supabase.from(REMOTE_STATE_TABLE).upsert(
-          {
-            id: REMOTE_STATE_ROW_ID,
-            payload: payloadObject,
-          },
-          { onConflict: 'id' },
-        )
 
-        if (error) {
+        const { data: remoteRow, error: remoteReadError } = await supabase
+          .from(REMOTE_STATE_TABLE)
+          .select('updated_at')
+          .eq('id', REMOTE_STATE_ROW_ID)
+          .maybeSingle()
+
+        if (remoteReadError || !remoteRow) {
+          cloudCanWriteRef.current = false
           setCloudState('error')
-          setCloudStateText('Buluta kaydedilemedi. Bağlantıyı ve tablo izinlerini kontrol et.')
+          setCloudStateText(CLOUD_SAFE_GUARD_TEXT)
           setIsCloudSaving(false)
           return
         }
 
-        const nowISO = new Date().toISOString()
+        const remoteUpdatedAt =
+          typeof remoteRow.updated_at === 'string' && remoteRow.updated_at ? remoteRow.updated_at : null
+        const knownRevision = cloudRevisionRef.current
+        if (knownRevision && remoteUpdatedAt && knownRevision !== remoteUpdatedAt) {
+          cloudCanWriteRef.current = false
+          setCloudState('error')
+          setCloudStateText(CLOUD_CONFLICT_TEXT)
+          setIsCloudSaving(false)
+          return
+        }
+
+        const nextUpdatedAt = new Date().toISOString()
+        const updateBase = supabase
+          .from(REMOTE_STATE_TABLE)
+          .update({
+            payload: payloadObject,
+            updated_at: nextUpdatedAt,
+          })
+          .eq('id', REMOTE_STATE_ROW_ID)
+        const guardedUpdate = remoteUpdatedAt ? updateBase.eq('updated_at', remoteUpdatedAt) : updateBase
+        const { data: updatedRows, error } = await guardedUpdate.select('updated_at')
+
+        if (error) {
+          cloudCanWriteRef.current = false
+          setCloudState('error')
+          setCloudStateText(CLOUD_CONFLICT_TEXT)
+          setIsCloudSaving(false)
+          return
+        }
+
+        const updatedAtFromServer =
+          Array.isArray(updatedRows) && updatedRows.length
+            ? typeof updatedRows[0]?.updated_at === 'string'
+              ? updatedRows[0].updated_at
+              : null
+            : null
+        if (!updatedAtFromServer) {
+          cloudCanWriteRef.current = false
+          setCloudState('error')
+          setCloudStateText(CLOUD_CONFLICT_TEXT)
+          setIsCloudSaving(false)
+          return
+        }
+
+        void supabase.from(REMOTE_STATE_HISTORY_TABLE).insert({
+          state_id: REMOTE_STATE_ROW_ID,
+          payload: payloadObject,
+          saved_at: updatedAtFromServer,
+          source: 'auto-save',
+        })
+
         cloudPayloadRef.current = cloudPayload
+        cloudRevisionRef.current = updatedAtFromServer
         setCloudState('ready')
         setCloudStateText(isCloudWriteEnabled ? 'Bulut kaydı aktif.' : CLOUD_READ_ONLY_TEXT)
-        setCloudLastSavedAt(nowISO)
+        setCloudLastSavedAt(updatedAtFromServer)
         setIsCloudSaving(false)
       }
 
