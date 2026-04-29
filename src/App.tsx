@@ -793,16 +793,6 @@ function dutySiteClassName(site: DutySite): string {
   return 'cekmekoy'
 }
 
-function dutySiteShortLabel(site: DutySite): string {
-  if (site === 'Sancaktepe') {
-    return 'Sancak'
-  }
-  if (site === 'Feriha Öz') {
-    return 'Feriha'
-  }
-  return 'Çekmeköy'
-}
-
 function normalizeTrToken(value: string): string {
   return value
     .toLocaleLowerCase('tr')
@@ -3878,19 +3868,6 @@ function App() {
     [myMonthlyDuties],
   )
 
-  const myCalendarWeeks = useMemo(() => buildMonthCalendarGrid(observerMonth), [observerMonth])
-  const myCalendarMonthTitle = useMemo(() => {
-    const [yearRaw, monthRaw] = observerMonth.split('-')
-    const year = Number(yearRaw)
-    const month = Number(monthRaw)
-    if (Number.isNaN(year) || Number.isNaN(month) || month < 1 || month > 12) {
-      return observerMonth
-    }
-    return new Date(year, month - 1, 1).toLocaleDateString('tr-TR', {
-      month: 'long',
-      year: 'numeric',
-    })
-  }, [observerMonth])
   const assistantTableMonthTitle = useMemo(() => {
     const [yearRaw, monthRaw] = assistantTableMonthActive.split('-')
     const year = Number(yearRaw)
@@ -3987,32 +3964,6 @@ function App() {
     observerDutyMonthDraft,
   ])
 
-  const myCalendarDayMap = useMemo(() => {
-    const entries: Record<
-      string,
-      {
-        locations: WorkLocation[]
-        duty: DutyAssignment | null
-      }
-    > = {}
-
-    myCalendarWeeks.flat().forEach((cell) => {
-      const dayKey = cell.key
-      const duty = (data.dutyRoster[dayKey] ?? []).find((entry) => entry.name === loggedAssistantName) ?? null
-      const locations = sortedLocations.filter(
-        (location) =>
-          location.kind !== 'duty' &&
-          location.kind !== 'postDuty' &&
-          getAssignmentsForLocation(data, dayKey, location).includes(loggedAssistantName),
-      )
-      entries[dayKey] = {
-        locations,
-        duty,
-      }
-    })
-
-    return entries
-  }, [data, loggedAssistantName, myCalendarWeeks, sortedLocations])
   const assistantTableCalendarWeeks = useMemo<AssistantMonthlyCalendarCell[][]>(
     () => buildMonthCalendarGrid(assistantTableMonthActive),
     [assistantTableMonthActive],
@@ -5524,8 +5475,8 @@ function App() {
             <section className="card fade-up delay-2">
               <h2>Toplu Görünüm</h2>
               <p className="subtext">
-                Bu bölüm sadece giriş yapan asistan hekimin seçili aydaki günlük çalışma yerlerini ve
-                nöbetlerini takvim üzerinde gösterir.
+                Bu bölüm sadece giriş yapan asistan hekimin seçili ay için takvim ve nöbet
+                tablolarını ayrı sayfada hızlıca açmasını sağlar.
               </p>
 
               <div className="my-summary-grid">
@@ -5585,92 +5536,6 @@ function App() {
                   <button type="button" className="secondary" onClick={openObserverDutyList}>
                     Görüntüle
                   </button>
-                </div>
-              </article>
-
-              <article className="focus-location my-calendar-panel">
-                <div className="my-calendar-toolbar">
-                  <h3>{myCalendarMonthTitle}</h3>
-                  <select
-                    className="my-calendar-month-select"
-                    value={observerMonth}
-                    onChange={(event) => setObserverMonth(event.target.value)}
-                  >
-                    {myCalendarMonthOptions.map((option) => (
-                      <option key={`my-calendar-month-${option.value}`} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div className="my-calendar-scroll">
-                  <div className="my-calendar-weekdays">
-                    {['Pzt', 'Sal', 'Çar', 'Per', 'Cum', 'Cmt', 'Paz'].map((weekday) => (
-                      <span key={`my-calendar-weekday-${weekday}`}>{weekday}</span>
-                    ))}
-                  </div>
-
-                  <div className="my-calendar-grid">
-                    {myCalendarWeeks.flat().map((cell) => {
-                      const dayDate = fromISODate(cell.key)
-                      const dayNumber = dayDate.getDate()
-                      const dayData = myCalendarDayMap[cell.key]
-                      const locations = dayData?.locations ?? []
-                      const dutyEntry = dayData?.duty ?? null
-                      const dayTypeLabel = getDayTypeLabel(cell.key)
-                      const holidayReason = cell.inMonth ? getOfficialHolidayReason(cell.key) : null
-
-                      return (
-                        <article
-                          key={`my-calendar-${cell.key}`}
-                          className={`my-calendar-cell${cell.inMonth ? '' : ' outside-month'}${
-                            cell.weekend ? ' weekend' : ''
-                          }${cell.officialHoliday ? ' holiday' : ''}${cell.key === todayISO ? ' today' : ''}`}
-                        >
-                          <header>
-                            <strong>{dayNumber}</strong>
-                            <small>{cell.key}</small>
-                          </header>
-
-                          <div className="my-calendar-content">
-                            {holidayReason ? (
-                              <span className="my-calendar-holiday-reason">{holidayReason}</span>
-                            ) : null}
-
-                            {dutyEntry ? (
-                              <span
-                                className={`my-calendar-duty duty-site-${dutySiteClassName(dutyEntry.site)}`}
-                              >
-                                Nöbet ({dutySiteShortLabel(dutyEntry.site)})
-                              </span>
-                            ) : null}
-
-                            {locations.map((location) => (
-                              <span
-                                key={`my-calendar-location-${cell.key}-${location.id}`}
-                                className="my-calendar-location"
-                              >
-                                {location.site} / {location.name}
-                              </span>
-                            ))}
-
-                            {!dutyEntry && !locations.length ? (
-                              <span className="empty tiny">
-                                {cell.inMonth && dayTypeLabel
-                                  ? holidayReason
-                                    ? 'Resmi tatil'
-                                    : dayTypeLabel
-                                  : cell.inMonth
-                                    ? 'Atama yok'
-                                    : ''}
-                              </span>
-                            ) : null}
-                          </div>
-                        </article>
-                      )
-                    })}
-                  </div>
                 </div>
               </article>
             </section>
