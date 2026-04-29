@@ -16,7 +16,7 @@ import WeeklyRotaExportView, {
 
 type PanelMode = 'admin' | 'observer'
 type AdminSection = 'assistants' | 'locations' | 'duty' | 'planner'
-type ObserverSection = 'myPanel' | 'personWeek' | 'dailyMap' | 'dutyList' | 'personLookup'
+type ObserverSection = 'myPanel' | 'personWeek' | 'dailyMap' | 'dutyList'
 type PlannerView = 'rooms' | 'status'
 type LocationKind = 'normal' | 'leave' | 'duty' | 'postDuty'
 type LocationTone = 'sand' | 'sage' | 'amber' | 'sky' | 'rose'
@@ -1874,9 +1874,6 @@ function App() {
   const [activeObserverWeek, setActiveObserverWeek] = useState('')
   const [observerDay, setObserverDay] = useState('')
   const [observerWeekRoom, setObserverWeekRoom] = useState('')
-  const [observerLookupName, setObserverLookupName] = useState('')
-  const [observerLookupDay, setObserverLookupDay] = useState('')
-  const [observerLookupMonth, setObserverLookupMonth] = useState(currentMonthISO)
   const [plannerMonth, setPlannerMonth] = useState(currentMonthISO)
   const [activePlannerDay, setActivePlannerDay] = useState(todayISO)
   const [plannerWeeklyExportOpen, setPlannerWeeklyExportOpen] = useState(false)
@@ -1889,10 +1886,6 @@ function App() {
   const weekDays = useMemo(() => buildWeek(data.weekStartISO), [data.weekStartISO])
   const plannerMonthDays = useMemo(() => listMonthDays(plannerMonth), [plannerMonth])
   const dutyMonthDays = useMemo(() => listMonthDays(dutyMonth), [dutyMonth])
-  const observerLookupMonthDays = useMemo(
-    () => listMonthDays(observerLookupMonth),
-    [observerLookupMonth],
-  )
   const observerWeekGroups = useMemo(() => buildWeekGroupsForMonth(observerMonth), [observerMonth])
   const observerActiveWeekDays = useMemo(
     () => observerWeekGroups.find((group) => group.weekStartISO === activeObserverWeek)?.days ?? [],
@@ -2010,17 +2003,6 @@ function App() {
     ]
     return buildRelativeMonthOptions(plannerMonth, plannerMonths)
   }, [currentMonthISO, data.dutyRoster, data.manualAssignments, plannerMonth])
-  const observerLookupMonthOptions = useMemo(() => {
-    const monthsFromSchedules = [
-      ...Object.keys(data.manualAssignments)
-        .filter((dayKey) => /^\d{4}-\d{2}-\d{2}$/.test(dayKey))
-        .map((dayKey) => dayKey.slice(0, 7)),
-      ...Object.keys(data.dutyRoster)
-        .filter((dayKey) => /^\d{4}-\d{2}-\d{2}$/.test(dayKey))
-        .map((dayKey) => dayKey.slice(0, 7)),
-    ]
-    return buildRelativeMonthOptions(observerLookupMonth, monthsFromSchedules)
-  }, [currentMonthISO, data.dutyRoster, data.manualAssignments, observerLookupMonth])
   const roomLeftGroups = useMemo(
     () => groupedPlannerRoomLocations.filter(([siteName]) => siteName === 'Sancaktepe'),
     [groupedPlannerRoomLocations],
@@ -2292,7 +2274,6 @@ function App() {
       setObserverSection('myPanel')
       if (session.assistantName) {
         setObserverAssistant(session.assistantName)
-        setObserverLookupName(session.assistantName)
       }
     }
   }, [session])
@@ -2344,32 +2325,6 @@ function App() {
   }, [observerActiveWeekDays, observerDay, todayISO])
 
   useEffect(() => {
-    if (!observerLookupDay) {
-      return
-    }
-    const dayMonth = observerLookupDay.slice(0, 7)
-    if (isValidMonthISO(dayMonth) && dayMonth !== observerLookupMonth) {
-      setObserverLookupMonth(dayMonth)
-    }
-  }, [observerLookupDay, observerLookupMonth])
-
-  useEffect(() => {
-    if (!observerLookupMonthDays.length) {
-      if (observerLookupDay) {
-        setObserverLookupDay('')
-      }
-      return
-    }
-
-    if (!observerLookupDay || !observerLookupMonthDays.includes(observerLookupDay)) {
-      const preferredDay = observerLookupMonthDays.includes(todayISO)
-        ? todayISO
-        : observerLookupMonthDays[0]
-      setObserverLookupDay(preferredDay)
-    }
-  }, [observerLookupDay, observerLookupMonthDays, todayISO])
-
-  useEffect(() => {
     if (!plannerMonthDays.length) {
       if (activePlannerDay) {
         setActivePlannerDay('')
@@ -2382,22 +2337,6 @@ function App() {
       setActivePlannerDay(preferredDay)
     }
   }, [activePlannerDay, plannerMonthDays, todayISO])
-
-  useEffect(() => {
-    if (
-      !observerLookupName &&
-      session?.role === 'assistant' &&
-      session.assistantName &&
-      data.assistants.includes(session.assistantName)
-    ) {
-      setObserverLookupName(session.assistantName)
-      return
-    }
-
-    if (!data.assistants.includes(observerLookupName)) {
-      setObserverLookupName(data.assistants[0] ?? '')
-    }
-  }, [data.assistants, observerLookupName, session])
 
   useEffect(() => {
     if (!observerWeekRoomOptions.length) {
@@ -2501,7 +2440,6 @@ function App() {
     }
     setNotice(null)
     setObserverAssistant(selectedAssistantName)
-    setObserverLookupName(selectedAssistantName)
   }
 
   const logout = () => {
@@ -2739,21 +2677,6 @@ function App() {
       return
     }
     setOwnersMonth(shiftMonthISO(ownersMonth, delta))
-  }
-
-  const goObserverLookupMonth = (delta: number) => {
-    if (!isValidMonthISO(observerLookupMonth)) {
-      setObserverLookupMonth(currentMonthISO)
-      return
-    }
-    const nextMonth = shiftMonthISO(observerLookupMonth, delta)
-    setObserverLookupMonth(nextMonth)
-    const nextMonthDays = listMonthDays(nextMonth)
-    if (!nextMonthDays.length) {
-      return
-    }
-    const preferredDay = nextMonthDays.includes(todayISO) ? todayISO : nextMonthDays[0]
-    setObserverLookupDay(preferredDay)
   }
 
   const openPlannerWeeklyExport = () => {
@@ -3792,16 +3715,6 @@ function App() {
     })
   }, [data, observerWeekRoom, sortedLocations, weekDays])
 
-  const observerLookupResult = useMemo(() => {
-    if (!observerLookupDay || !observerLookupName) {
-      return []
-    }
-
-    return sortedLocations.filter((location) =>
-      getAssignmentsForLocation(data, observerLookupDay, location).includes(observerLookupName),
-    )
-  }, [data, observerLookupDay, observerLookupName, sortedLocations])
-
   const loggedAssistantName = session?.role === 'assistant' ? session.assistantName ?? '' : ''
   const myWeekAssignments = useMemo(() => {
     if (!loggedAssistantName) {
@@ -4797,7 +4710,6 @@ function App() {
                 value={observerAssistant}
                 onChange={(event) => {
                   setObserverAssistant(event.target.value)
-                  setObserverLookupName(event.target.value)
                 }}
               >
                 {data.assistants.map((assistant) => (
@@ -4890,13 +4802,6 @@ function App() {
                 onClick={() => selectObserverSection('dutyList')}
               >
                 Nöbet Listesi
-              </button>
-              <button
-                type="button"
-                className={observerSection === 'personLookup' ? 'active' : ''}
-                onClick={() => selectObserverSection('personLookup')}
-              >
-                Kişi Sorgu
               </button>
             </>
           )}
@@ -5555,13 +5460,6 @@ function App() {
               >
                 Nöbet Listesi
               </button>
-              <button
-                type="button"
-                className={observerSection === 'personLookup' ? 'active' : ''}
-                onClick={() => selectObserverSection('personLookup')}
-              >
-                Kişi Sorgu
-              </button>
             </div>
           </section>
 
@@ -5889,102 +5787,6 @@ function App() {
             </section>
           ) : null}
 
-          {observerSection === 'personLookup' ? (
-            <section className="card fade-up delay-3">
-              <h2>Bir Kişi Bugün Nerede?</h2>
-              <p className="subtext">
-                Seçtiğin gün için herhangi bir kişinin tüm konumlarını ve durumunu tek kartta gör.
-              </p>
-
-              <div className="form-row month-nav-row lookup-date-row">
-                <button type="button" className="ghost-button" onClick={() => goObserverLookupMonth(-1)}>
-                  Önceki Ay
-                </button>
-                <select
-                  className="my-calendar-month-select"
-                  value={observerLookupMonth}
-                  onChange={(event) => {
-                    const nextMonth = event.target.value
-                    if (!isValidMonthISO(nextMonth)) {
-                      return
-                    }
-                    setObserverLookupMonth(nextMonth)
-                    const nextMonthDays = listMonthDays(nextMonth)
-                    if (!nextMonthDays.length) {
-                      return
-                    }
-                    const preferred = nextMonthDays.includes(todayISO) ? todayISO : nextMonthDays[0]
-                    setObserverLookupDay(preferred)
-                  }}
-                >
-                  {observerLookupMonthOptions.map((option) => (
-                    <option key={`lookup-month-${option.value}`} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-                <button type="button" className="ghost-button" onClick={() => goObserverLookupMonth(1)}>
-                  Sonraki Ay
-                </button>
-                <select
-                  value={observerLookupDay}
-                  onChange={(event) => setObserverLookupDay(event.target.value)}
-                >
-                  {observerLookupMonthDays.map((dayKey) => {
-                    const date = fromISODate(dayKey)
-                    const label = date.toLocaleDateString('tr-TR', {
-                      day: '2-digit',
-                      month: '2-digit',
-                      weekday: 'short',
-                    })
-                    const dayTypeLabel = getDayTypeLabel(dayKey)
-                    return (
-                      <option key={`lookup-day-${dayKey}`} value={dayKey}>
-                        {label} {dayTypeLabel ? `- ${dayTypeLabel}` : ''}
-                      </option>
-                    )
-                  })}
-                </select>
-                <select
-                  value={observerLookupName}
-                  onChange={(event) => setObserverLookupName(event.target.value)}
-                >
-                  {data.assistants.map((assistant) => (
-                    <option key={`lookup-${assistant}`} value={assistant}>
-                      {assistant}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <article className="focus-location">
-                <h3>
-                  {observerLookupName || 'Kişi Seçilmedi'} -{' '}
-                  {observerLookupDay
-                    ? new Date(observerLookupDay).toLocaleDateString('tr-TR', {
-                        day: '2-digit',
-                        month: '2-digit',
-                        weekday: 'long',
-                      })
-                    : 'Tarih Seçilmedi'}
-                </h3>
-                <div className="chip-wrap">
-                  {observerLookupResult.length ? (
-                    observerLookupResult.map((location) => (
-                      <span
-                        className={`chip tone-${location.tone}`}
-                        key={`lookup-result-${location.id}`}
-                      >
-                        {location.site} / {location.name} ({LOCATION_KIND_LABELS[location.kind]})
-                      </span>
-                    ))
-                  ) : (
-                    <span className="empty">Bu kişi seçilen gün için atanmış görünmüyor.</span>
-                  )}
-                </div>
-              </article>
-            </section>
-          ) : null}
         </main>
       )}
     </div>
