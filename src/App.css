@@ -360,7 +360,7 @@ h4 {
 }
 
 .subpanel-toggle.observer-toggle {
-  grid-template-columns: repeat(5, minmax(100px, 1fr));
+  grid-template-columns: repeat(4, minmax(100px, 1fr));
 }
 
 .subpanel-toggle button {
@@ -2069,6 +2069,21 @@ code {
 
   .planner-side-panel {
     order: 2;
+  }
+
+  .subpanel-toggle.observer-toggle {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    overflow: visible;
+    gap: 0.45rem;
+    padding-bottom: 0;
+  }
+
+  .subpanel-toggle.observer-toggle button {
+    min-width: 0;
+    white-space: normal;
+    text-align: center;
+    line-height: 1.2;
   }
 }
 
