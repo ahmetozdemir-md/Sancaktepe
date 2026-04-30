@@ -5576,6 +5576,24 @@ function App() {
           const blockedPostDutyNames = new Set(
             dutyAssignmentsToNames(plannerState.dutyRoster[previousDayKeyForOptions] ?? []),
           )
+          const blockedLeaveNames = new Set(
+            plannerState.locations
+              .filter((item) => {
+                if (item.kind !== 'leave') {
+                  return false
+                }
+                const normalizedLeaveName = normalizeTrToken(item.name)
+                return (
+                  item.id === LEAVE_LOCATION_IDS.excuse ||
+                  item.id === LEAVE_LOCATION_IDS.annual ||
+                  item.id === LEAVE_LOCATION_IDS.rotation ||
+                  normalizedLeaveName.includes('mazeret') ||
+                  normalizedLeaveName.includes('yillik') ||
+                  normalizedLeaveName.includes('rotasyon')
+                )
+              })
+              .flatMap((leaveLocation) => getAssignmentsForLocation(plannerState, dayKey, leaveLocation)),
+          )
           const assignedInRoomNames = new Set<string>()
           plannerState.locations
             .filter((item) => item.kind === 'normal')
@@ -5605,6 +5623,9 @@ function App() {
           const sectionMap = new Map(hospitalGroups.map((group) => [group.section, group.items]))
 
           plannerState.assistants.forEach((assistant) => {
+            if (blockedLeaveNames.has(assistant)) {
+              return
+            }
             if (blockedPostDutyNames.has(assistant)) {
               return
             }
