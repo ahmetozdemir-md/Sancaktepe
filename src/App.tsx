@@ -2433,6 +2433,7 @@ function App() {
   const [specialistDutyIssues, setSpecialistDutyIssues] = useState<string[]>([])
   const [specialistMonth, setSpecialistMonth] = useState(currentMonthISO)
   const [specialistDay, setSpecialistDay] = useState(todayISO)
+  const [activeSpecialistWeek, setActiveSpecialistWeek] = useState('')
   const [specialistDateEditMode, setSpecialistDateEditMode] = useState(false)
   const [specialistMonthDraft, setSpecialistMonthDraft] = useState(currentMonthISO)
   const [specialistDayDraft, setSpecialistDayDraft] = useState(todayISO)
@@ -2620,6 +2621,14 @@ function App() {
     return buildRelativeMonthOptions(specialistMonth, specialistMonths)
   }, [currentMonthISO, data.specialistDutyRoster, data.specialistWorkAssignments, specialistMonth])
   const specialistDayOptions = useMemo(() => listMonthDays(specialistMonth), [specialistMonth])
+  const specialistWeekGroups = useMemo(
+    () => buildWeekGroupsForMonth(specialistMonth),
+    [specialistMonth],
+  )
+  const specialistActiveWeekDays = useMemo(() => {
+    const activeWeek = specialistWeekGroups.find((group) => group.weekStartISO === activeSpecialistWeek)
+    return activeWeek?.days ?? []
+  }, [activeSpecialistWeek, specialistWeekGroups])
   const roomLeftGroups = useMemo(
     () => groupedPlannerRoomLocations.filter(([siteName]) => siteName === 'Sancaktepe'),
     [groupedPlannerRoomLocations],
@@ -3093,6 +3102,28 @@ function App() {
       setSpecialistDayDraft(preferred)
     }
   }, [specialistDay, specialistDayDraft, specialistDayOptions, todayISO])
+
+  useEffect(() => {
+    if (!specialistWeekGroups.length) {
+      if (activeSpecialistWeek) {
+        setActiveSpecialistWeek('')
+      }
+      return
+    }
+
+    const selectedWeek = specialistWeekGroups.find(
+      (group) => group.weekStartISO === activeSpecialistWeek,
+    )
+    const selectedWeekHasDay = selectedWeek?.days.some((day) => day.key === specialistDay)
+    if (selectedWeekHasDay) {
+      return
+    }
+
+    const weekForDay = specialistWeekGroups.find((group) =>
+      group.days.some((day) => day.key === specialistDay),
+    )
+    setActiveSpecialistWeek(weekForDay?.weekStartISO ?? specialistWeekGroups[0].weekStartISO)
+  }, [activeSpecialistWeek, specialistDay, specialistWeekGroups])
 
   useEffect(() => {
     if (!observerWeekRoomOptions.length) {
@@ -4273,6 +4304,78 @@ function App() {
 
     setSpecialistDutyIssues(issueMessages)
     setSpecialistDutyText('')
+  }
+
+  const removeSpecialistWorkAssignment = (
+    dayKey: string,
+    locationId: string,
+    specialistName: string,
+  ) => {
+    setData((previous) => {
+      const dayMap = previous.specialistWorkAssignments[dayKey]
+      if (!dayMap) {
+        return previous
+      }
+
+      const currentNames = dayMap[locationId] ?? []
+      if (!currentNames.includes(specialistName)) {
+        return previous
+      }
+
+      const nextNames = currentNames.filter((name) => name !== specialistName)
+      const nextDayMap = { ...dayMap }
+      if (nextNames.length) {
+        nextDayMap[locationId] = nextNames
+      } else {
+        delete nextDayMap[locationId]
+      }
+
+      const nextAssignments = { ...previous.specialistWorkAssignments }
+      if (Object.keys(nextDayMap).length) {
+        nextAssignments[dayKey] = nextDayMap
+      } else {
+        delete nextAssignments[dayKey]
+      }
+
+      showSuccess(`${specialistName} uzman kaydı kaldırıldı.`)
+      return {
+        ...previous,
+        specialistWorkAssignments: nextAssignments,
+      }
+    })
+  }
+
+  const removeSpecialistDutyAssignment = (
+    dayKey: string,
+    site: SpecialistDutySite,
+    specialistName: string,
+  ) => {
+    setData((previous) => {
+      const dayEntries = previous.specialistDutyRoster[dayKey] ?? []
+      if (!dayEntries.length) {
+        return previous
+      }
+
+      const nextEntries = dayEntries.filter(
+        (entry) => !(entry.site === site && entry.name === specialistName),
+      )
+      if (nextEntries.length === dayEntries.length) {
+        return previous
+      }
+
+      const nextRoster = { ...previous.specialistDutyRoster }
+      if (nextEntries.length) {
+        nextRoster[dayKey] = nextEntries
+      } else {
+        delete nextRoster[dayKey]
+      }
+
+      showSuccess(`${specialistName} nöbetçi uzman kaydı kaldırıldı.`)
+      return {
+        ...previous,
+        specialistDutyRoster: nextRoster,
+      }
+    })
   }
 
   const startPlannerDayEdit = (dayKey: string) => {
@@ -6592,23 +6695,6 @@ function App() {
                     </option>
                   ))}
                 </select>
-                <select
-                  value={specialistDateEditMode ? specialistDayDraft : specialistDay}
-                  disabled={!specialistDateEditMode}
-                  onChange={(event) => setSpecialistDayDraft(event.target.value)}
-                >
-                  {(specialistDateEditMode ? listMonthDays(specialistMonthDraft) : specialistDayOptions).map(
-                    (dayKey) => (
-                      <option key={`specialist-day-${dayKey}`} value={dayKey}>
-                        {fromISODate(dayKey).toLocaleDateString('tr-TR', {
-                          day: '2-digit',
-                          month: '2-digit',
-                          weekday: 'short',
-                        })}
-                      </option>
-                    ),
-                  )}
-                </select>
                 {!specialistDateEditMode ? (
                   <button type="button" className="secondary" onClick={startSpecialistDateEdit}>
                     Değiştir
@@ -6624,6 +6710,46 @@ function App() {
                     İptal
                   </button>
                 ) : null}
+              </div>
+
+              <div className="planner-day-tabs specialist-week-tabs">
+                {specialistWeekGroups.map((group) => (
+                  <button
+                    key={`specialist-week-${group.weekStartISO}`}
+                    type="button"
+                    className={activeSpecialistWeek === group.weekStartISO ? 'active' : ''}
+                    onClick={() => {
+                      setActiveSpecialistWeek(group.weekStartISO)
+                      const firstDay = group.days[0]?.key
+                      if (firstDay) {
+                        setSpecialistDay(firstDay)
+                        if (specialistDateEditMode) {
+                          setSpecialistDayDraft(firstDay)
+                        }
+                      }
+                    }}
+                  >
+                    {group.label}
+                  </button>
+                ))}
+              </div>
+
+              <div className="planner-day-tabs specialist-day-tabs">
+                {specialistActiveWeekDays.map((day) => (
+                  <button
+                    key={`specialist-day-tab-${day.key}`}
+                    type="button"
+                    className={specialistDay === day.key ? 'active' : ''}
+                    onClick={() => {
+                      setSpecialistDay(day.key)
+                      if (specialistDateEditMode) {
+                        setSpecialistDayDraft(day.key)
+                      }
+                    }}
+                  >
+                    {day.shortLabel} ({fromISODate(day.key).toLocaleDateString('tr-TR', { weekday: 'short' })})
+                  </button>
+                ))}
               </div>
 
               <article className="specialist-input-card">
@@ -6673,12 +6799,21 @@ function App() {
                             <div className="chip-wrap">
                               {specialists.length ? (
                                 specialists.map((specialistName) => (
-                                  <span
+                                  <button
                                     key={`specialist-preview-chip-${location.id}-${specialistName}`}
-                                    className="chip"
+                                    type="button"
+                                    className="chip removable"
+                                    title="Uzmanı kaldır"
+                                    onClick={() =>
+                                      removeSpecialistWorkAssignment(
+                                        specialistDay,
+                                        location.id,
+                                        specialistName,
+                                      )
+                                    }
                                   >
                                     {specialistName}
-                                  </span>
+                                  </button>
                                 ))
                               ) : (
                                 <span className="empty">Uzman yok</span>
@@ -6733,12 +6868,21 @@ function App() {
                       <div className="chip-wrap">
                         {specialistDutyPreviewBySite[site].length ? (
                           specialistDutyPreviewBySite[site].map((specialistName) => (
-                            <span
+                            <button
                               key={`specialist-duty-preview-name-${site}-${specialistName}`}
-                              className="chip"
+                              type="button"
+                              className="chip removable"
+                              title="Nöbetçi uzmanı kaldır"
+                              onClick={() =>
+                                removeSpecialistDutyAssignment(
+                                  specialistDay,
+                                  site,
+                                  specialistName,
+                                )
+                              }
                             >
                               {specialistName}
-                            </span>
+                            </button>
                           ))
                         ) : (
                           <span className="empty">Kayıt yok</span>

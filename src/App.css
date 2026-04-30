@@ -1790,8 +1790,21 @@ button.assistant-chip:active {
 }
 
 .specialist-date-edit-row {
-  grid-template-columns: minmax(160px, 220px) minmax(180px, 250px) auto auto auto;
+  grid-template-columns: minmax(170px, 230px) auto auto auto;
   align-items: center;
+}
+
+.planner-day-tabs.specialist-week-tabs,
+.planner-day-tabs.specialist-day-tabs {
+  margin-top: 0.15rem;
+}
+
+.planner-day-tabs.specialist-week-tabs button {
+  min-width: 220px;
+}
+
+.planner-day-tabs.specialist-day-tabs button {
+  min-width: 180px;
 }
 
 .specialist-input-card {
@@ -2522,7 +2535,9 @@ code {
   }
 
   .planner-day-tabs.observer-week-tabs,
-  .planner-day-tabs.observer-day-tabs {
+  .planner-day-tabs.observer-day-tabs,
+  .planner-day-tabs.specialist-week-tabs,
+  .planner-day-tabs.specialist-day-tabs {
     display: grid;
     grid-template-columns: 1fr;
     overflow: visible;
@@ -2531,7 +2546,9 @@ code {
   }
 
   .planner-day-tabs.observer-week-tabs button,
-  .planner-day-tabs.observer-day-tabs button {
+  .planner-day-tabs.observer-day-tabs button,
+  .planner-day-tabs.specialist-week-tabs button,
+  .planner-day-tabs.specialist-day-tabs button {
     min-width: 0;
     white-space: normal;
     line-height: 1.25;
@@ -2578,6 +2595,10 @@ code {
     justify-items: stretch;
   }
 
+  .weekly-export-shell {
+    overflow-x: visible;
+  }
+
   .assistant-monthly-table-sheet .my-calendar-weekdays,
   .assistant-monthly-table-sheet .my-calendar-grid {
     width: 100%;
@@ -2608,6 +2629,69 @@ code {
   .my-calendar-location {
     font-size: 0.68rem;
     line-height: 1.2;
+  }
+
+  /* Mobil tablo ekranlarında içerik %25 küçültülür (0.75 ölçek). */
+  .assistant-monthly-table-sheet .assistant-monthly-calendar-inner {
+    width: 133.3333%;
+    transform: scale(0.75);
+    transform-origin: top left;
+  }
+
+  .assistant-monthly-table-sheet .duty-list-table {
+    width: 133.3333%;
+    min-width: 133.3333%;
+    transform: scale(0.75);
+    transform-origin: top left;
+  }
+
+  .assistant-monthly-table-sheet .duty-list-table col.duty-col-day {
+    width: 12%;
+  }
+
+  .assistant-monthly-table-sheet .duty-list-table th,
+  .assistant-monthly-table-sheet .duty-list-table td {
+    padding: 0.16rem 0.2rem;
+  }
+
+  .assistant-monthly-table-sheet .duty-name-line {
+    font-size: 0.62rem;
+    padding: 0.02rem 0.14rem;
+  }
+
+  .weekly-export-table {
+    width: 133.3333%;
+    min-width: 133.3333%;
+    table-layout: fixed;
+    transform: scale(0.75);
+    transform-origin: top left;
+  }
+
+  .weekly-export-table th,
+  .weekly-export-table td {
+    padding: 0.15rem 0.18rem;
+    font-size: 0.56rem;
+  }
+
+  .weekly-export-table .group-col {
+    width: 30px;
+  }
+
+  .weekly-export-table .unit-col {
+    width: 56px;
+  }
+
+  .weekly-export-name-stack {
+    gap: 0.05rem;
+  }
+
+  .weekly-export-name-stack span {
+    font-size: 0.56rem;
+    line-height: 1.15;
+  }
+
+  .weekly-export-specialist-line {
+    font-size: 0.52rem;
   }
 
   .my-calendar-duty {
