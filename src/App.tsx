@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import './App.css'
 import {
   isCloudWriteEnabled,
@@ -148,6 +148,12 @@ interface BackupEntry {
   assignmentDayCount: number
 }
 
+interface BackupInsertResult {
+  ok: boolean
+  skipped: boolean
+  missingTable: boolean
+}
+
 interface DutyParseIssue {
   lineNumber: number
   message: string
@@ -192,6 +198,8 @@ const SPECIALIST_DUTY_SITES: SpecialistDutySite[] = [
   'Feriha G123',
 ]
 const REMOTE_SAVE_DEBOUNCE_MS = 900
+const AUTO_HISTORY_BACKUP_MIN_INTERVAL_MS = 12 * 60 * 60 * 1000
+const PRE_CHANGE_BACKUP_MIN_INTERVAL_MS = 6 * 60 * 60 * 1000
 const DUTY_SITE_ORDER = new Map<DutySite, number>(
   DUTY_SITES.map((site, index) => [site, index]),
 )
@@ -2579,6 +2587,8 @@ function App() {
   const cloudCanWriteRef = useRef(false)
   const cloudRevisionRef = useRef<string | null>(null)
   const cloudSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const cloudHistoryBackupLastAtRef = useRef(0)
+  const preChangeBackupLastAtRef = useRef<Record<string, number>>({})
   const observerWeeklyScrollerRef = useRef<HTMLDivElement | null>(null)
   const observerDailyWeekScrollerRef = useRef<HTMLDivElement | null>(null)
   const observerDailyDayScrollerRef = useRef<HTMLDivElement | null>(null)
@@ -2702,7 +2712,7 @@ function App() {
     [plannerLocations],
   )
 
-  const groupBySite = (locations: WorkLocation[], dayKey = todayISO) => {
+  const groupBySite = useCallback((locations: WorkLocation[], dayKey = todayISO) => {
     const orderedLocations = sortLocationsForState(locations, dayKey)
     const map = new Map<string, WorkLocation[]>()
     orderedLocations.forEach((location) => {
@@ -2711,9 +2721,9 @@ function App() {
     return [...map.entries()].sort(
       (a, b) => getSiteDisplayRank(a[0]) - getSiteDisplayRank(b[0]) || a[0].localeCompare(b[0], 'tr'),
     )
-  }
+  }, [todayISO])
 
-  const buildRelativeMonthOptions = (anchorMonth: string, extraMonths: string[]) => {
+  const buildRelativeMonthOptions = useCallback((anchorMonth: string, extraMonths: string[]) => {
     const months = new Set<string>()
     const normalizedAnchor = isValidMonthISO(anchorMonth) ? anchorMonth : currentMonthISO
     for (let offset = -3; offset <= 3; offset += 1) {
@@ -2729,20 +2739,20 @@ function App() {
         value: monthISO,
         label: formatMonthSelectLabel(monthISO, Number.isNaN(selectedYear) ? undefined : selectedYear),
       }))
-  }
+  }, [currentMonthISO])
 
-  const groupedRoomLocations = useMemo(() => groupBySite(roomLocations, todayISO), [roomLocations, todayISO])
+  const groupedRoomLocations = useMemo(() => groupBySite(roomLocations, todayISO), [groupBySite, roomLocations, todayISO])
   const groupedPlannerRoomLocations = useMemo(
     () => groupBySite(plannerRoomLocations, plannerReferenceDay),
-    [plannerReferenceDay, plannerRoomLocations],
+    [groupBySite, plannerReferenceDay, plannerRoomLocations],
   )
   const groupedStatusLocations = useMemo(
     () => groupBySite(plannerStatusLocations, plannerReferenceDay),
-    [plannerReferenceDay, plannerStatusLocations],
+    [groupBySite, plannerReferenceDay, plannerStatusLocations],
   )
   const groupedObserverLocations = useMemo(
     () => groupBySite(sortedLocations, todayISO),
-    [sortedLocations, todayISO],
+    [groupBySite, sortedLocations, todayISO],
   )
   const observerWeekRoomOptions = useMemo(
     () => sortedLocations.filter((location) => location.kind === 'normal'),
@@ -2801,13 +2811,13 @@ function App() {
       ...Object.keys(data.locationOwnersByMonth),
       ...Object.keys(data.postDutyPoolByMonth),
     ])
-  }, [currentMonthISO, data.locationOwnersByMonth, data.postDutyPoolByMonth, ownersMonth])
+  }, [buildRelativeMonthOptions, data.locationOwnersByMonth, data.postDutyPoolByMonth, ownersMonth])
   const dutyMonthOptions = useMemo(() => {
     const dutyMonths = Object.keys(data.dutyRoster)
       .filter((dayKey) => /^\d{4}-\d{2}-\d{2}$/.test(dayKey))
       .map((dayKey) => dayKey.slice(0, 7))
     return buildRelativeMonthOptions(dutyMonth, dutyMonths)
-  }, [currentMonthISO, data.dutyRoster, dutyMonth])
+  }, [buildRelativeMonthOptions, data.dutyRoster, dutyMonth])
   const plannerMonthOptions = useMemo(() => {
     const plannerMonths = [
       ...Object.keys(data.manualAssignments)
@@ -2818,7 +2828,7 @@ function App() {
         .map((dayKey) => dayKey.slice(0, 7)),
     ]
     return buildRelativeMonthOptions(plannerMonth, plannerMonths)
-  }, [currentMonthISO, data.dutyRoster, data.manualAssignments, plannerMonth])
+  }, [buildRelativeMonthOptions, data.dutyRoster, data.manualAssignments, plannerMonth])
   const specialistMonthOptions = useMemo(() => {
     const specialistMonths = [
       ...Object.keys(data.specialistWorkAssignments)
@@ -2829,7 +2839,7 @@ function App() {
         .map((dayKey) => dayKey.slice(0, 7)),
     ]
     return buildRelativeMonthOptions(specialistMonth, specialistMonths)
-  }, [currentMonthISO, data.specialistDutyRoster, data.specialistWorkAssignments, specialistMonth])
+  }, [buildRelativeMonthOptions, data.specialistDutyRoster, data.specialistWorkAssignments, specialistMonth])
   const specialistDayOptions = useMemo(() => listMonthDays(specialistMonth), [specialistMonth])
   const specialistWeekGroups = useMemo(
     () => buildWeekGroupsForMonth(specialistMonth),
@@ -3133,12 +3143,16 @@ function App() {
           return
         }
 
-        void supabase.from(REMOTE_STATE_HISTORY_TABLE).insert({
-          state_id: REMOTE_STATE_ROW_ID,
-          payload: payloadObject,
-          saved_at: updatedAtFromServer,
-          source: 'auto-save',
-        })
+        const nowMs = Date.now()
+        if (nowMs - cloudHistoryBackupLastAtRef.current >= AUTO_HISTORY_BACKUP_MIN_INTERVAL_MS) {
+          cloudHistoryBackupLastAtRef.current = nowMs
+          void supabase.from(REMOTE_STATE_HISTORY_TABLE).insert({
+            state_id: REMOTE_STATE_ROW_ID,
+            payload: payloadObject,
+            saved_at: updatedAtFromServer,
+            source: 'auto-save-throttled',
+          })
+        }
 
         cloudPayloadRef.current = cloudPayload
         cloudRevisionRef.current = updatedAtFromServer
@@ -3260,7 +3274,7 @@ function App() {
         setObserverAssistant(session.assistantName)
       }
     }
-  }, [session])
+  }, [observerMonth, session])
 
   useEffect(() => {
     if (
@@ -3739,7 +3753,7 @@ function App() {
     )
   }
 
-  const getSpecialistNamesForLocation = (
+  const getSpecialistNamesForLocation = useCallback((
     state: PlannerState,
     dayKey: string,
     location: WorkLocation,
@@ -3748,9 +3762,9 @@ function App() {
       return []
     }
     return getSpecialistsForLocation(state, dayKey, location.id)
-  }
+  }, [])
 
-  const getSpecialistLabelForLocation = (
+  const getSpecialistLabelForLocation = useCallback((
     state: PlannerState,
     dayKey: string,
     location: WorkLocation,
@@ -3760,7 +3774,7 @@ function App() {
       return null
     }
     return `Uzm: ${names.join(', ')}`
-  }
+  }, [getSpecialistNamesForLocation])
 
   const getWeeklyPersonLocationLabel = (
     state: PlannerState,
@@ -3920,6 +3934,62 @@ function App() {
     setIsBackupLoading(false)
   }
 
+  const insertBackupSnapshot = async (
+    source: string,
+    payload: RemotePortalPayload = buildRemotePayload(data, userBindings),
+  ): Promise<BackupInsertResult> => {
+    if (!isSupabaseConfigured || !supabase) {
+      return { ok: false, skipped: true, missingTable: false }
+    }
+
+    const { error } = await supabase.from(REMOTE_STATE_HISTORY_TABLE).insert({
+      state_id: REMOTE_STATE_ROW_ID,
+      payload,
+      saved_at: new Date().toISOString(),
+      source,
+    })
+
+    if (error) {
+      const message = `${error.message ?? ''} ${error.details ?? ''}`.toLocaleLowerCase('tr')
+      return {
+        ok: false,
+        skipped: false,
+        missingTable: message.includes('portal_state_history') || message.includes('schema cache'),
+      }
+    }
+
+    return { ok: true, skipped: false, missingTable: false }
+  }
+
+  const createPreChangeBackup = async (source: string, throttleKey = source, force = false) => {
+    if (!isSupabaseConfigured || !supabase || !cloudCanWriteRef.current) {
+      return true
+    }
+
+    const nowMs = Date.now()
+    const lastBackupAt = preChangeBackupLastAtRef.current[throttleKey] ?? 0
+    if (!force && nowMs - lastBackupAt < PRE_CHANGE_BACKUP_MIN_INTERVAL_MS) {
+      return true
+    }
+
+    const result = await insertBackupSnapshot(source)
+    if (!result.ok) {
+      if (result.missingTable) {
+        showWarning('Yedek tablosu henüz kurulu değil. Kayıt devam edecek; yedek sistemi için Supabase SQL kurulumu gerekli.')
+        return true
+      }
+      showWarning('Otomatik güvenlik yedeği alınamadı. Kayıt devam edecek ama Yedekler modülünü kontrol et.')
+      return true
+    }
+
+    preChangeBackupLastAtRef.current = {
+      ...preChangeBackupLastAtRef.current,
+      [throttleKey]: nowMs,
+    }
+
+    return true
+  }
+
   const createManualBackup = async () => {
     if (!isSupabaseConfigured || !supabase) {
       showWarning('Manuel yedek için Supabase bağlantısı gerekli.')
@@ -3927,17 +3997,15 @@ function App() {
     }
 
     setIsBackupLoading(true)
-    const payload = buildRemotePayload(data, userBindings)
-    const { error } = await supabase.from(REMOTE_STATE_HISTORY_TABLE).insert({
-      state_id: REMOTE_STATE_ROW_ID,
-      payload,
-      saved_at: new Date().toISOString(),
-      source: 'manual-backup',
-    })
+    const result = await insertBackupSnapshot('manual-backup')
 
-    if (error) {
+    if (!result.ok) {
       setIsBackupLoading(false)
-      showWarning('Manuel yedek alınamadı. Supabase history tablosunu kontrol et.')
+      showWarning(
+        result.missingTable
+          ? 'Manuel yedek alınamadı. Supabase SQL ekranında portal_state_history tablosunu kurmalısın.'
+          : 'Manuel yedek alınamadı. Supabase history tablosunu kontrol et.',
+      )
       return
     }
 
@@ -3958,10 +4026,19 @@ function App() {
     if (
       typeof window !== 'undefined' &&
       !window.confirm(
-        `${new Date(backup.savedAt).toLocaleString('tr-TR')} tarihli yedeği geri yüklemek istediğine emin misin? Mevcut yayın verisi bu yedekle değişir.`,
+        `${new Date(backup.savedAt).toLocaleString('tr-TR')} tarihli yedeği geri yüklemek istediğine emin misin? Mevcut yayın verisi bu yedekle değişir. İşlem öncesi mevcut online verinin ayrı yedeği alınacak.`,
       )
     ) {
       return
+    }
+    if (typeof window !== 'undefined') {
+      const typedApproval = window.prompt(
+        'Yanlış tıklamayı önlemek için devam etmek istiyorsan YEDEGE DON yaz.',
+      )
+      if (typedApproval?.trim().toLocaleUpperCase('tr') !== 'YEDEGE DON') {
+        showWarning('Yedek geri yükleme iptal edildi.')
+        return
+      }
     }
 
     const fallback = buildFallbackState()
@@ -3974,14 +4051,54 @@ function App() {
     const nextUpdatedAt = new Date().toISOString()
 
     setIsBackupLoading(true)
-    const { data: updatedRows, error } = await supabase
+    const { data: remoteRow, error: remoteReadError } = await supabase
+      .from(REMOTE_STATE_TABLE)
+      .select('payload, updated_at')
+      .eq('id', REMOTE_STATE_ROW_ID)
+      .maybeSingle()
+
+    if (remoteReadError || !remoteRow) {
+      setIsBackupLoading(false)
+      showWarning('Geri yükleme durduruldu. Mevcut online veri okunamadı.')
+      return
+    }
+
+    const remoteUpdatedAt =
+      typeof remoteRow.updated_at === 'string' && remoteRow.updated_at ? remoteRow.updated_at : null
+    const knownRevision = cloudRevisionRef.current
+    if (knownRevision && remoteUpdatedAt && knownRevision !== remoteUpdatedAt) {
+      cloudCanWriteRef.current = false
+      setCloudState('error')
+      setCloudStateText(CLOUD_CONFLICT_TEXT)
+      setIsBackupLoading(false)
+      showWarning('Online veri bu ekrandan sonra değişmiş. Geri yükleme durduruldu; sayfayı yenileyip tekrar dene.')
+      return
+    }
+
+    const currentRemotePayload =
+      remoteRow.payload && typeof remoteRow.payload === 'object'
+        ? (remoteRow.payload as RemotePortalPayload)
+        : buildRemotePayload(data, userBindings)
+    const preRestoreBackup = await insertBackupSnapshot(`before-restore-${backup.id}`, currentRemotePayload)
+    if (!preRestoreBackup.ok) {
+      setIsBackupLoading(false)
+      showWarning(
+        preRestoreBackup.missingTable
+          ? 'Geri yükleme durduruldu. Önce Supabase SQL ekranında portal_state_history tablosunu kurmalısın.'
+          : 'Geri yükleme öncesi güvenlik yedeği alınamadı. İşlem durduruldu.',
+      )
+      return
+    }
+
+    const updateBase = supabase
       .from(REMOTE_STATE_TABLE)
       .update({
         payload: restoredPayload,
         updated_at: nextUpdatedAt,
       })
       .eq('id', REMOTE_STATE_ROW_ID)
-      .select('updated_at')
+    const guardedUpdate = remoteUpdatedAt ? updateBase.eq('updated_at', remoteUpdatedAt) : updateBase
+    const { data: updatedRows, error } = await guardedUpdate.select('updated_at')
 
     if (error) {
       setIsBackupLoading(false)
@@ -4016,12 +4133,15 @@ function App() {
     await refreshBackups()
   }
 
-  const saveOwnersMonth = () => {
+  const saveOwnersMonth = async () => {
     if (!ownersEditMode) {
       return
     }
     if (!isValidMonthISO(ownersMonth)) {
       showWarning('Kaydetmek için geçerli bir ay seçmelisin.')
+      return
+    }
+    if (!(await createPreChangeBackup(`before-owners-save-${ownersMonth}`, 'owners-save'))) {
       return
     }
 
@@ -4540,7 +4660,7 @@ function App() {
     })
   }
 
-  const importDutyQuickLines = () => {
+  const importDutyQuickLines = async () => {
     const yearFromMonth = Number(dutyMonth.slice(0, 4))
     const fallbackYear = Number.isNaN(yearFromMonth) ? new Date().getFullYear() : yearFromMonth
     const parsed = parseDutyQuickLines(dutyQuickText, fallbackYear)
@@ -4557,6 +4677,9 @@ function App() {
     }
 
     const issueMessages = [...issueMessagesFromParser]
+    if (!(await createPreChangeBackup(`before-duty-import-${dutyMonth}`, 'duty-import', true))) {
+      return
+    }
 
     setData((previous) => {
       const mergedDuty: DutyRoster = { ...previous.dutyRoster }
@@ -4669,7 +4792,7 @@ function App() {
     showWarning(`${specialistEditDay} için taslak değişiklikler iptal edildi.`)
   }
 
-  const saveSpecialistDateEdit = () => {
+  const saveSpecialistDateEdit = async () => {
     if (!specialistDateEditMode) {
       return
     }
@@ -4682,6 +4805,9 @@ function App() {
     )
     if (!approved) {
       showWarning('Kaydetme onayı verilmedi. Taslak değişiklikler korunuyor.')
+      return
+    }
+    if (!(await createPreChangeBackup(`before-specialist-save-${specialistEditDay}`, 'specialist-day-save'))) {
       return
     }
 
@@ -4782,7 +4908,7 @@ function App() {
     setSpecialistWorkText('')
   }
 
-  const importSpecialistDutyLines = () => {
+  const importSpecialistDutyLines = async () => {
     if (!specialistDateEditMode) {
       showWarning('Nöbetçi uzman verisi düzenlemek için önce "Değiştir" butonuna bas.')
       return
@@ -4822,6 +4948,9 @@ function App() {
       if (!approved) {
         setSpecialistDutyIssues(['Çok günlük aktarım onaylanmadı. Kayıt yapılmadı.'])
         showWarning('Çok günlük nöbetçi uzman aktarımı iptal edildi.')
+        return
+      }
+      if (!(await createPreChangeBackup(`before-specialist-duty-import-${specialistMonth}`, 'specialist-duty-import', true))) {
         return
       }
 
@@ -4970,7 +5099,7 @@ function App() {
     showWarning(`${dayKey} için taslak değişiklikler iptal edildi.`)
   }
 
-  const savePlannerDay = (dayKey: string) => {
+  const savePlannerDay = async (dayKey: string) => {
     if (!isPlannerDayInEditMode(dayKey)) {
       showWarning('Kaydetmek için önce Değiştir ile düzenlemeyi aç.')
       return
@@ -4979,6 +5108,9 @@ function App() {
     const dayDraftAssignments = cloneDayLocationAssignments(
       plannerDraftAssignments[dayKey] ?? data.manualAssignments[dayKey],
     )
+    if (!(await createPreChangeBackup(`before-planner-day-save-${dayKey}`, 'planner-day-save'))) {
+      return
+    }
 
     setData((previous) => {
       const nextManualAssignments = {
@@ -5404,7 +5536,7 @@ function App() {
         dayTypeLabel,
       }
     })
-  }, [data, observerWeekRoom, observerWeeklyDays, sortedLocations])
+  }, [data, getSpecialistNamesForLocation, observerWeekRoom, observerWeeklyDays, sortedLocations])
 
   const weekDutyAssignmentsForSite = useMemo(() => {
     return observerWeeklyDays.map((day) => {
@@ -5625,7 +5757,7 @@ function App() {
       }
     })
     return entries
-  }, [assistantTableCalendarWeeks, data, loggedAssistantName, sortedLocations])
+  }, [assistantTableCalendarWeeks, data, getSpecialistLabelForLocation, loggedAssistantName, sortedLocations])
 
   const adminDutyTableModel = useMemo(
     () =>
@@ -5671,7 +5803,7 @@ function App() {
       (location) => location.kind === 'normal',
     )
     return groupBySite(dayLocations, specialistDay)
-  }, [data, specialistDay])
+  }, [data, groupBySite, specialistDay])
   const specialistWorkPreviewMap = useMemo<SpecialistWorkDayAssignments>(() => {
     if (specialistDateEditMode && specialistDay === specialistEditDay) {
       return specialistWorkDraft
@@ -5817,7 +5949,7 @@ function App() {
     }
 
     return groups.filter((group) => group.rows.length > 0)
-  }, [data, plannerWeeklyExportDays, plannerWeeklyExportWeekStartISO])
+  }, [data, getSpecialistNamesForLocation, plannerWeeklyExportDays, plannerWeeklyExportWeekStartISO])
 
   const renderDutyListTable = (tableModel: DutyTableModel, keyPrefix: string) => (
     <div className="duty-list-table-wrap">
