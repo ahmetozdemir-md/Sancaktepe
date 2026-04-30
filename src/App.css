@@ -2631,17 +2631,17 @@ code {
     line-height: 1.2;
   }
 
-  /* Mobil tablo ekranlarında içerik %25 küçültülür (0.75 ölçek). */
+  /* Mobil tablo ekranlarında içerik 0.25 ölçekle gösterilir. */
   .assistant-monthly-table-sheet .assistant-monthly-calendar-inner {
-    width: 133.3333%;
-    transform: scale(0.75);
+    width: 400%;
+    transform: scale(0.25);
     transform-origin: top left;
   }
 
   .assistant-monthly-table-sheet .duty-list-table {
-    width: 133.3333%;
-    min-width: 133.3333%;
-    transform: scale(0.75);
+    width: 400%;
+    min-width: 400%;
+    transform: scale(0.25);
     transform-origin: top left;
   }
 
@@ -2660,10 +2660,10 @@ code {
   }
 
   .weekly-export-table {
-    width: 133.3333%;
-    min-width: 133.3333%;
+    width: 400%;
+    min-width: 400%;
     table-layout: fixed;
-    transform: scale(0.75);
+    transform: scale(0.25);
     transform-origin: top left;
   }
 
