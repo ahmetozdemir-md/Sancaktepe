@@ -1124,6 +1124,10 @@ body.table-pan-unlocked .duty-list-table-wrap {
   gap: 0.22rem;
 }
 
+.weekly-duty-name-stack {
+  width: 100%;
+}
+
 .duty-specialist-row,
 .duty-assistant-row {
   display: flex;

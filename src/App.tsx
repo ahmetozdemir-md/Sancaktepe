@@ -5408,16 +5408,22 @@ function App() {
 
   const weekDutyAssignmentsForSite = useMemo(() => {
     return observerWeeklyDays.map((day) => {
+      const specialistNames = sortSpecialistDutyAssignments(
+        (data.specialistDutyRoster[day.key] ?? []).filter(
+          (entry) => mapSpecialistDutySiteToDutySite(entry.site) === observerWeekDutySite,
+        ),
+      ).map(formatSpecialistDutyLabel)
       const names = sortDutyAssignments(
         (data.dutyRoster[day.key] ?? []).filter((entry) => entry.site === observerWeekDutySite),
         data.assistantRanks,
       ).map((entry) => entry.name)
       return {
         day,
+        specialistNames,
         names,
       }
     })
-  }, [data.assistantRanks, data.dutyRoster, observerWeekDutySite, observerWeeklyDays])
+  }, [data.assistantRanks, data.dutyRoster, data.specialistDutyRoster, observerWeekDutySite, observerWeeklyDays])
 
   const loggedAssistantName = session?.role === 'assistant' ? session.assistantName ?? '' : ''
   const myWeekAssignments = useMemo(() => {
@@ -7890,19 +7896,41 @@ function App() {
                   </div>
 
                   <div className="timeline-grid">
-                    {weekDutyAssignmentsForSite.map(({ day, names }) => (
+                    {weekDutyAssignmentsForSite.map(({ day, names, specialistNames }) => (
                       <article key={`timeline-duty-${day.key}`} className="timeline-card">
                         <header>
                           <strong>{day.shortLabel}</strong>
                           <small>{day.key}</small>
                         </header>
                         <div className="chip-wrap">
-                          {names.length ? (
-                            names.map((name) => (
-                              <span key={`${day.key}-${observerWeekDutySite}-${name}`} className="chip duty-site-chip">
-                                {name}
-                              </span>
-                            ))
+                          {specialistNames.length || names.length ? (
+                            <div className="duty-name-stack weekly-duty-name-stack">
+                              {specialistNames.length ? (
+                                <div className="duty-specialist-row" aria-label={`${observerWeekDutySite} nöbetçi uzmanları`}>
+                                  {specialistNames.map((name) => (
+                                    <span
+                                      key={`${day.key}-${observerWeekDutySite}-specialist-${name}`}
+                                      className="duty-name-line specialist-duty-name-line"
+                                    >
+                                      {name}
+                                    </span>
+                                  ))}
+                                </div>
+                              ) : null}
+
+                              {names.length ? (
+                                <div className="duty-assistant-row" aria-label={`${observerWeekDutySite} nöbetçi asistanları`}>
+                                  {names.map((name) => (
+                                    <span
+                                      key={`${day.key}-${observerWeekDutySite}-${name}`}
+                                      className="chip duty-site-chip"
+                                    >
+                                      {name}
+                                    </span>
+                                  ))}
+                                </div>
+                              ) : null}
+                            </div>
                           ) : (
                             <span className="empty">Bu hastanede nöbetçi görünmüyor</span>
                           )}
