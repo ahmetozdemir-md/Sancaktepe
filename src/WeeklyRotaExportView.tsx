@@ -6,10 +6,15 @@ export interface WeeklyRotaExportDay {
   shortDate: string
 }
 
+export interface WeeklyRotaExportCell {
+  names: string[]
+  specialists?: string[]
+}
+
 export interface WeeklyRotaExportRow {
   id: string
   unitLabel: string
-  cells: string[][]
+  cells: WeeklyRotaExportCell[]
 }
 
 export interface WeeklyRotaExportGroup {
@@ -92,11 +97,19 @@ function WeeklyRotaExportView({
 
                     <th className="unit-col">{row.unitLabel}</th>
 
-                    {row.cells.map((names, cellIndex) => (
+                    {row.cells.map((cell, cellIndex) => (
                       <td key={`weekly-export-cell-${group.id}-${row.id}-${cellIndex}`}>
-                        {names.length ? (
+                        {cell.specialists?.length || cell.names.length ? (
                           <div className="weekly-export-name-stack">
-                            {names.map((name) => (
+                            {cell.specialists?.map((specialistLabel) => (
+                              <span
+                                key={`weekly-export-specialist-${group.id}-${row.id}-${cellIndex}-${specialistLabel}`}
+                                className="weekly-export-specialist-line"
+                              >
+                                {specialistLabel}
+                              </span>
+                            ))}
+                            {cell.names.map((name) => (
                               <span key={`weekly-export-name-${group.id}-${row.id}-${cellIndex}-${name}`}>
                                 {name}
                               </span>

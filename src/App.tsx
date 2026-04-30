@@ -19,23 +19,42 @@ import AssistantMonthlyTableView, {
 } from './AssistantMonthlyTableView'
 
 type PanelMode = 'admin' | 'observer'
-type AdminSection = 'assistants' | 'locations' | 'duty' | 'planner'
+type AdminSection = 'assistants' | 'locations' | 'duty' | 'planner' | 'specialists'
 type ObserverSection = 'myPanel' | 'personWeek' | 'dailyMap'
 type PlannerView = 'rooms' | 'status'
 type LocationKind = 'normal' | 'leave' | 'duty' | 'postDuty'
 type LocationTone = 'sand' | 'sage' | 'amber' | 'sky' | 'rose'
 type DutySite = 'Sancaktepe' | 'Feriha Öz' | 'Çekmeköy'
+type SpecialistDutySite =
+  | 'Sancaktepe'
+  | 'Çekmeköy'
+  | 'Feriha C123'
+  | 'Feriha C456'
+  | 'Feriha G123'
 type SeniorityLevel = number
 
 type ManualAssignments = Record<string, Record<string, string[]>>
 type DutyRoster = Record<string, DutyAssignment[]>
+type SpecialistWorkAssignments = Record<string, Record<string, string[]>>
+type SpecialistDutyRoster = Record<string, SpecialistDutyAssignment[]>
 type LocationOwners = Record<string, string[]>
 type LocationOwnersByMonth = Record<string, LocationOwners>
+type PostDutyPoolByMonth = Record<string, string[]>
 type AssistantRanks = Record<string, SeniorityLevel>
 
 interface DutyAssignment {
   name: string
   site: DutySite
+}
+
+interface SpecialistDutyAssignment {
+  name: string
+  site: SpecialistDutySite
+}
+
+interface DutyCellEntry {
+  label: string
+  kind: 'assistant' | 'specialist'
 }
 
 interface SessionInfo {
@@ -62,8 +81,11 @@ interface PlannerState {
   locations: WorkLocation[]
   locationOwners: LocationOwners
   locationOwnersByMonth: LocationOwnersByMonth
+  postDutyPoolByMonth: PostDutyPoolByMonth
   manualAssignments: ManualAssignments
   dutyRoster: DutyRoster
+  specialistWorkAssignments: SpecialistWorkAssignments
+  specialistDutyRoster: SpecialistDutyRoster
   weekStartISO: string
 }
 
@@ -93,7 +115,7 @@ interface OfficialHolidayEntry {
 
 interface DutyTableRow {
   dayKey: string
-  bySite: Record<DutySite, string[]>
+  bySite: Record<DutySite, DutyCellEntry[]>
   weekend: boolean
   holidayReason: string | null
 }
@@ -108,6 +130,12 @@ interface Notice {
 }
 
 interface DutyParseIssue {
+  lineNumber: number
+  message: string
+  rawLine: string
+}
+
+interface SpecialistParseIssue {
   lineNumber: number
   message: string
   rawLine: string
@@ -133,10 +161,27 @@ const CLOUD_CONFLICT_TEXT =
   'Bulutta daha yeni bir kayıt var. Güvenlik için üzerine yazma engellendi; sayfayı yenileyip tekrar dene.'
 const APP_PASSWORD = '1234'
 const DUTY_SITES: DutySite[] = ['Sancaktepe', 'Feriha Öz', 'Çekmeköy']
+const SPECIALIST_DUTY_SITES: SpecialistDutySite[] = [
+  'Sancaktepe',
+  'Çekmeköy',
+  'Feriha C123',
+  'Feriha C456',
+  'Feriha G123',
+]
 const REMOTE_SAVE_DEBOUNCE_MS = 900
 const DUTY_SITE_ORDER = new Map<DutySite, number>(
   DUTY_SITES.map((site, index) => [site, index]),
 )
+const SPECIALIST_DUTY_SITE_ORDER = new Map<SpecialistDutySite, number>(
+  SPECIALIST_DUTY_SITES.map((site, index) => [site, index]),
+)
+const SPECIALIST_DUTY_SITE_LABELS: Record<SpecialistDutySite, string> = {
+  Sancaktepe: 'Sancaktepe',
+  Çekmeköy: 'Çekmeköy',
+  'Feriha C123': 'C1-2-3',
+  'Feriha C456': 'C4-5-6',
+  'Feriha G123': 'G1-2-3',
+}
 const LOCATION_SITE_ID_PREFIX: Record<DutySite, string> = {
   Sancaktepe: 'sancak',
   'Feriha Öz': 'feriha-oz',
@@ -703,6 +748,92 @@ function normalizeDutySite(rawSite: string): DutySite | null {
   return null
 }
 
+function normalizeLooseToken(value: string): string {
+  return normalizeTrToken(value)
+    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function normalizeSpecialistDutySite(rawSite: string): SpecialistDutySite | null {
+  const token = normalizeLooseToken(rawSite).replace(/\s+/g, '')
+  if (!token) {
+    return null
+  }
+
+  if (token === 'sancaktepe' || token === 'sancak') {
+    return 'Sancaktepe'
+  }
+  if (token === 'cekmekoy' || token === 'cekmekoyhastanesi') {
+    return 'Çekmeköy'
+  }
+
+  const isFeriha = token.includes('feriha') || token.startsWith('c') || token.startsWith('g')
+  if (!isFeriha) {
+    return null
+  }
+
+  if (/(c123|c1-2-3|c1_2_3|c1\/2\/3|c12?3)/.test(token)) {
+    return 'Feriha C123'
+  }
+  if (/(c456|c4-5-6|c4_5_6|c4\/5\/6|c45?6)/.test(token)) {
+    return 'Feriha C456'
+  }
+  if (/(g123|g1-2-3|g1_2_3|g1\/2\/3|g12?3)/.test(token)) {
+    return 'Feriha G123'
+  }
+
+  return null
+}
+
+function sortSpecialistDutyAssignments(
+  assignments: SpecialistDutyAssignment[],
+): SpecialistDutyAssignment[] {
+  return [...assignments].sort(
+    (left, right) =>
+      (SPECIALIST_DUTY_SITE_ORDER.get(left.site) ?? 99) -
+        (SPECIALIST_DUTY_SITE_ORDER.get(right.site) ?? 99) ||
+      left.name.localeCompare(right.name, 'tr'),
+  )
+}
+
+function uniqueSpecialistDutyAssignments(
+  assignments: SpecialistDutyAssignment[],
+): SpecialistDutyAssignment[] {
+  const uniqueMap = new Map<string, SpecialistDutyAssignment>()
+
+  assignments.forEach((assignment) => {
+    const name = assignment.name.trim()
+    if (!name) {
+      return
+    }
+    const key = `${name}::${assignment.site}`
+    if (uniqueMap.has(key)) {
+      return
+    }
+    uniqueMap.set(key, { name, site: assignment.site })
+  })
+
+  return sortSpecialistDutyAssignments([...uniqueMap.values()])
+}
+
+function mapSpecialistDutySiteToDutySite(site: SpecialistDutySite): DutySite {
+  if (site === 'Sancaktepe') {
+    return 'Sancaktepe'
+  }
+  if (site === 'Çekmeköy') {
+    return 'Çekmeköy'
+  }
+  return 'Feriha Öz'
+}
+
+function formatSpecialistDutyLabel(entry: SpecialistDutyAssignment): string {
+  if (entry.site === 'Sancaktepe' || entry.site === 'Çekmeköy') {
+    return `Uzm: ${entry.name}`
+  }
+  return `Uzm: ${entry.name} (${SPECIALIST_DUTY_SITE_LABELS[entry.site]})`
+}
+
 function slugifyLocationName(value: string): string {
   return value
     .trim()
@@ -807,6 +938,138 @@ function normalizeTrToken(value: string): string {
     .replace(/ö/g, 'o')
     .replace(/ü/g, 'u')
     .replace(/ç/g, 'c')
+}
+
+function parseTurkishMonthDate(raw: string, fallbackYear: number): string | null {
+  const token = raw.trim()
+  if (!token) {
+    return null
+  }
+
+  const match = token.match(/^(\d{1,2})\s+([A-Za-zÇĞİÖŞÜçğıöşü]+)\s*(\d{4})?$/u)
+  if (!match) {
+    return null
+  }
+
+  const monthToken = normalizeLooseToken(match[2]).replace(/\s+/g, '')
+  const monthLookup = new Map<string, number>([
+    ['ocak', 1],
+    ['subat', 2],
+    ['mart', 3],
+    ['nisan', 4],
+    ['mayis', 5],
+    ['haziran', 6],
+    ['temmuz', 7],
+    ['agustos', 8],
+    ['eylul', 9],
+    ['ekim', 10],
+    ['kasim', 11],
+    ['aralik', 12],
+  ])
+  const month = monthLookup.get(monthToken)
+  if (!month) {
+    return null
+  }
+
+  const day = Number(match[1])
+  const year = match[3] ? Number(match[3]) : fallbackYear
+  if (!Number.isFinite(day) || day < 1 || day > 31 || !Number.isFinite(year) || year < 1900) {
+    return null
+  }
+
+  const parsed = new Date(year, month - 1, day)
+  if (
+    parsed.getFullYear() !== year ||
+    parsed.getMonth() !== month - 1 ||
+    parsed.getDate() !== day
+  ) {
+    return null
+  }
+  return toISODate(parsed)
+}
+
+function normalizeSpecialistDateToken(raw: string, fallbackYear: number): string | null {
+  return normalizeDateToken(raw) ?? parseTurkishMonthDate(raw, fallbackYear)
+}
+
+function buildLocationLookupTokens(location: WorkLocation): Set<string> {
+  const tokenSet = new Set<string>()
+  const siteToken = normalizeLooseToken(location.site)
+  const nameToken = normalizeLooseToken(location.name)
+
+  if (nameToken) {
+    tokenSet.add(nameToken)
+  }
+  if (siteToken && nameToken) {
+    tokenSet.add(`${siteToken} ${nameToken}`)
+  }
+
+  const numericRoomMatch = location.name.match(/ameliyathane\s*(\d+)/iu)
+  if (numericRoomMatch && siteToken) {
+    tokenSet.add(`${siteToken} ameliyathane ${numericRoomMatch[1]}`)
+  }
+
+  const codeMatch = location.name.match(/^(C\d+|G\d+)/iu)
+  if (codeMatch && siteToken) {
+    tokenSet.add(`${siteToken} ${normalizeLooseToken(codeMatch[1])}`)
+  }
+
+  return tokenSet
+}
+
+function resolveSpecialistWorkLocation(
+  locations: WorkLocation[],
+  dayKey: string,
+  rawArea: string,
+): { location: WorkLocation | null; reason?: string } {
+  const normalizedArea = normalizeLooseToken(rawArea)
+  if (!normalizedArea) {
+    return { location: null, reason: 'Alan bilgisi boş.' }
+  }
+
+  const normalLocations = locations.filter((location) => location.kind === 'normal')
+  const activeNormals = normalLocations.filter((location) => isLocationActiveOnDay(location, dayKey))
+  const searchPool = activeNormals.length ? activeNormals : normalLocations
+
+  const exactMatches = searchPool.filter((location) =>
+    buildLocationLookupTokens(location).has(normalizedArea),
+  )
+  if (exactMatches.length === 1) {
+    return { location: exactMatches[0] }
+  }
+  if (exactMatches.length > 1) {
+    return {
+      location: null,
+      reason: `"${rawArea}" birden fazla alana eşleşti. Lütfen hastane adını da yaz.`,
+    }
+  }
+
+  const fuzzyMatches = searchPool.filter((location) => {
+    const tokens = [...buildLocationLookupTokens(location)]
+    return tokens.some(
+      (token) =>
+        token.includes(normalizedArea) ||
+        (normalizedArea.length > 5 && normalizedArea.includes(token)),
+    )
+  })
+  if (fuzzyMatches.length === 1) {
+    return { location: fuzzyMatches[0] }
+  }
+  if (fuzzyMatches.length > 1) {
+    return {
+      location: null,
+      reason: `"${rawArea}" belirsiz eşleşti. Lütfen daha net alan adı yaz.`,
+    }
+  }
+
+  return { location: null, reason: `"${rawArea}" için eşleşen alan bulunamadı.` }
+}
+
+function getSpecialistsForLocation(state: PlannerState, dayKey: string, locationId: string): string[] {
+  return sortAssistantNamesByRank(
+    uniqueSortedNames(state.specialistWorkAssignments[dayKey]?.[locationId] ?? []),
+    undefined,
+  )
 }
 
 function getWeeklyExportUnitLabel(location: WorkLocation): string {
@@ -1067,6 +1330,16 @@ function getLocationOwnersForDay(state: PlannerState, dayKey: string): LocationO
   return getLocationOwnersForMonth(state, monthFromDayKey(dayKey))
 }
 
+function getPostDutyPoolForMonth(state: PlannerState, monthISO: string): string[] {
+  return uniqueSortedNames(
+    (state.postDutyPoolByMonth[monthISO] ?? []).filter((name) => state.assistants.includes(name)),
+  )
+}
+
+function getPostDutyPoolForDay(state: PlannerState, dayKey: string): string[] {
+  return getPostDutyPoolForMonth(state, monthFromDayKey(dayKey))
+}
+
 function cloneOwnersForNormalLocations(
   owners: LocationOwners,
   locations: WorkLocation[],
@@ -1210,18 +1483,30 @@ function buildMonthCalendarGrid(monthISO: string): CalendarCellInfo[][] {
 
 function buildDutyTableModel(
   dutyRoster: DutyRoster,
+  specialistDutyRoster: SpecialistDutyRoster,
   monthISO: string,
   assistantRanks?: AssistantRanks,
 ): DutyTableModel {
   const rows: DutyTableRow[] = listMonthDays(monthISO).map((dayKey) => {
     const entries = sortDutyAssignments(dutyRoster[dayKey] ?? [], assistantRanks)
-    const bySite: Record<DutySite, string[]> = {
+    const specialistEntries = sortSpecialistDutyAssignments(specialistDutyRoster[dayKey] ?? [])
+    const bySite: Record<DutySite, DutyCellEntry[]> = {
       Sancaktepe: [],
       'Feriha Öz': [],
       Çekmeköy: [],
     }
     entries.forEach((entry) => {
-      bySite[entry.site].push(entry.name)
+      bySite[entry.site].push({
+        label: entry.name,
+        kind: 'assistant',
+      })
+    })
+    specialistEntries.forEach((entry) => {
+      const site = mapSpecialistDutySiteToDutySite(entry.site)
+      bySite[site].push({
+        label: formatSpecialistDutyLabel(entry),
+        kind: 'specialist',
+      })
     })
 
     return {
@@ -1406,6 +1691,171 @@ function parseDutyQuickLines(
   return { data, issues, totalNames }
 }
 
+function parseSpecialistWorkQuickLines(
+  text: string,
+  fallbackYear: number,
+  locations: WorkLocation[],
+): { data: SpecialistWorkAssignments; issues: SpecialistParseIssue[]; totalNames: number } {
+  const data: SpecialistWorkAssignments = {}
+  const issues: SpecialistParseIssue[] = []
+
+  text
+    .split(/\r?\n/)
+    .forEach((rawLine, index) => {
+      const line = rawLine.trim()
+      if (!line) {
+        return
+      }
+
+      const strictMatch = line.match(/^(.+?)\s+-\s+(.+?)\s+-\s+(.+)$/u)
+      const looseParts = line.split('-').map((part) => part.trim()).filter(Boolean)
+      const parts =
+        strictMatch?.slice(1, 4) ??
+        (looseParts.length >= 3 ? [looseParts[0], looseParts[1], looseParts.slice(2).join('-')] : null)
+      if (!parts) {
+        issues.push({
+          lineNumber: index + 1,
+          rawLine,
+          message: 'Biçim hatası. Örnek: 27 Nisan 2026 - Sami Yarkın Sözüer - Sancaktepe Ameliyathane 1',
+        })
+        return
+      }
+
+      let dateToken = parts[0]
+      let nameToken = parts[1]
+      let areaToken = parts.slice(2).join(' - ')
+      let dayKey = normalizeSpecialistDateToken(dateToken, fallbackYear)
+
+      // Eski serbest formatla girilmiş satırları da (İsim - Alan - Tarih) tolere et.
+      if (!dayKey) {
+        const altDateToken = parts[parts.length - 1]
+        const altDayKey = normalizeSpecialistDateToken(altDateToken, fallbackYear)
+        if (altDayKey) {
+          dayKey = altDayKey
+          dateToken = altDateToken
+          nameToken = parts[0]
+          areaToken = parts.slice(1, parts.length - 1).join(' - ')
+        }
+      }
+
+      if (!dayKey) {
+        issues.push({
+          lineNumber: index + 1,
+          rawLine,
+          message: `Tarih çözümlenemedi (${dateToken}).`,
+        })
+        return
+      }
+
+      const specialistName = normalizeAssistantName(nameToken)
+      if (!specialistName) {
+        issues.push({
+          lineNumber: index + 1,
+          rawLine,
+          message: 'Uzman adı boş veya geçersiz.',
+        })
+        return
+      }
+
+      const resolved = resolveSpecialistWorkLocation(locations, dayKey, areaToken)
+      if (!resolved.location) {
+        issues.push({
+          lineNumber: index + 1,
+          rawLine,
+          message: resolved.reason ?? 'Alan eşleşmedi.',
+        })
+        return
+      }
+
+      const locationId = resolved.location.id
+      const previousDayMap = data[dayKey] ?? {}
+      const previousNames = previousDayMap[locationId] ?? []
+      data[dayKey] = {
+        ...previousDayMap,
+        [locationId]: uniqueSortedNames([...previousNames, specialistName]),
+      }
+    })
+
+  const totalNames = Object.values(data).reduce(
+    (count, locationMap) =>
+      count + Object.values(locationMap).reduce((inner, names) => inner + names.length, 0),
+    0,
+  )
+
+  return { data, issues, totalNames }
+}
+
+function parseSpecialistDutyQuickLines(
+  text: string,
+  fallbackYear: number,
+): { data: SpecialistDutyRoster; issues: SpecialistParseIssue[]; totalNames: number } {
+  const data: SpecialistDutyRoster = {}
+  const issues: SpecialistParseIssue[] = []
+
+  text
+    .split(/\r?\n/)
+    .forEach((rawLine, index) => {
+      const line = rawLine.trim()
+      if (!line) {
+        return
+      }
+
+      const strictMatch = line.match(/^(.+?)\s+-\s+(.+?)\s+-\s+(.+)$/u)
+      const looseParts = line.split('-').map((part) => part.trim()).filter(Boolean)
+      const parts =
+        strictMatch?.slice(1, 4) ??
+        (looseParts.length >= 3 ? [looseParts[0], looseParts[1], looseParts.slice(2).join('-')] : null)
+      if (!parts) {
+        issues.push({
+          lineNumber: index + 1,
+          rawLine,
+          message: 'Biçim hatası. Örnek: 1 Nisan 2026 - Sami Yarkın Sözüer - Sancaktepe',
+        })
+        return
+      }
+
+      const dateToken = parts[0]
+      const specialistName = normalizeAssistantName(parts[1])
+      const siteToken = parts.slice(2).join(' - ')
+      const dayKey = normalizeSpecialistDateToken(dateToken, fallbackYear)
+      const site = normalizeSpecialistDutySite(siteToken)
+
+      if (!dayKey) {
+        issues.push({
+          lineNumber: index + 1,
+          rawLine,
+          message: `Tarih çözümlenemedi (${dateToken}).`,
+        })
+        return
+      }
+      if (!specialistName) {
+        issues.push({
+          lineNumber: index + 1,
+          rawLine,
+          message: 'Uzman adı boş veya geçersiz.',
+        })
+        return
+      }
+      if (!site) {
+        issues.push({
+          lineNumber: index + 1,
+          rawLine,
+          message: `Nöbet yeri geçersiz (${siteToken}).`,
+        })
+        return
+      }
+
+      data[dayKey] = uniqueSpecialistDutyAssignments([
+        ...(data[dayKey] ?? []),
+        { name: specialistName, site },
+      ])
+    })
+
+  const totalNames = Object.values(data).reduce((count, entries) => count + entries.length, 0)
+
+  return { data, issues, totalNames }
+}
+
 function sanitizeManualAssignments(
   manualAssignments: ManualAssignments,
   dutyRoster: DutyRoster,
@@ -1454,6 +1904,70 @@ function sanitizeManualAssignments(
   })
 
   return { manualAssignments: next, removedCount }
+}
+
+function sanitizeSpecialistWorkAssignments(
+  specialistWorkAssignments: unknown,
+  locations: WorkLocation[],
+): SpecialistWorkAssignments {
+  if (!specialistWorkAssignments || typeof specialistWorkAssignments !== 'object') {
+    return {}
+  }
+
+  const normalLocationIds = new Set(
+    locations.filter((location) => location.kind === 'normal').map((location) => location.id),
+  )
+
+  return Object.fromEntries(
+    Object.entries(specialistWorkAssignments as Record<string, unknown>)
+      .filter(([dayKey, dayMap]) => hasIsoShape(dayKey) && dayMap && typeof dayMap === 'object')
+      .map(([dayKey, dayMap]) => {
+        const normalizedDayMap = Object.fromEntries(
+          Object.entries(dayMap as Record<string, unknown>)
+            .filter(([locationId, names]) => normalLocationIds.has(locationId) && Array.isArray(names))
+            .map(([locationId, names]) => [
+              locationId,
+              uniqueSortedNames(
+                (names as unknown[])
+                  .filter((name): name is string => typeof name === 'string')
+                  .map((name) => normalizeAssistantName(name))
+                  .filter(Boolean),
+              ),
+            ]),
+        )
+
+        return [dayKey, normalizedDayMap]
+      }),
+  )
+}
+
+function sanitizeSpecialistDutyRoster(raw: unknown): SpecialistDutyRoster {
+  if (!raw || typeof raw !== 'object') {
+    return {}
+  }
+
+  return Object.fromEntries(
+    Object.entries(raw as Record<string, unknown>)
+      .filter(([dayKey, entries]) => hasIsoShape(dayKey) && Array.isArray(entries))
+      .map(([dayKey, entries]) => {
+        const normalizedEntries = (entries as unknown[])
+          .map((entry) => {
+            if (typeof entry !== 'object' || entry === null) {
+              return null
+            }
+
+            const name = normalizeAssistantName(String((entry as { name?: unknown }).name ?? ''))
+            const site = normalizeSpecialistDutySite(String((entry as { site?: unknown }).site ?? ''))
+            if (!name || !site) {
+              return null
+            }
+            return { name, site }
+          })
+          .filter((entry): entry is SpecialistDutyAssignment => Boolean(entry))
+
+        return [dayKey, uniqueSpecialistDutyAssignments(normalizedEntries)]
+      }),
+  )
 }
 
 function removeNameFromManual(
@@ -1611,8 +2125,13 @@ function buildFallbackState(): PlannerState {
     locationOwnersByMonth: {
       [currentMonthISO]: fallbackLocationOwners,
     },
+    postDutyPoolByMonth: {
+      [currentMonthISO]: [],
+    },
     manualAssignments: createSampleManual(weekStartISO, DEFAULT_LOCATIONS, fallbackLocationOwners),
     dutyRoster: createSampleDuty(weekStartISO),
+    specialistWorkAssignments: {},
+    specialistDutyRoster: {},
     weekStartISO,
   }
 }
@@ -1695,6 +2214,28 @@ function sanitizePlannerState(parsed: Partial<PlannerState>, fallback: PlannerSt
     normalizedLocationOwnersByMonth[currentMonthISO] = normalizedLocationOwners
   }
 
+  const rawPostDutyPoolByMonth = (parsed as { postDutyPoolByMonth?: Record<string, unknown> })
+    .postDutyPoolByMonth
+  const normalizedPostDutyPoolByMonth: PostDutyPoolByMonth =
+    rawPostDutyPoolByMonth && typeof rawPostDutyPoolByMonth === 'object'
+      ? Object.fromEntries(
+          Object.entries(rawPostDutyPoolByMonth)
+            .filter(([monthISO, names]) => isValidMonthISO(monthISO) && Array.isArray(names))
+            .map(([monthISO, names]) => [
+              monthISO,
+              uniqueSortedNames(
+                (names as unknown[])
+                  .filter((name): name is string => typeof name === 'string')
+                  .map((name) => normalizeAssistantName(name))
+                  .filter((name) => assistants.includes(name)),
+              ),
+            ]),
+        )
+      : {}
+  if (!Object.keys(normalizedPostDutyPoolByMonth).length) {
+    normalizedPostDutyPoolByMonth[currentMonthISO] = []
+  }
+
   const rawManualAssignments: ManualAssignments =
     parsed.manualAssignments && typeof parsed.manualAssignments === 'object'
       ? Object.fromEntries(
@@ -1750,6 +2291,14 @@ function sanitizePlannerState(parsed: Partial<PlannerState>, fallback: PlannerSt
         )
       : fallback.dutyRoster
 
+  const specialistWorkAssignments = sanitizeSpecialistWorkAssignments(
+    (parsed as { specialistWorkAssignments?: unknown }).specialistWorkAssignments,
+    locations,
+  )
+  const specialistDutyRoster = sanitizeSpecialistDutyRoster(
+    (parsed as { specialistDutyRoster?: unknown }).specialistDutyRoster,
+  )
+
   const candidateWeekStart = typeof parsed.weekStartISO === 'string' ? parsed.weekStartISO : ''
   const normalizedWeekStart = normalizeDateToken(candidateWeekStart)
 
@@ -1761,8 +2310,11 @@ function sanitizePlannerState(parsed: Partial<PlannerState>, fallback: PlannerSt
     locations,
     locationOwners: normalizedLocationOwners,
     locationOwnersByMonth: normalizedLocationOwnersByMonth,
+    postDutyPoolByMonth: normalizedPostDutyPoolByMonth,
     manualAssignments: sanitized.manualAssignments,
     dutyRoster,
+    specialistWorkAssignments,
+    specialistDutyRoster,
     weekStartISO: normalizedWeekStart ?? fallback.weekStartISO,
   }
 }
@@ -1864,6 +2416,8 @@ function App() {
   const [ownersMonth, setOwnersMonth] = useState(currentMonthISO)
   const [ownersEditMode, setOwnersEditMode] = useState(false)
   const [ownersWorking, setOwnersWorking] = useState<LocationOwners>({})
+  const [postDutyPoolWorking, setPostDutyPoolWorking] = useState<string[]>([])
+  const [postDutyPoolDraft, setPostDutyPoolDraft] = useState('')
   const [ownerDrafts, setOwnerDrafts] = useState<Record<string, string>>({})
   const [ownerSelectionDrafts, setOwnerSelectionDrafts] = useState<Record<string, string[]>>({})
 
@@ -1873,6 +2427,15 @@ function App() {
   const [cellDrafts, setCellDrafts] = useState<Record<string, string>>({})
   const [dutyDrafts, setDutyDrafts] = useState<Record<string, string>>({})
   const [dutySiteDrafts, setDutySiteDrafts] = useState<Record<string, DutySite | ''>>({})
+  const [specialistWorkText, setSpecialistWorkText] = useState('')
+  const [specialistWorkIssues, setSpecialistWorkIssues] = useState<string[]>([])
+  const [specialistDutyText, setSpecialistDutyText] = useState('')
+  const [specialistDutyIssues, setSpecialistDutyIssues] = useState<string[]>([])
+  const [specialistMonth, setSpecialistMonth] = useState(currentMonthISO)
+  const [specialistDay, setSpecialistDay] = useState(todayISO)
+  const [specialistDateEditMode, setSpecialistDateEditMode] = useState(false)
+  const [specialistMonthDraft, setSpecialistMonthDraft] = useState(currentMonthISO)
+  const [specialistDayDraft, setSpecialistDayDraft] = useState(todayISO)
 
   const [observerAssistant, setObserverAssistant] = useState('')
   const [observerMonth, setObserverMonth] = useState(currentMonthISO)
@@ -2014,10 +2577,20 @@ function App() {
     () => getLocationOwnersForMonth(data, ownersMonth),
     [data, ownersMonth],
   )
+  const postDutyPoolForSelectedMonth = useMemo(
+    () => getPostDutyPoolForMonth(data, ownersMonth),
+    [data, ownersMonth],
+  )
   const visibleOwnersForMonth = ownersEditMode ? ownersWorking : ownersForSelectedMonth
+  const visiblePostDutyPoolForMonth = ownersEditMode
+    ? postDutyPoolWorking
+    : postDutyPoolForSelectedMonth
   const ownersMonthOptions = useMemo(() => {
-    return buildRelativeMonthOptions(ownersMonth, Object.keys(data.locationOwnersByMonth))
-  }, [currentMonthISO, data.locationOwnersByMonth, ownersMonth])
+    return buildRelativeMonthOptions(ownersMonth, [
+      ...Object.keys(data.locationOwnersByMonth),
+      ...Object.keys(data.postDutyPoolByMonth),
+    ])
+  }, [currentMonthISO, data.locationOwnersByMonth, data.postDutyPoolByMonth, ownersMonth])
   const dutyMonthOptions = useMemo(() => {
     const dutyMonths = Object.keys(data.dutyRoster)
       .filter((dayKey) => /^\d{4}-\d{2}-\d{2}$/.test(dayKey))
@@ -2035,6 +2608,18 @@ function App() {
     ]
     return buildRelativeMonthOptions(plannerMonth, plannerMonths)
   }, [currentMonthISO, data.dutyRoster, data.manualAssignments, plannerMonth])
+  const specialistMonthOptions = useMemo(() => {
+    const specialistMonths = [
+      ...Object.keys(data.specialistWorkAssignments)
+        .filter((dayKey) => /^\d{4}-\d{2}-\d{2}$/.test(dayKey))
+        .map((dayKey) => dayKey.slice(0, 7)),
+      ...Object.keys(data.specialistDutyRoster)
+        .filter((dayKey) => /^\d{4}-\d{2}-\d{2}$/.test(dayKey))
+        .map((dayKey) => dayKey.slice(0, 7)),
+    ]
+    return buildRelativeMonthOptions(specialistMonth, specialistMonths)
+  }, [currentMonthISO, data.specialistDutyRoster, data.specialistWorkAssignments, specialistMonth])
+  const specialistDayOptions = useMemo(() => listMonthDays(specialistMonth), [specialistMonth])
   const roomLeftGroups = useMemo(
     () => groupedPlannerRoomLocations.filter(([siteName]) => siteName === 'Sancaktepe'),
     [groupedPlannerRoomLocations],
@@ -2472,6 +3057,44 @@ function App() {
   }, [activePlannerDay, plannerMonthDays, todayISO])
 
   useEffect(() => {
+    if (!specialistMonthOptions.length) {
+      return
+    }
+
+    const optionValues = specialistMonthOptions.map((option) => option.value)
+    if (!optionValues.includes(specialistMonth)) {
+      const fallback = optionValues[optionValues.length - 1] ?? currentMonthISO
+      setSpecialistMonth(fallback)
+    }
+    if (!optionValues.includes(specialistMonthDraft)) {
+      const fallback = optionValues[optionValues.length - 1] ?? currentMonthISO
+      setSpecialistMonthDraft(fallback)
+    }
+  }, [currentMonthISO, specialistMonth, specialistMonthDraft, specialistMonthOptions])
+
+  useEffect(() => {
+    if (!specialistDayOptions.length) {
+      if (specialistDay) {
+        setSpecialistDay('')
+      }
+      if (specialistDayDraft) {
+        setSpecialistDayDraft('')
+      }
+      return
+    }
+
+    if (!specialistDayOptions.includes(specialistDay)) {
+      const preferred = specialistDayOptions.includes(todayISO) ? todayISO : specialistDayOptions[0]
+      setSpecialistDay(preferred)
+    }
+
+    if (!specialistDayOptions.includes(specialistDayDraft)) {
+      const preferred = specialistDayOptions.includes(todayISO) ? todayISO : specialistDayOptions[0]
+      setSpecialistDayDraft(preferred)
+    }
+  }, [specialistDay, specialistDayDraft, specialistDayOptions, todayISO])
+
+  useEffect(() => {
     if (!observerWeekRoomOptions.length) {
       if (observerWeekRoom) {
         setObserverWeekRoom('')
@@ -2754,6 +3377,29 @@ function App() {
     )
   }
 
+  const getSpecialistNamesForLocation = (
+    state: PlannerState,
+    dayKey: string,
+    location: WorkLocation,
+  ): string[] => {
+    if (location.kind !== 'normal') {
+      return []
+    }
+    return getSpecialistsForLocation(state, dayKey, location.id)
+  }
+
+  const getSpecialistLabelForLocation = (
+    state: PlannerState,
+    dayKey: string,
+    location: WorkLocation,
+  ): string | null => {
+    const names = getSpecialistNamesForLocation(state, dayKey, location)
+    if (!names.length) {
+      return null
+    }
+    return `Uzm: ${names.join(', ')}`
+  }
+
   const getWeeklyPersonLocationLabel = (
     state: PlannerState,
     dayKey: string,
@@ -2796,6 +3442,7 @@ function App() {
           })()
 
     setOwnersWorking(cloneOwnersForNormalLocations(baseOwners, data.locations, data.assistants))
+    setPostDutyPoolWorking(getPostDutyPoolForMonth(data, ownersMonth))
     setOwnersEditMode(true)
     showSuccess(`${ownersMonth} ayı oda asistanları düzenleme modunda.`)
   }
@@ -2803,6 +3450,8 @@ function App() {
   const cancelOwnersEdit = () => {
     setOwnersEditMode(false)
     setOwnersWorking({})
+    setPostDutyPoolWorking([])
+    setPostDutyPoolDraft('')
     setOwnerDrafts({})
     showWarning('Aylık oda asistanı değişiklikleri iptal edildi.')
   }
@@ -2902,10 +3551,17 @@ function App() {
           ...previous.locationOwnersByMonth,
           [ownersMonth]: normalizedForMonth,
         },
+        postDutyPoolByMonth: {
+          ...previous.postDutyPoolByMonth,
+          [ownersMonth]: uniqueSortedNames(
+            postDutyPoolWorking.filter((name) => previous.assistants.includes(name)),
+          ),
+        },
       }
     })
 
     setOwnersEditMode(false)
+    setPostDutyPoolDraft('')
     setOwnerDrafts({})
   }
 
@@ -2963,6 +3619,41 @@ function App() {
     showSuccess(
       `${location.site} / ${location.name} (${ownersMonth}) taslağından ${ownerName} çıkarıldı.`,
     )
+  }
+
+  const addPostDutyPoolAssistant = () => {
+    if (!ownersEditMode) {
+      showWarning('Nöbet ertesiciler listesini değiştirmek için önce "Değiştir" butonuna bas.')
+      return
+    }
+
+    const candidate = postDutyPoolDraft.trim()
+    if (!candidate) {
+      showWarning('Nöbet ertesiciler listesi için bir kişi seç.')
+      return
+    }
+    if (!data.assistants.includes(candidate)) {
+      showWarning(`${candidate} asistan listesinde yok.`)
+      return
+    }
+    if (postDutyPoolWorking.includes(candidate)) {
+      showWarning(`${candidate} zaten ${ownersMonth} ayı nöbet ertesiciler listesinde.`)
+      return
+    }
+
+    setPostDutyPoolWorking((previous) => uniqueSortedNames([...previous, candidate]))
+    setPostDutyPoolDraft('')
+    showSuccess(`${candidate} ${ownersMonth} ayı nöbet ertesiciler listesine eklendi.`)
+  }
+
+  const removePostDutyPoolAssistant = (assistantName: string) => {
+    if (!ownersEditMode) {
+      showWarning('Silmek için önce "Değiştir" butonuna bas.')
+      return
+    }
+
+    setPostDutyPoolWorking((previous) => previous.filter((name) => name !== assistantName))
+    showSuccess(`${assistantName} ${ownersMonth} ayı nöbet ertesiciler listesinden çıkarıldı.`)
   }
 
   const addAssistant = () => {
@@ -3238,6 +3929,12 @@ function App() {
           ),
         ]),
       )
+      const nextPostDutyPoolByMonth = Object.fromEntries(
+        Object.entries(previous.postDutyPoolByMonth).map(([monthISO, names]) => [
+          monthISO,
+          uniqueSortedNames((names ?? []).filter((assistantName) => assistantName !== name)),
+        ]),
+      )
 
       showSuccess(`${name} listeden çıkarıldı.`)
       return {
@@ -3246,6 +3943,7 @@ function App() {
         assistantRanks: nextAssistantRanks,
         locationOwners: nextOwners,
         locationOwnersByMonth: nextOwnersByMonth,
+        postDutyPoolByMonth: nextPostDutyPoolByMonth,
         manualAssignments: removeNameFromManual(previous.manualAssignments, name),
         dutyRoster: removeNameFromDuty(previous.dutyRoster, name),
       }
@@ -3446,6 +4144,135 @@ function App() {
 
     setDutyImportIssues(issueMessages)
     setDutyQuickText('')
+  }
+
+  const startSpecialistDateEdit = () => {
+    setSpecialistMonthDraft(specialistMonth)
+    setSpecialistDayDraft(specialistDay)
+    setSpecialistDateEditMode(true)
+  }
+
+  const cancelSpecialistDateEdit = () => {
+    setSpecialistMonthDraft(specialistMonth)
+    setSpecialistDayDraft(specialistDay)
+    setSpecialistDateEditMode(false)
+  }
+
+  const applySpecialistDateEdit = () => {
+    if (!isValidMonthISO(specialistMonthDraft)) {
+      showWarning('Geçerli bir ay seçmelisin.')
+      return
+    }
+    const nextDayOptions = listMonthDays(specialistMonthDraft)
+    if (!nextDayOptions.length) {
+      showWarning('Seçilen ay için gün bulunamadı.')
+      return
+    }
+    const nextDay = nextDayOptions.includes(specialistDayDraft) ? specialistDayDraft : nextDayOptions[0]
+    setSpecialistMonth(specialistMonthDraft)
+    setSpecialistDay(nextDay)
+    setSpecialistDateEditMode(false)
+    showSuccess(`${nextDay} uzman önizlemesi açıldı.`)
+  }
+
+  const importSpecialistWorkLines = () => {
+    const yearFromMonth = Number(specialistMonth.slice(0, 4))
+    const fallbackYear = Number.isNaN(yearFromMonth) ? new Date().getFullYear() : yearFromMonth
+    const parsed = parseSpecialistWorkQuickLines(specialistWorkText, fallbackYear, data.locations)
+    const issueMessages = parsed.issues.map(
+      (issue) => `${issue.lineNumber}. satır: ${issue.message} (${issue.rawLine})`,
+    )
+
+    if (!parsed.totalNames) {
+      setSpecialistWorkIssues(issueMessages)
+      showWarning(
+        'Geçerli uzman satırı bulunamadı. Örnek: 27 Nisan 2026 - Sami Yarkın Sözüer - Sancaktepe Ameliyathane 1',
+      )
+      return
+    }
+
+    setData((previous) => {
+      const nextWorkAssignments: SpecialistWorkAssignments = {
+        ...previous.specialistWorkAssignments,
+      }
+      let mergedCount = 0
+
+      Object.entries(parsed.data).forEach(([dayKey, locationMap]) => {
+        const nextDayMap = {
+          ...(nextWorkAssignments[dayKey] ?? {}),
+        }
+
+        Object.entries(locationMap).forEach(([locationId, specialistNames]) => {
+          const before = nextDayMap[locationId] ?? []
+          const merged = uniqueSortedNames([...before, ...specialistNames])
+          mergedCount += Math.max(0, merged.length - before.length)
+          nextDayMap[locationId] = merged
+        })
+
+        nextWorkAssignments[dayKey] = nextDayMap
+      })
+
+      if (issueMessages.length) {
+        showWarning(
+          `${mergedCount} uzman eşleşmesi eklendi. ${issueMessages.length} satır uyarı verdi.`,
+        )
+      } else {
+        showSuccess(`${mergedCount} uzman eşleşmesi kaydedildi.`)
+      }
+
+      return {
+        ...previous,
+        specialistWorkAssignments: nextWorkAssignments,
+      }
+    })
+
+    setSpecialistWorkIssues(issueMessages)
+    setSpecialistWorkText('')
+  }
+
+  const importSpecialistDutyLines = () => {
+    const yearFromMonth = Number(specialistMonth.slice(0, 4))
+    const fallbackYear = Number.isNaN(yearFromMonth) ? new Date().getFullYear() : yearFromMonth
+    const parsed = parseSpecialistDutyQuickLines(specialistDutyText, fallbackYear)
+    const issueMessages = parsed.issues.map(
+      (issue) => `${issue.lineNumber}. satır: ${issue.message} (${issue.rawLine})`,
+    )
+
+    if (!parsed.totalNames) {
+      setSpecialistDutyIssues(issueMessages)
+      showWarning(
+        'Geçerli nöbetçi uzman satırı bulunamadı. Örnek: 1 Nisan 2026 - Sami Yarkın Sözüer - Sancaktepe',
+      )
+      return
+    }
+
+    setData((previous) => {
+      const nextDutyRoster: SpecialistDutyRoster = {
+        ...previous.specialistDutyRoster,
+      }
+      let mergedCount = 0
+
+      Object.entries(parsed.data).forEach(([dayKey, specialistEntries]) => {
+        const before = nextDutyRoster[dayKey] ?? []
+        const merged = uniqueSpecialistDutyAssignments([...before, ...specialistEntries])
+        mergedCount += Math.max(0, merged.length - before.length)
+        nextDutyRoster[dayKey] = merged
+      })
+
+      if (issueMessages.length) {
+        showWarning(`${mergedCount} nöbetçi uzman eklendi. ${issueMessages.length} satır uyarı verdi.`)
+      } else {
+        showSuccess(`${mergedCount} nöbetçi uzman kaydedildi.`)
+      }
+
+      return {
+        ...previous,
+        specialistDutyRoster: nextDutyRoster,
+      }
+    })
+
+    setSpecialistDutyIssues(issueMessages)
+    setSpecialistDutyText('')
   }
 
   const startPlannerDayEdit = (dayKey: string) => {
@@ -3906,10 +4733,12 @@ function App() {
 
     return weekDays.map((day) => {
       const names = getDisplayAssignmentsForLocation(data, day.key, room)
+      const specialistNames = getSpecialistNamesForLocation(data, day.key, room)
       const dayTypeLabel = getDayTypeLabel(day.key)
       return {
         day,
         names,
+        specialistNames,
         dayTypeLabel,
       }
     })
@@ -4025,6 +4854,16 @@ function App() {
         months.add(monthISO)
       }
     })
+    Object.keys(data.specialistWorkAssignments).forEach((dayKey) => {
+      if (/^\d{4}-\d{2}-\d{2}$/.test(dayKey)) {
+        months.add(dayKey.slice(0, 7))
+      }
+    })
+    Object.keys(data.specialistDutyRoster).forEach((dayKey) => {
+      if (/^\d{4}-\d{2}-\d{2}$/.test(dayKey)) {
+        months.add(dayKey.slice(0, 7))
+      }
+    })
 
     if (!months.size) {
       months.add(currentMonthISO)
@@ -4036,7 +4875,15 @@ function App() {
         value,
         label: formatMonthSelectLabel(value, Number.isNaN(myCalendarSelectedYear) ? undefined : myCalendarSelectedYear),
       }))
-  }, [currentMonthISO, data.dutyRoster, data.locationOwnersByMonth, data.manualAssignments, myCalendarSelectedYear])
+  }, [
+    currentMonthISO,
+    data.dutyRoster,
+    data.locationOwnersByMonth,
+    data.manualAssignments,
+    data.specialistDutyRoster,
+    data.specialistWorkAssignments,
+    myCalendarSelectedYear,
+  ])
 
   useEffect(() => {
     if (!myCalendarMonthOptions.length) {
@@ -4097,7 +4944,10 @@ function App() {
             location.kind !== 'postDuty' &&
             getAssignmentsForLocation(data, dayKey, location).includes(loggedAssistantName),
         )
-        .map((location) => `${location.site} / ${location.name}`)
+        .map((location) => ({
+          label: `${location.site} / ${location.name}`,
+          specialistLabel: getSpecialistLabelForLocation(data, dayKey, location),
+        }))
       const duty = (data.dutyRoster[dayKey] ?? []).find((entry) => entry.name === loggedAssistantName) ?? null
       entries[dayKey] = {
         dayTypeLabel: getDayTypeLabel(dayKey),
@@ -4110,12 +4960,24 @@ function App() {
   }, [assistantTableCalendarWeeks, data, loggedAssistantName, sortedLocations])
 
   const adminDutyTableModel = useMemo(
-    () => buildDutyTableModel(data.dutyRoster, dutyMonth, data.assistantRanks),
-    [data.assistantRanks, data.dutyRoster, dutyMonth],
+    () =>
+      buildDutyTableModel(
+        data.dutyRoster,
+        data.specialistDutyRoster,
+        dutyMonth,
+        data.assistantRanks,
+      ),
+    [data.assistantRanks, data.dutyRoster, data.specialistDutyRoster, dutyMonth],
   )
   const observerDutyTableModel = useMemo(
-    () => buildDutyTableModel(data.dutyRoster, observerDutyMonthActive, data.assistantRanks),
-    [data.assistantRanks, data.dutyRoster, observerDutyMonthActive],
+    () =>
+      buildDutyTableModel(
+        data.dutyRoster,
+        data.specialistDutyRoster,
+        observerDutyMonthActive,
+        data.assistantRanks,
+      ),
+    [data.assistantRanks, data.dutyRoster, data.specialistDutyRoster, observerDutyMonthActive],
   )
   const selectedPlannerDay = useMemo(() => {
     if (!activePlannerDay) {
@@ -4133,6 +4995,39 @@ function App() {
       roomAssignmentBlocked: !isRoomAssignableDay(date),
     }
   }, [activePlannerDay])
+  const specialistPreviewGroups = useMemo(() => {
+    if (!specialistDay) {
+      return [] as Array<[string, WorkLocation[]]>
+    }
+    const dayLocations = getLocationsForDay(data, specialistDay).filter(
+      (location) => location.kind === 'normal',
+    )
+    return groupBySite(dayLocations, specialistDay)
+  }, [data, specialistDay])
+  const specialistDutyPreviewBySite = useMemo(() => {
+    const bySite: Record<SpecialistDutySite, string[]> = {
+      Sancaktepe: [],
+      Çekmeköy: [],
+      'Feriha C123': [],
+      'Feriha C456': [],
+      'Feriha G123': [],
+    }
+
+    sortSpecialistDutyAssignments(data.specialistDutyRoster[specialistDay] ?? []).forEach((entry) => {
+      bySite[entry.site].push(entry.name)
+    })
+    return bySite
+  }, [data.specialistDutyRoster, specialistDay])
+  const specialistPreviewDayLabel = useMemo(() => {
+    if (!specialistDay) {
+      return 'Tarih seçilmedi'
+    }
+    return fromISODate(specialistDay).toLocaleDateString('tr-TR', {
+      day: '2-digit',
+      month: '2-digit',
+      weekday: 'long',
+    })
+  }, [specialistDay])
 
   const plannerWeeklyExportDays = useMemo<WeeklyRotaExportDay[]>(() => {
     const fullWeek = buildWeek(plannerWeeklyExportWeekStartISO)
@@ -4167,12 +5062,15 @@ function App() {
     const buildRowModel = (location: WorkLocation): WeeklyRotaExportRow => ({
       id: location.id,
       unitLabel: getWeeklyExportUnitLabel(location),
-      cells: plannerWeeklyExportDays.map((day) =>
-        sortAssistantNamesByRank(
+      cells: plannerWeeklyExportDays.map((day) => ({
+        names: sortAssistantNamesByRank(
           getAssignmentsForLocation(data, day.key, location),
           data.assistantRanks,
         ),
-      ),
+        specialists: getSpecialistNamesForLocation(data, day.key, location).map(
+          (specialistName) => `Uzm: ${specialistName}`,
+        ),
+      })),
     })
 
     const normalLocationsBySite = (site: string) =>
@@ -4281,9 +5179,14 @@ function App() {
                 >
                   {row.bySite[site].length ? (
                     <div className="duty-name-stack">
-                      {row.bySite[site].map((name) => (
-                        <span key={`${keyPrefix}-name-${row.dayKey}-${site}-${name}`} className="duty-name-line">
-                          {name}
+                      {row.bySite[site].map((entry) => (
+                        <span
+                          key={`${keyPrefix}-name-${row.dayKey}-${site}-${entry.kind}-${entry.label}`}
+                          className={`duty-name-line ${
+                            entry.kind === 'specialist' ? 'specialist-duty-name-line' : ''
+                          }`}
+                        >
+                          {entry.label}
                         </span>
                       ))}
                     </div>
@@ -4308,39 +5211,86 @@ function App() {
         <h4>{siteName}</h4>
         {locations.map((location) => {
           const names = getDisplayAssignmentsForLocation(plannerState, dayKey, location)
+          const specialistLabel = getSpecialistLabelForLocation(plannerState, dayKey, location)
           const draftKey = `${dayKey}-${location.id}`
           const owners = location.kind === 'normal' ? ownersForDay[location.id] ?? [] : []
           const uniqueOwners = [...new Set(owners)]
           const sectionOrder = getPlannerAssistantSectionOrder(location.site)
-          const groupedAssistantOptions = sectionOrder.map((section) => ({
+          const previousDayKeyForOptions = toISODate(addDays(fromISODate(dayKey), -1))
+          const blockedPostDutyNames = new Set(
+            dutyAssignmentsToNames(plannerState.dutyRoster[previousDayKeyForOptions] ?? []),
+          )
+          const assignedInRoomNames = new Set<string>()
+          plannerState.locations
+            .filter((item) => item.kind === 'normal')
+            .forEach((normalLocation) => {
+              getAssignmentsForLocation(plannerState, dayKey, normalLocation).forEach((name) =>
+                assignedInRoomNames.add(name),
+              )
+            })
+          const postDutyPoolSet = new Set(getPostDutyPoolForDay(plannerState, dayKey))
+
+          const postDutyPoolGroup = {
+            key: 'nobet-ertesiciler',
+            label: 'Nöbet Ertesiciler',
+            items: [] as Array<{ assistant: string; label: string; isOwner: boolean }>,
+          }
+          const hospitalGroups = sectionOrder.map((section) => ({
+            key: `section-${section}`,
             section,
+            label: section === 'Diğer' ? 'Diğer / Ataması Olmayan' : section,
             items: [] as Array<{ assistant: string; label: string; isOwner: boolean }>,
           }))
-          const sectionMap = new Map(
-            groupedAssistantOptions.map((group) => [group.section, group.items]),
-          )
+          const placedGroup = {
+            key: 'yerlestirilenler',
+            label: 'Yerleştirilenler',
+            items: [] as Array<{ assistant: string; label: string; isOwner: boolean }>,
+          }
+          const sectionMap = new Map(hospitalGroups.map((group) => [group.section, group.items]))
 
           plannerState.assistants.forEach((assistant) => {
+            if (blockedPostDutyNames.has(assistant)) {
+              return
+            }
             const ownerSection = getAssistantOwnerSectionForPlannerList(
               plannerState,
               dayKey,
               assistant,
               sectionOrder,
             )
-            const section =
-              sectionMap.has(ownerSection) ? ownerSection : ('Diğer' as const)
             const isOwner = uniqueOwners.includes(assistant)
-            const label = isOwner
+            const baseLabel = isOwner
               ? `${getAssistantOptionLabelForState(plannerState, assistant, dayKey)} (odanın asistanı)`
               : getAssistantOptionLabelForState(plannerState, assistant, dayKey)
+
+            if (assignedInRoomNames.has(assistant)) {
+              placedGroup.items.push({
+                assistant,
+                label: `x ${baseLabel}`,
+                isOwner,
+              })
+              return
+            }
+
+            if (postDutyPoolSet.has(assistant)) {
+              postDutyPoolGroup.items.push({
+                assistant,
+                label: baseLabel,
+                isOwner,
+              })
+              return
+            }
+
+            const section = sectionMap.has(ownerSection) ? ownerSection : ('Diğer' as const)
             sectionMap.get(section)?.push({
               assistant,
-              label,
+              label: baseLabel,
               isOwner,
             })
           })
 
-          groupedAssistantOptions.forEach((group) => {
+          const allGroupsForSort = [postDutyPoolGroup, ...hospitalGroups, placedGroup]
+          allGroupsForSort.forEach((group) => {
             group.items.sort(
               (a, b) =>
                 Number(b.isOwner) - Number(a.isOwner) ||
@@ -4351,6 +5301,7 @@ function App() {
                 ),
             )
           })
+          const groupedAssistantOptions = allGroupsForSort.filter((group) => group.items.length)
 
           return (
             <div
@@ -4370,6 +5321,7 @@ function App() {
                 </strong>
                 <span>{LOCATION_KIND_LABELS[location.kind]}</span>
               </div>
+              {specialistLabel ? <p className="planner-specialist-inline">{specialistLabel}</p> : null}
 
               <div className="chip-wrap">
                 {names.length ? (
@@ -4405,16 +5357,14 @@ function App() {
                     if (!group.items.length) {
                       return null
                     }
-                    const groupLabel =
-                      group.section === 'Diğer' ? 'Diğer / Ataması Olmayan' : group.section
                     return (
                       <optgroup
-                        key={`${dayKey}-${location.id}-group-${group.section}`}
-                        label={groupLabel}
+                        key={`${dayKey}-${location.id}-group-${group.key}`}
+                        label={group.label}
                       >
                         {group.items.map((item) => (
                           <option
-                            key={`${dayKey}-${location.id}-${group.section}-${item.assistant}`}
+                            key={`${dayKey}-${location.id}-${group.key}-${item.assistant}`}
                             value={item.assistant}
                           >
                             {item.label}
@@ -4972,6 +5922,13 @@ function App() {
               >
                 Planlama
               </button>
+              <button
+                type="button"
+                className={adminSection === 'specialists' ? 'active' : ''}
+                onClick={() => selectAdminSection('specialists')}
+              >
+                Uzman
+              </button>
             </div>
           </section>
 
@@ -5223,6 +6180,52 @@ function App() {
                 </div>
               </section>
             ))}
+
+            <section className="site-group-card">
+              <h3 className="site-group-title">Nöbet Ertesiciler</h3>
+              <p className="hint-text">
+                Hastaneye bağlı olmayan, planlamada odalara dağıtılacak havuz. Oda kartı oluşturmaz.
+              </p>
+              <div className="location-actions post-duty-pool-actions">
+                <select
+                  disabled={!ownersEditMode}
+                  value={postDutyPoolDraft}
+                  onChange={(event) => setPostDutyPoolDraft(event.target.value)}
+                >
+                  <option value="">Asistan seç</option>
+                  {data.assistants.map((assistant) => (
+                    <option key={`post-duty-pool-option-${assistant}`} value={assistant}>
+                      {assistant}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  className="secondary"
+                  disabled={!ownersEditMode}
+                  onClick={addPostDutyPoolAssistant}
+                >
+                  Ekle
+                </button>
+              </div>
+              <div className="chip-wrap">
+                {visiblePostDutyPoolForMonth.length ? (
+                  visiblePostDutyPoolForMonth.map((assistantName) => (
+                    <button
+                      key={`post-duty-pool-chip-${assistantName}`}
+                      type="button"
+                      className="chip removable"
+                      disabled={!ownersEditMode}
+                      onClick={() => removePostDutyPoolAssistant(assistantName)}
+                    >
+                      {assistantName}
+                    </button>
+                  ))
+                ) : (
+                  <span className="empty">{ownersMonth} ayı için nöbet ertesi havuzu boş.</span>
+                )}
+              </div>
+            </section>
             </section>
           ) : null}
 
@@ -5557,6 +6560,196 @@ function App() {
             ) : null}
             </section>
           ) : null}
+
+          {adminSection === 'specialists' ? (
+            <section className="card fade-up delay-5 specialist-admin-card">
+              <h2>Uzman Modülü</h2>
+              <p className="subtext">
+                Uzmanları kullanıcıya çevirmeden metinsel planlama verisi olarak kaydedebilirsin.
+                1. kutu oda uzmanları (günlük çalışma), 2. kutu nöbetçi uzmanlar içindir.
+              </p>
+
+              <div className="form-row specialist-date-edit-row">
+                <select
+                  className="my-calendar-month-select"
+                  value={specialistDateEditMode ? specialistMonthDraft : specialistMonth}
+                  disabled={!specialistDateEditMode}
+                  onChange={(event) => {
+                    const nextMonth = event.target.value
+                    if (!isValidMonthISO(nextMonth)) {
+                      return
+                    }
+                    setSpecialistMonthDraft(nextMonth)
+                    const monthDays = listMonthDays(nextMonth)
+                    if (!monthDays.includes(specialistDayDraft)) {
+                      setSpecialistDayDraft(monthDays[0] ?? '')
+                    }
+                  }}
+                >
+                  {specialistMonthOptions.map((option) => (
+                    <option key={`specialist-month-${option.value}`} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+                <select
+                  value={specialistDateEditMode ? specialistDayDraft : specialistDay}
+                  disabled={!specialistDateEditMode}
+                  onChange={(event) => setSpecialistDayDraft(event.target.value)}
+                >
+                  {(specialistDateEditMode ? listMonthDays(specialistMonthDraft) : specialistDayOptions).map(
+                    (dayKey) => (
+                      <option key={`specialist-day-${dayKey}`} value={dayKey}>
+                        {fromISODate(dayKey).toLocaleDateString('tr-TR', {
+                          day: '2-digit',
+                          month: '2-digit',
+                          weekday: 'short',
+                        })}
+                      </option>
+                    ),
+                  )}
+                </select>
+                {!specialistDateEditMode ? (
+                  <button type="button" className="secondary" onClick={startSpecialistDateEdit}>
+                    Değiştir
+                  </button>
+                ) : null}
+                {specialistDateEditMode ? (
+                  <button type="button" className="secondary" onClick={applySpecialistDateEdit}>
+                    Uygula
+                  </button>
+                ) : null}
+                {specialistDateEditMode ? (
+                  <button type="button" className="ghost-button" onClick={cancelSpecialistDateEdit}>
+                    İptal
+                  </button>
+                ) : null}
+              </div>
+
+              <article className="specialist-input-card">
+                <h3>Günlük Çalışma</h3>
+                <p className="subtext">
+                  Yapıştırma formatı: <code>Tarih - Uzman Adı - Alan</code>. Aynı uzman aynı gün farklı
+                  odalara yazılabilir; aynı odada birden fazla uzman da olabilir.
+                </p>
+                <textarea
+                  value={specialistWorkText}
+                  onChange={(event) => setSpecialistWorkText(event.target.value)}
+                  placeholder={
+                    '27 Nisan 2026 - Sami Yarkın Sözüer - Sancaktepe Ameliyathane 1\n' +
+                    '27 Nisan 2026 - Murat Öksüz - Çekmeköy Ameliyathane\n' +
+                    '28 Nisan 2026 - Ayşe Demir - Feriha Öz C3 Yoğun Bakım Ünitesi'
+                  }
+                />
+                <div className="form-row specialist-save-row">
+                  <button type="button" className="secondary" onClick={importSpecialistWorkLines}>
+                    Günlük Çalışmayı Kaydet
+                  </button>
+                </div>
+
+                {specialistWorkIssues.length ? (
+                  <article className="import-issue-card">
+                    <h3>Günlük Çalışma Uyarıları</h3>
+                    <ul>
+                      {specialistWorkIssues.map((issue, index) => (
+                        <li key={`specialist-work-issue-${index}`}>{issue}</li>
+                      ))}
+                    </ul>
+                  </article>
+                ) : null}
+              </article>
+
+              <section className="specialist-preview-board">
+                <h3>{specialistPreviewDayLabel} Uzman Önizlemesi</h3>
+                <div className="specialist-preview-grid">
+                  {specialistPreviewGroups.map(([siteName, locations]) => (
+                    <article key={`specialist-preview-${siteName}`} className="site-block specialist-preview-site">
+                      <h4>{siteName}</h4>
+                      {locations.map((location) => {
+                        const specialists = getSpecialistNamesForLocation(data, specialistDay, location)
+                        return (
+                          <div key={`specialist-preview-row-${location.id}`} className="specialist-preview-row">
+                            <strong>{location.name}</strong>
+                            <div className="chip-wrap">
+                              {specialists.length ? (
+                                specialists.map((specialistName) => (
+                                  <span
+                                    key={`specialist-preview-chip-${location.id}-${specialistName}`}
+                                    className="chip"
+                                  >
+                                    {specialistName}
+                                  </span>
+                                ))
+                              ) : (
+                                <span className="empty">Uzman yok</span>
+                              )}
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </article>
+                  ))}
+                </div>
+              </section>
+
+              <article className="specialist-input-card">
+                <h3>Nöbetçi Uzmanlar</h3>
+                <p className="subtext">
+                  Yapıştırma formatı: <code>Tarih - Uzman Adı - NöbetYeri</code>. Nöbet yeri:
+                  Sancaktepe, Çekmeköy, Feriha C123, Feriha C456, Feriha G123.
+                </p>
+                <textarea
+                  value={specialistDutyText}
+                  onChange={(event) => setSpecialistDutyText(event.target.value)}
+                  placeholder={
+                    '1 Nisan 2026 - Sami Yarkın Sözüer - Sancaktepe\n' +
+                    '1 Nisan 2026 - Murat Öksüz - Çekmeköy\n' +
+                    '1 Nisan 2026 - Ayşe Demir - Feriha C123\n' +
+                    '1 Nisan 2026 - Mehmet Kaya - Feriha C456\n' +
+                    '1 Nisan 2026 - Ali Veli - Feriha G123'
+                  }
+                />
+                <div className="form-row specialist-save-row">
+                  <button type="button" className="secondary" onClick={importSpecialistDutyLines}>
+                    Nöbetçi Uzmanları Kaydet
+                  </button>
+                </div>
+
+                {specialistDutyIssues.length ? (
+                  <article className="import-issue-card">
+                    <h3>Nöbetçi Uzman Uyarıları</h3>
+                    <ul>
+                      {specialistDutyIssues.map((issue, index) => (
+                        <li key={`specialist-duty-issue-${index}`}>{issue}</li>
+                      ))}
+                    </ul>
+                  </article>
+                ) : null}
+
+                <div className="specialist-duty-preview">
+                  {SPECIALIST_DUTY_SITES.map((site) => (
+                    <article key={`specialist-duty-preview-${site}`} className="specialist-duty-preview-item">
+                      <h4>{SPECIALIST_DUTY_SITE_LABELS[site]}</h4>
+                      <div className="chip-wrap">
+                        {specialistDutyPreviewBySite[site].length ? (
+                          specialistDutyPreviewBySite[site].map((specialistName) => (
+                            <span
+                              key={`specialist-duty-preview-name-${site}-${specialistName}`}
+                              className="chip"
+                            >
+                              {specialistName}
+                            </span>
+                          ))
+                        ) : (
+                          <span className="empty">Kayıt yok</span>
+                        )}
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              </article>
+            </section>
+          ) : null}
         </main>
       ) : (
         <main className="stack-layout">
@@ -5689,8 +6882,13 @@ function App() {
                     <div className="chip-wrap">
                       {locations.length ? (
                         locations.map((location) => (
-                          <span key={`${day.key}-${location.id}`} className="chip soft">
-                            {getWeeklyPersonLocationLabel(data, day.key, observerAssistant, location)}
+                          <span key={`${day.key}-${location.id}`} className="chip soft chip-with-meta">
+                            {getSpecialistLabelForLocation(data, day.key, location) ? (
+                              <small className="chip-meta">
+                                {getSpecialistLabelForLocation(data, day.key, location)}
+                              </small>
+                            ) : null}
+                            <span>{getWeeklyPersonLocationLabel(data, day.key, observerAssistant, location)}</span>
                           </span>
                         ))
                       ) : dayTypeLabel ? (
@@ -5719,13 +6917,18 @@ function App() {
               </div>
 
               <div className="timeline-grid">
-                {weekAssignmentsForRoom.map(({ day, names, dayTypeLabel }) => (
+                {weekAssignmentsForRoom.map(({ day, names, specialistNames, dayTypeLabel }) => (
                   <article key={`timeline-room-${day.key}`} className="timeline-card">
                     <header>
                       <strong>{day.shortLabel}</strong>
                       <small>{day.key}</small>
                     </header>
                     <div className="chip-wrap">
+                      {specialistNames.length ? (
+                        <span className="chip soft chip-with-meta">
+                          <small className="chip-meta">Uzm: {specialistNames.join(', ')}</small>
+                        </span>
+                      ) : null}
                       {names.length ? (
                         names.map((name) => (
                           <span key={`${day.key}-${observerWeekRoom}-${name}`} className="chip soft">
@@ -5847,6 +7050,9 @@ function App() {
                     const names = observerDay
                       ? getDisplayAssignmentsForLocation(data, observerDay, location)
                       : []
+                    const specialistLabel = observerDay
+                      ? getSpecialistLabelForLocation(data, observerDay, location)
+                      : null
 
                     return (
                       <article key={`observer-${location.id}`} className={`tile tone-${location.tone}`}>
@@ -5854,6 +7060,9 @@ function App() {
                           <h4>{location.name}</h4>
                           <small>{LOCATION_KIND_LABELS[location.kind]}</small>
                         </header>
+                        {specialistLabel ? (
+                          <p className="tile-specialist-inline">{specialistLabel}</p>
+                        ) : null}
                         <div className="chip-wrap">
                           {names.length ? (
                             names.map((name) => (

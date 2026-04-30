@@ -10,8 +10,13 @@ interface AssistantMonthlyCalendarCell {
   officialHoliday: boolean
 }
 
+interface AssistantMonthlyCalendarLocationItem {
+  label: string
+  specialistLabel?: string | null
+}
+
 interface AssistantMonthlyCalendarDayData {
-  locations: string[]
+  locations: AssistantMonthlyCalendarLocationItem[]
   dutySite: string | null
   dayTypeLabel: string | null
   holidayReason: string | null
@@ -127,9 +132,17 @@ function AssistantMonthlyTableView({
                         </span>
                       ) : null}
 
-                      {locations.map((locationLabel) => (
-                        <span key={`assistant-table-location-${cell.key}-${locationLabel}`} className="my-calendar-location">
-                          {locationLabel}
+                      {locations.map((locationItem) => (
+                        <span
+                          key={`assistant-table-location-${cell.key}-${locationItem.label}`}
+                          className="my-calendar-location"
+                        >
+                          {locationItem.specialistLabel ? (
+                            <strong className="my-calendar-specialist-label">
+                              {locationItem.specialistLabel}
+                            </strong>
+                          ) : null}
+                          <span>{locationItem.label}</span>
                         </span>
                       ))}
 
