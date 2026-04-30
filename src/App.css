@@ -1233,6 +1233,16 @@ body.table-pan-unlocked .duty-list-table-wrap {
   margin-top: 1rem;
 }
 
+.observer-week-detail-tabs {
+  margin-top: 0.5rem;
+  margin-bottom: 0.62rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.observer-week-detail-tabs button {
+  min-width: 0;
+}
+
 .day-card {
   border: 1px solid rgba(99, 121, 111, 0.24);
   border-radius: 16px;
@@ -1556,8 +1566,9 @@ body.table-pan-unlocked .weekly-export-table-wrap {
   gap: 0.08rem 0.18rem;
 }
 
-.weekly-export-name-stack span {
+.weekly-export-assistant-chip {
   display: inline-flex;
+  align-items: center;
   font-size: 1.11rem;
   font-weight: 800;
   line-height: 1.15;
@@ -1565,6 +1576,10 @@ body.table-pan-unlocked .weekly-export-table-wrap {
   max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
+  border: 1px solid rgba(41, 55, 50, 0.34);
+  border-radius: 7px;
+  padding: 0.07rem 0.28rem;
+  background: rgba(255, 255, 255, 0.72);
 }
 
 .weekly-export-specialist-line {
@@ -2709,9 +2724,11 @@ code {
     gap: 0.05rem;
   }
 
-  .weekly-export-name-stack span {
+  .weekly-export-assistant-chip {
     font-size: 0.56rem;
     line-height: 1.15;
+    border-radius: 4px;
+    padding: 0.03rem 0.14rem;
   }
 
   .weekly-export-specialist-line {
@@ -2866,9 +2883,11 @@ code {
     min-width: 0;
   }
 
-  .weekly-export-name-stack span {
+  .weekly-export-assistant-chip {
     font-size: 0.95rem;
     font-weight: 800;
+    border-color: #000 !important;
+    background: #fff !important;
   }
 
   .weekly-export-specialist-line {

@@ -110,7 +110,10 @@ function WeeklyRotaExportView({
                               </span>
                             ))}
                             {cell.names.map((name) => (
-                              <span key={`weekly-export-name-${group.id}-${row.id}-${cellIndex}-${name}`}>
+                              <span
+                                key={`weekly-export-name-${group.id}-${row.id}-${cellIndex}-${name}`}
+                                className="weekly-export-assistant-chip"
+                              >
                                 {name}
                               </span>
                             ))}

@@ -21,6 +21,7 @@ import AssistantMonthlyTableView, {
 type PanelMode = 'admin' | 'observer'
 type AdminSection = 'assistants' | 'locations' | 'duty' | 'planner' | 'specialists'
 type ObserverSection = 'myPanel' | 'personWeek' | 'dailyMap'
+type ObserverWeekDetailView = 'room' | 'duty'
 type PlannerView = 'rooms' | 'status'
 type LocationKind = 'normal' | 'leave' | 'duty' | 'postDuty'
 type LocationTone = 'sand' | 'sage' | 'amber' | 'sky' | 'rose'
@@ -36,6 +37,7 @@ type SeniorityLevel = number
 type ManualAssignments = Record<string, Record<string, string[]>>
 type DutyRoster = Record<string, DutyAssignment[]>
 type SpecialistWorkAssignments = Record<string, Record<string, string[]>>
+type SpecialistWorkDayAssignments = Record<string, string[]>
 type SpecialistDutyRoster = Record<string, SpecialistDutyAssignment[]>
 type LocationOwners = Record<string, string[]>
 type LocationOwnersByMonth = Record<string, LocationOwners>
@@ -129,6 +131,12 @@ interface Notice {
   text: string
 }
 
+interface AdminLoginGuardState {
+  failedAttempts: number
+  blockedUntil: number
+  rememberedPassword: string
+}
+
 interface DutyParseIssue {
   lineNumber: number
   message: string
@@ -154,12 +162,16 @@ interface RemotePortalPayload {
 const STORAGE_KEY = 'assistant-scheduler-v1'
 const USER_BINDING_KEY = 'assistant-user-binding-v1'
 const LAST_ASSISTANT_USER_KEY = 'assistant-last-user-v1'
+const ADMIN_LOGIN_GUARD_KEY = 'assistant-admin-login-guard-v1'
 const CLOUD_READ_ONLY_TEXT = 'Bulut salt-okunur modda (yerelden buluta yazma kapalı).'
 const CLOUD_SAFE_GUARD_TEXT =
   'Bulut verisi okunamadığı için güvenlik gereği yerelden buluta yazma kapatıldı.'
 const CLOUD_CONFLICT_TEXT =
   'Bulutta daha yeni bir kayıt var. Güvenlik için üzerine yazma engellendi; sayfayı yenileyip tekrar dene.'
-const APP_PASSWORD = '1234'
+const APP_PASSWORD = 'a.918273'
+const ADMIN_BLOCK_STEP = 5
+const ADMIN_FIRST_BLOCK_MS = 60 * 60 * 1000
+const ADMIN_SECOND_BLOCK_MS = 24 * 60 * 60 * 1000
 const DUTY_SITES: DutySite[] = ['Sancaktepe', 'Feriha Öz', 'Çekmeköy']
 const SPECIALIST_DUTY_SITES: SpecialistDutySite[] = [
   'Sancaktepe',
@@ -1856,6 +1868,23 @@ function parseSpecialistDutyQuickLines(
   return { data, issues, totalNames }
 }
 
+function cloneSpecialistWorkDayAssignments(
+  assignments?: SpecialistWorkDayAssignments,
+): SpecialistWorkDayAssignments {
+  if (!assignments) {
+    return {}
+  }
+  return Object.fromEntries(
+    Object.entries(assignments).map(([locationId, names]) => [locationId, uniqueSortedNames(names)]),
+  )
+}
+
+function cloneSpecialistDutyDayAssignments(
+  assignments?: SpecialistDutyAssignment[],
+): SpecialistDutyAssignment[] {
+  return uniqueSpecialistDutyAssignments(assignments ?? []).map((entry) => ({ ...entry }))
+}
+
 function sanitizeManualAssignments(
   manualAssignments: ManualAssignments,
   dutyRoster: DutyRoster,
@@ -2374,6 +2403,78 @@ function safeReadUserBindings(): Record<string, string> {
   }
 }
 
+function sanitizeAdminLoginGuard(raw: unknown): AdminLoginGuardState {
+  if (!raw || typeof raw !== 'object') {
+    return {
+      failedAttempts: 0,
+      blockedUntil: 0,
+      rememberedPassword: '',
+    }
+  }
+  const record = raw as Partial<AdminLoginGuardState>
+  const failedAttempts =
+    typeof record.failedAttempts === 'number' && Number.isFinite(record.failedAttempts) && record.failedAttempts > 0
+      ? Math.floor(record.failedAttempts)
+      : 0
+  const blockedUntil =
+    typeof record.blockedUntil === 'number' && Number.isFinite(record.blockedUntil) && record.blockedUntil > 0
+      ? Math.floor(record.blockedUntil)
+      : 0
+  const rememberedPassword = typeof record.rememberedPassword === 'string' ? record.rememberedPassword : ''
+  return {
+    failedAttempts: Math.min(failedAttempts, 500),
+    blockedUntil,
+    rememberedPassword,
+  }
+}
+
+function safeReadAdminLoginGuard(): AdminLoginGuardState {
+  if (typeof window === 'undefined') {
+    return {
+      failedAttempts: 0,
+      blockedUntil: 0,
+      rememberedPassword: '',
+    }
+  }
+  const raw = localStorage.getItem(ADMIN_LOGIN_GUARD_KEY)
+  if (!raw) {
+    return {
+      failedAttempts: 0,
+      blockedUntil: 0,
+      rememberedPassword: '',
+    }
+  }
+  try {
+    const parsed = JSON.parse(raw) as unknown
+    return sanitizeAdminLoginGuard(parsed)
+  } catch {
+    return {
+      failedAttempts: 0,
+      blockedUntil: 0,
+      rememberedPassword: '',
+    }
+  }
+}
+
+function formatRemainingBlock(ms: number): string {
+  const totalSeconds = Math.max(1, Math.ceil(ms / 1000))
+  const days = Math.floor(totalSeconds / 86400)
+  const hours = Math.floor((totalSeconds % 86400) / 3600)
+  const minutes = Math.floor((totalSeconds % 3600) / 60)
+  const seconds = totalSeconds % 60
+
+  if (days > 0) {
+    return `${days} gün ${hours} saat`
+  }
+  if (hours > 0) {
+    return `${hours} saat ${minutes} dk`
+  }
+  if (minutes > 0) {
+    return `${minutes} dk ${seconds} sn`
+  }
+  return `${seconds} sn`
+}
+
 function App() {
   const today = useMemo(() => new Date(), [])
   const todayISO = toISODate(today)
@@ -2386,7 +2487,10 @@ function App() {
   const [plannerView, setPlannerView] = useState<PlannerView>('rooms')
   const [session, setSession] = useState<SessionInfo | null>(null)
   const [loginView, setLoginView] = useState<'choose' | 'admin' | 'assistant'>('choose')
-  const [passwordInput, setPasswordInput] = useState('')
+  const [blockClockMs, setBlockClockMs] = useState(() => Date.now())
+  const initialAdminLoginGuard = useMemo(() => safeReadAdminLoginGuard(), [])
+  const [adminLoginGuard, setAdminLoginGuard] = useState<AdminLoginGuardState>(initialAdminLoginGuard)
+  const [passwordInput, setPasswordInput] = useState(initialAdminLoginGuard.rememberedPassword)
   const [assistantUsernameInput, setAssistantUsernameInput] = useState('')
   const [assistantUserPickerOpen, setAssistantUserPickerOpen] = useState(false)
   const [data, setData] = useState<PlannerState>(() => safeReadState())
@@ -2434,9 +2538,10 @@ function App() {
   const [specialistMonth, setSpecialistMonth] = useState(currentMonthISO)
   const [specialistDay, setSpecialistDay] = useState(todayISO)
   const [activeSpecialistWeek, setActiveSpecialistWeek] = useState('')
+  const [specialistEditDay, setSpecialistEditDay] = useState(todayISO)
+  const [specialistWorkDraft, setSpecialistWorkDraft] = useState<SpecialistWorkDayAssignments>({})
+  const [specialistDutyDraft, setSpecialistDutyDraft] = useState<SpecialistDutyAssignment[]>([])
   const [specialistDateEditMode, setSpecialistDateEditMode] = useState(false)
-  const [specialistMonthDraft, setSpecialistMonthDraft] = useState(currentMonthISO)
-  const [specialistDayDraft, setSpecialistDayDraft] = useState(todayISO)
 
   const [observerAssistant, setObserverAssistant] = useState('')
   const [observerMonth, setObserverMonth] = useState(currentMonthISO)
@@ -2450,6 +2555,8 @@ function App() {
   const [observerDay, setObserverDay] = useState('')
   const [observerWeekRoom, setObserverWeekRoom] = useState('')
   const [observerWeekDutySite, setObserverWeekDutySite] = useState<DutySite>('Sancaktepe')
+  const [observerWeekDetailView, setObserverWeekDetailView] =
+    useState<ObserverWeekDetailView>('room')
   const [plannerMonth, setPlannerMonth] = useState(currentMonthISO)
   const [activePlannerDay, setActivePlannerDay] = useState(todayISO)
   const [plannerWeeklyExportOpen, setPlannerWeeklyExportOpen] = useState(false)
@@ -2669,6 +2776,7 @@ function App() {
   const isTableLikeFullscreenOpen =
     (session?.role === 'admin' && plannerWeeklyExportOpen) ||
     (session?.role === 'assistant' && (assistantMonthlyTableOpen || observerDutyListOpen))
+  const adminBlockRemainingMs = Math.max(0, adminLoginGuard.blockedUntil - blockClockMs)
 
   useEffect(() => {
     if (typeof document === 'undefined') {
@@ -2689,6 +2797,39 @@ function App() {
       localStorage.setItem(USER_BINDING_KEY, JSON.stringify(userBindings))
     }
   }, [userBindings])
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      localStorage.setItem(ADMIN_LOGIN_GUARD_KEY, JSON.stringify(adminLoginGuard))
+    }
+  }, [adminLoginGuard])
+
+  useEffect(() => {
+    setBlockClockMs(Date.now())
+    if (adminLoginGuard.blockedUntil <= Date.now()) {
+      return
+    }
+    const timer = window.setInterval(() => {
+      setBlockClockMs(Date.now())
+    }, 1000)
+    return () => {
+      window.clearInterval(timer)
+    }
+  }, [adminLoginGuard.blockedUntil])
+
+  useEffect(() => {
+    if (!adminLoginGuard.blockedUntil || adminBlockRemainingMs > 0) {
+      return
+    }
+    setAdminLoginGuard((previous) =>
+      previous.blockedUntil
+        ? {
+            ...previous,
+            blockedUntil: 0,
+          }
+        : previous,
+    )
+  }, [adminBlockRemainingMs, adminLoginGuard.blockedUntil])
 
   useEffect(() => {
     let cancelled = false
@@ -3088,19 +3229,12 @@ function App() {
       const fallback = optionValues[optionValues.length - 1] ?? currentMonthISO
       setSpecialistMonth(fallback)
     }
-    if (!optionValues.includes(specialistMonthDraft)) {
-      const fallback = optionValues[optionValues.length - 1] ?? currentMonthISO
-      setSpecialistMonthDraft(fallback)
-    }
-  }, [currentMonthISO, specialistMonth, specialistMonthDraft, specialistMonthOptions])
+  }, [currentMonthISO, specialistMonth, specialistMonthOptions])
 
   useEffect(() => {
     if (!specialistDayOptions.length) {
       if (specialistDay) {
         setSpecialistDay('')
-      }
-      if (specialistDayDraft) {
-        setSpecialistDayDraft('')
       }
       return
     }
@@ -3109,12 +3243,7 @@ function App() {
       const preferred = specialistDayOptions.includes(todayISO) ? todayISO : specialistDayOptions[0]
       setSpecialistDay(preferred)
     }
-
-    if (!specialistDayOptions.includes(specialistDayDraft)) {
-      const preferred = specialistDayOptions.includes(todayISO) ? todayISO : specialistDayOptions[0]
-      setSpecialistDayDraft(preferred)
-    }
-  }, [specialistDay, specialistDayDraft, specialistDayOptions, todayISO])
+  }, [specialistDay, specialistDayOptions, todayISO])
 
   useEffect(() => {
     if (!specialistWeekGroups.length) {
@@ -3191,13 +3320,48 @@ function App() {
   }
 
   const loginAsAdmin = () => {
-    if (passwordInput.trim() !== APP_PASSWORD) {
-      showWarning('Şifre hatalı. Lütfen tekrar dene.')
+    const now = Date.now()
+    if (adminLoginGuard.blockedUntil > now) {
+      showWarning(`Çok fazla yanlış deneme. ${formatRemainingBlock(adminLoginGuard.blockedUntil - now)} sonra tekrar dene.`)
       return
     }
 
+    if (passwordInput.trim() !== APP_PASSWORD) {
+      const nextFailedAttempts = adminLoginGuard.failedAttempts + 1
+      let blockedUntil = 0
+      let blockDurationMs = 0
+
+      if (nextFailedAttempts % ADMIN_BLOCK_STEP === 0) {
+        blockDurationMs = nextFailedAttempts >= ADMIN_BLOCK_STEP * 2 ? ADMIN_SECOND_BLOCK_MS : ADMIN_FIRST_BLOCK_MS
+        blockedUntil = now + blockDurationMs
+      }
+
+      setAdminLoginGuard((previous) => ({
+        ...previous,
+        failedAttempts: nextFailedAttempts,
+        blockedUntil,
+      }))
+
+      if (blockedUntil > 0) {
+        showWarning(
+          `Şifre hatalı. ${nextFailedAttempts}. yanlış deneme sonrası giriş ${formatRemainingBlock(blockDurationMs)} bloke edildi.`,
+        )
+      } else {
+        const remainingToBlock = ADMIN_BLOCK_STEP - (nextFailedAttempts % ADMIN_BLOCK_STEP)
+        showWarning(
+          `Şifre hatalı. Lütfen tekrar dene.${remainingToBlock > 0 ? ` ${remainingToBlock} yanlış sonra blok uygulanır.` : ''}`,
+        )
+      }
+      return
+    }
+
+    setAdminLoginGuard({
+      failedAttempts: 0,
+      blockedUntil: 0,
+      rememberedPassword: APP_PASSWORD,
+    })
     setSession({ role: 'admin' })
-    setPasswordInput('')
+    setPasswordInput(APP_PASSWORD)
     setNotice(null)
   }
 
@@ -3238,7 +3402,7 @@ function App() {
     setAssistantMonthlyTableOpen(false)
     setObserverDutyListOpen(false)
     setMode('admin')
-    setPasswordInput('')
+    setPasswordInput(adminLoginGuard.rememberedPassword)
     setAssistantUsernameInput('')
     setAssistantUserPickerOpen(false)
     setNotice(null)
@@ -4191,41 +4355,102 @@ function App() {
   }
 
   const startSpecialistDateEdit = () => {
-    setSpecialistMonthDraft(specialistMonth)
-    setSpecialistDayDraft(specialistDay)
+    if (!specialistDay) {
+      showWarning('Önce düzenlemek istediğin günü seç.')
+      return
+    }
+    setSpecialistEditDay(specialistDay)
+    setSpecialistWorkDraft(
+      cloneSpecialistWorkDayAssignments(data.specialistWorkAssignments[specialistDay]),
+    )
+    setSpecialistDutyDraft(
+      cloneSpecialistDutyDayAssignments(data.specialistDutyRoster[specialistDay]),
+    )
+    setSpecialistWorkText('')
+    setSpecialistDutyText('')
+    setSpecialistWorkIssues([])
+    setSpecialistDutyIssues([])
     setSpecialistDateEditMode(true)
+    showSuccess(`${specialistDay} uzman düzenlemesi açıldı.`)
   }
 
   const cancelSpecialistDateEdit = () => {
-    setSpecialistMonthDraft(specialistMonth)
-    setSpecialistDayDraft(specialistDay)
+    if (!specialistDateEditMode) {
+      return
+    }
+    setSpecialistWorkDraft({})
+    setSpecialistDutyDraft([])
+    setSpecialistWorkText('')
+    setSpecialistDutyText('')
+    setSpecialistWorkIssues([])
+    setSpecialistDutyIssues([])
     setSpecialistDateEditMode(false)
+    showWarning(`${specialistEditDay} için taslak değişiklikler iptal edildi.`)
   }
 
-  const applySpecialistDateEdit = () => {
-    if (!isValidMonthISO(specialistMonthDraft)) {
-      showWarning('Geçerli bir ay seçmelisin.')
+  const saveSpecialistDateEdit = () => {
+    if (!specialistDateEditMode) {
       return
     }
-    const nextDayOptions = listMonthDays(specialistMonthDraft)
-    if (!nextDayOptions.length) {
-      showWarning('Seçilen ay için gün bulunamadı.')
+    if (!specialistEditDay) {
+      showWarning('Kaydetmek için geçerli bir gün bulunamadı.')
       return
     }
-    const nextDay = nextDayOptions.includes(specialistDayDraft) ? specialistDayDraft : nextDayOptions[0]
-    setSpecialistMonth(specialistMonthDraft)
-    setSpecialistDay(nextDay)
+    const approved = window.confirm(
+      `${specialistEditDay} tarihindeki uzman değişikliklerini onaylıyor musun?`,
+    )
+    if (!approved) {
+      showWarning('Kaydetme onayı verilmedi. Taslak değişiklikler korunuyor.')
+      return
+    }
+
+    setData((previous) => {
+      const nextWorkAssignments = { ...previous.specialistWorkAssignments }
+      const normalizedWork = cloneSpecialistWorkDayAssignments(specialistWorkDraft)
+      if (Object.keys(normalizedWork).length) {
+        nextWorkAssignments[specialistEditDay] = normalizedWork
+      } else {
+        delete nextWorkAssignments[specialistEditDay]
+      }
+
+      const nextDutyRoster = { ...previous.specialistDutyRoster }
+      const normalizedDuty = cloneSpecialistDutyDayAssignments(specialistDutyDraft)
+      if (normalizedDuty.length) {
+        nextDutyRoster[specialistEditDay] = normalizedDuty
+      } else {
+        delete nextDutyRoster[specialistEditDay]
+      }
+
+      return {
+        ...previous,
+        specialistWorkAssignments: nextWorkAssignments,
+        specialistDutyRoster: nextDutyRoster,
+      }
+    })
+
+    setSpecialistWorkDraft({})
+    setSpecialistDutyDraft([])
+    setSpecialistWorkText('')
+    setSpecialistDutyText('')
+    setSpecialistWorkIssues([])
+    setSpecialistDutyIssues([])
     setSpecialistDateEditMode(false)
-    showSuccess(`${nextDay} uzman önizlemesi açıldı.`)
+    showSuccess(`${specialistEditDay} uzman değişiklikleri kaydedildi.`)
   }
 
   const importSpecialistWorkLines = () => {
+    if (!specialistDateEditMode) {
+      showWarning('Uzman verisi düzenlemek için önce "Değiştir" butonuna bas.')
+      return
+    }
+
     const yearFromMonth = Number(specialistMonth.slice(0, 4))
     const fallbackYear = Number.isNaN(yearFromMonth) ? new Date().getFullYear() : yearFromMonth
     const parsed = parseSpecialistWorkQuickLines(specialistWorkText, fallbackYear, data.locations)
     const issueMessages = parsed.issues.map(
       (issue) => `${issue.lineNumber}. satır: ${issue.message} (${issue.rawLine})`,
     )
+    const targetDay = specialistEditDay
 
     if (!parsed.totalNames) {
       setSpecialistWorkIssues(issueMessages)
@@ -4235,52 +4460,60 @@ function App() {
       return
     }
 
-    setData((previous) => {
-      const nextWorkAssignments: SpecialistWorkAssignments = {
-        ...previous.specialistWorkAssignments,
-      }
-      let mergedCount = 0
+    const selectedDayMap = parsed.data[targetDay] ?? {}
+    const skippedDayCount = Object.keys(parsed.data).filter((dayKey) => dayKey !== targetDay).length
+    if (!Object.keys(selectedDayMap).length) {
+      const warningMessages = [...issueMessages]
+      warningMessages.push(
+        `Seçili gün (${targetDay}) için satır bulunamadı. Bu gün dışındaki satırlar taslağa eklenmedi.`,
+      )
+      setSpecialistWorkIssues(warningMessages)
+      showWarning(`${targetDay} için uzman satırı yok. Taslak güncellenmedi.`)
+      return
+    }
 
-      Object.entries(parsed.data).forEach(([dayKey, locationMap]) => {
-        const nextDayMap = {
-          ...(nextWorkAssignments[dayKey] ?? {}),
-        }
-
-        Object.entries(locationMap).forEach(([locationId, specialistNames]) => {
-          const before = nextDayMap[locationId] ?? []
-          const merged = uniqueSortedNames([...before, ...specialistNames])
-          mergedCount += Math.max(0, merged.length - before.length)
-          nextDayMap[locationId] = merged
-        })
-
-        nextWorkAssignments[dayKey] = nextDayMap
+    let mergedCount = 0
+    setSpecialistWorkDraft((previous) => {
+      const next = cloneSpecialistWorkDayAssignments(previous)
+      Object.entries(selectedDayMap).forEach(([locationId, specialistNames]) => {
+        const before = next[locationId] ?? []
+        const merged = uniqueSortedNames([...before, ...specialistNames])
+        mergedCount += Math.max(0, merged.length - before.length)
+        next[locationId] = merged
       })
-
-      if (issueMessages.length) {
-        showWarning(
-          `${mergedCount} uzman eşleşmesi eklendi. ${issueMessages.length} satır uyarı verdi.`,
-        )
-      } else {
-        showSuccess(`${mergedCount} uzman eşleşmesi kaydedildi.`)
-      }
-
-      return {
-        ...previous,
-        specialistWorkAssignments: nextWorkAssignments,
-      }
+      return next
     })
 
-    setSpecialistWorkIssues(issueMessages)
+    const nextIssues = [...issueMessages]
+    if (skippedDayCount > 0) {
+      nextIssues.push(
+        `${skippedDayCount} farklı güne ait satır seçili gün (${targetDay}) dışında kaldığı için atlandı.`,
+      )
+    }
+
+    if (nextIssues.length) {
+      showWarning(`${mergedCount} uzman taslağa eklendi. ${nextIssues.length} uyarı var.`)
+    } else {
+      showSuccess(`${mergedCount} uzman ${targetDay} taslağına eklendi.`)
+    }
+
+    setSpecialistWorkIssues(nextIssues)
     setSpecialistWorkText('')
   }
 
   const importSpecialistDutyLines = () => {
+    if (!specialistDateEditMode) {
+      showWarning('Nöbetçi uzman verisi düzenlemek için önce "Değiştir" butonuna bas.')
+      return
+    }
+
     const yearFromMonth = Number(specialistMonth.slice(0, 4))
     const fallbackYear = Number.isNaN(yearFromMonth) ? new Date().getFullYear() : yearFromMonth
     const parsed = parseSpecialistDutyQuickLines(specialistDutyText, fallbackYear)
     const issueMessages = parsed.issues.map(
       (issue) => `${issue.lineNumber}. satır: ${issue.message} (${issue.rawLine})`,
     )
+    const targetDay = specialistEditDay
 
     if (!parsed.totalNames) {
       setSpecialistDutyIssues(issueMessages)
@@ -4290,32 +4523,40 @@ function App() {
       return
     }
 
-    setData((previous) => {
-      const nextDutyRoster: SpecialistDutyRoster = {
-        ...previous.specialistDutyRoster,
-      }
-      let mergedCount = 0
+    const selectedDayEntries = parsed.data[targetDay] ?? []
+    const skippedDayCount = Object.keys(parsed.data).filter((dayKey) => dayKey !== targetDay).length
+    if (!selectedDayEntries.length) {
+      const warningMessages = [...issueMessages]
+      warningMessages.push(
+        `Seçili gün (${targetDay}) için satır bulunamadı. Bu gün dışındaki satırlar taslağa eklenmedi.`,
+      )
+      setSpecialistDutyIssues(warningMessages)
+      showWarning(`${targetDay} için nöbetçi uzman satırı yok. Taslak güncellenmedi.`)
+      return
+    }
 
-      Object.entries(parsed.data).forEach(([dayKey, specialistEntries]) => {
-        const before = nextDutyRoster[dayKey] ?? []
-        const merged = uniqueSpecialistDutyAssignments([...before, ...specialistEntries])
-        mergedCount += Math.max(0, merged.length - before.length)
-        nextDutyRoster[dayKey] = merged
-      })
-
-      if (issueMessages.length) {
-        showWarning(`${mergedCount} nöbetçi uzman eklendi. ${issueMessages.length} satır uyarı verdi.`)
-      } else {
-        showSuccess(`${mergedCount} nöbetçi uzman kaydedildi.`)
-      }
-
-      return {
-        ...previous,
-        specialistDutyRoster: nextDutyRoster,
-      }
+    let mergedCount = 0
+    setSpecialistDutyDraft((previous) => {
+      const beforeCount = previous.length
+      const merged = uniqueSpecialistDutyAssignments([...previous, ...selectedDayEntries])
+      mergedCount = Math.max(0, merged.length - beforeCount)
+      return merged
     })
 
-    setSpecialistDutyIssues(issueMessages)
+    const nextIssues = [...issueMessages]
+    if (skippedDayCount > 0) {
+      nextIssues.push(
+        `${skippedDayCount} farklı güne ait satır seçili gün (${targetDay}) dışında kaldığı için atlandı.`,
+      )
+    }
+
+    if (nextIssues.length) {
+      showWarning(`${mergedCount} nöbetçi uzman taslağa eklendi. ${nextIssues.length} uyarı var.`)
+    } else {
+      showSuccess(`${mergedCount} nöbetçi uzman ${targetDay} taslağına eklendi.`)
+    }
+
+    setSpecialistDutyIssues(nextIssues)
     setSpecialistDutyText('')
   }
 
@@ -4324,38 +4565,27 @@ function App() {
     locationId: string,
     specialistName: string,
   ) => {
-    setData((previous) => {
-      const dayMap = previous.specialistWorkAssignments[dayKey]
-      if (!dayMap) {
-        return previous
-      }
+    if (!specialistDateEditMode || dayKey !== specialistEditDay) {
+      showWarning('Silmek için önce Değiştir ile bu günü düzenlemeye aç.')
+      return
+    }
 
-      const currentNames = dayMap[locationId] ?? []
+    setSpecialistWorkDraft((previous) => {
+      const currentNames = previous[locationId] ?? []
       if (!currentNames.includes(specialistName)) {
         return previous
       }
 
       const nextNames = currentNames.filter((name) => name !== specialistName)
-      const nextDayMap = { ...dayMap }
+      const next = { ...previous }
       if (nextNames.length) {
-        nextDayMap[locationId] = nextNames
+        next[locationId] = nextNames
       } else {
-        delete nextDayMap[locationId]
+        delete next[locationId]
       }
-
-      const nextAssignments = { ...previous.specialistWorkAssignments }
-      if (Object.keys(nextDayMap).length) {
-        nextAssignments[dayKey] = nextDayMap
-      } else {
-        delete nextAssignments[dayKey]
-      }
-
-      showSuccess(`${specialistName} uzman kaydı kaldırıldı.`)
-      return {
-        ...previous,
-        specialistWorkAssignments: nextAssignments,
-      }
+      return next
     })
+    showSuccess(`${specialistName} uzman taslaktan çıkarıldı.`)
   }
 
   const removeSpecialistDutyAssignment = (
@@ -4363,32 +4593,18 @@ function App() {
     site: SpecialistDutySite,
     specialistName: string,
   ) => {
-    setData((previous) => {
-      const dayEntries = previous.specialistDutyRoster[dayKey] ?? []
-      if (!dayEntries.length) {
-        return previous
-      }
+    if (!specialistDateEditMode || dayKey !== specialistEditDay) {
+      showWarning('Silmek için önce Değiştir ile bu günü düzenlemeye aç.')
+      return
+    }
 
-      const nextEntries = dayEntries.filter(
+    setSpecialistDutyDraft((previous) => {
+      const next = previous.filter(
         (entry) => !(entry.site === site && entry.name === specialistName),
       )
-      if (nextEntries.length === dayEntries.length) {
-        return previous
-      }
-
-      const nextRoster = { ...previous.specialistDutyRoster }
-      if (nextEntries.length) {
-        nextRoster[dayKey] = nextEntries
-      } else {
-        delete nextRoster[dayKey]
-      }
-
-      showSuccess(`${specialistName} nöbetçi uzman kaydı kaldırıldı.`)
-      return {
-        ...previous,
-        specialistDutyRoster: nextRoster,
-      }
+      return next.length === previous.length ? previous : next
     })
+    showSuccess(`${specialistName} nöbetçi uzman taslaktan çıkarıldı.`)
   }
 
   const startPlannerDayEdit = (dayKey: string) => {
@@ -5120,6 +5336,30 @@ function App() {
     )
     return groupBySite(dayLocations, specialistDay)
   }, [data, specialistDay])
+  const specialistWorkPreviewMap = useMemo<SpecialistWorkDayAssignments>(() => {
+    if (specialistDateEditMode && specialistDay === specialistEditDay) {
+      return specialistWorkDraft
+    }
+    return cloneSpecialistWorkDayAssignments(data.specialistWorkAssignments[specialistDay])
+  }, [
+    data.specialistWorkAssignments,
+    specialistDateEditMode,
+    specialistDay,
+    specialistEditDay,
+    specialistWorkDraft,
+  ])
+  const specialistDutyPreviewEntries = useMemo<SpecialistDutyAssignment[]>(() => {
+    if (specialistDateEditMode && specialistDay === specialistEditDay) {
+      return specialistDutyDraft
+    }
+    return cloneSpecialistDutyDayAssignments(data.specialistDutyRoster[specialistDay])
+  }, [
+    data.specialistDutyRoster,
+    specialistDateEditMode,
+    specialistDay,
+    specialistEditDay,
+    specialistDutyDraft,
+  ])
   const specialistDutyPreviewBySite = useMemo(() => {
     const bySite: Record<SpecialistDutySite, string[]> = {
       Sancaktepe: [],
@@ -5129,11 +5369,11 @@ function App() {
       'Feriha G123': [],
     }
 
-    sortSpecialistDutyAssignments(data.specialistDutyRoster[specialistDay] ?? []).forEach((entry) => {
+    sortSpecialistDutyAssignments(specialistDutyPreviewEntries).forEach((entry) => {
       bySite[entry.site].push(entry.name)
     })
     return bySite
-  }, [data.specialistDutyRoster, specialistDay])
+  }, [specialistDutyPreviewEntries])
   const specialistPreviewDayLabel = useMemo(() => {
     if (!specialistDay) {
       return 'Tarih seçilmedi'
@@ -5762,10 +6002,17 @@ function App() {
                   onChange={(event) => setPasswordInput(event.target.value)}
                   placeholder="Şifreyi gir"
                 />
+                {adminBlockRemainingMs > 0 ? (
+                  <p className="hint-text">
+                    Geçici bloke aktif. Kalan süre: {formatRemainingBlock(adminBlockRemainingMs)}
+                  </p>
+                ) : (
+                  <p className="hint-text">Bu cihazda şifre hatırlanır.</p>
+                )}
               </div>
               <div className="login-actions">
-                <button type="button" onClick={loginAsAdmin}>
-                  Giriş
+                <button type="button" onClick={loginAsAdmin} disabled={adminBlockRemainingMs > 0}>
+                  {adminBlockRemainingMs > 0 ? 'Bloklu' : 'Giriş'}
                 </button>
               </div>
             </>
@@ -6688,17 +6935,20 @@ function App() {
               <div className="form-row specialist-date-edit-row">
                 <select
                   className="my-calendar-month-select"
-                  value={specialistDateEditMode ? specialistMonthDraft : specialistMonth}
-                  disabled={!specialistDateEditMode}
+                  value={specialistMonth}
                   onChange={(event) => {
+                    if (specialistDateEditMode) {
+                      showWarning('Tarihi değiştirmek için önce uzman düzenlemesini Kaydet veya İptal et.')
+                      return
+                    }
                     const nextMonth = event.target.value
                     if (!isValidMonthISO(nextMonth)) {
                       return
                     }
-                    setSpecialistMonthDraft(nextMonth)
+                    setSpecialistMonth(nextMonth)
                     const monthDays = listMonthDays(nextMonth)
-                    if (!monthDays.includes(specialistDayDraft)) {
-                      setSpecialistDayDraft(monthDays[0] ?? '')
+                    if (!monthDays.includes(specialistDay)) {
+                      setSpecialistDay(monthDays[0] ?? '')
                     }
                   }}
                 >
@@ -6714,8 +6964,8 @@ function App() {
                   </button>
                 ) : null}
                 {specialistDateEditMode ? (
-                  <button type="button" className="secondary" onClick={applySpecialistDateEdit}>
-                    Uygula
+                  <button type="button" className="secondary" onClick={saveSpecialistDateEdit}>
+                    Kaydet
                   </button>
                 ) : null}
                 {specialistDateEditMode ? (
@@ -6724,6 +6974,12 @@ function App() {
                   </button>
                 ) : null}
               </div>
+              {specialistDateEditMode ? (
+                <p className="hint-text planner-hint">
+                  Düzenleme açık: <strong>{specialistEditDay}</strong> günü için yapılan değişiklikler taslaktadır.
+                  Kaydet dediğinde onay sorulur; Hayır dersen taslak korunur, İptal dersen taslak silinir.
+                </p>
+              ) : null}
 
               <div className="planner-day-tabs specialist-week-tabs">
                 {specialistWeekGroups.map((group) => (
@@ -6731,14 +6987,15 @@ function App() {
                     key={`specialist-week-${group.weekStartISO}`}
                     type="button"
                     className={activeSpecialistWeek === group.weekStartISO ? 'active' : ''}
+                    disabled={specialistDateEditMode}
                     onClick={() => {
+                      if (specialistDateEditMode) {
+                        return
+                      }
                       setActiveSpecialistWeek(group.weekStartISO)
                       const firstDay = group.days[0]?.key
                       if (firstDay) {
                         setSpecialistDay(firstDay)
-                        if (specialistDateEditMode) {
-                          setSpecialistDayDraft(firstDay)
-                        }
                       }
                     }}
                   >
@@ -6753,11 +7010,12 @@ function App() {
                     key={`specialist-day-tab-${day.key}`}
                     type="button"
                     className={specialistDay === day.key ? 'active' : ''}
+                    disabled={specialistDateEditMode}
                     onClick={() => {
-                      setSpecialistDay(day.key)
                       if (specialistDateEditMode) {
-                        setSpecialistDayDraft(day.key)
+                        return
                       }
+                      setSpecialistDay(day.key)
                     }}
                   >
                     {day.shortLabel} ({fromISODate(day.key).toLocaleDateString('tr-TR', { weekday: 'short' })})
@@ -6773,6 +7031,7 @@ function App() {
                 </p>
                 <textarea
                   value={specialistWorkText}
+                  disabled={!specialistDateEditMode}
                   onChange={(event) => setSpecialistWorkText(event.target.value)}
                   placeholder={
                     '27 Nisan 2026 - Sami Yarkın Sözüer - Sancaktepe Ameliyathane 1\n' +
@@ -6781,7 +7040,12 @@ function App() {
                   }
                 />
                 <div className="form-row specialist-save-row">
-                  <button type="button" className="secondary" onClick={importSpecialistWorkLines}>
+                  <button
+                    type="button"
+                    className="secondary"
+                    disabled={!specialistDateEditMode}
+                    onClick={importSpecialistWorkLines}
+                  >
                     Günlük Çalışmayı Kaydet
                   </button>
                 </div>
@@ -6805,7 +7069,7 @@ function App() {
                     <article key={`specialist-preview-${siteName}`} className="site-block specialist-preview-site">
                       <h4>{siteName}</h4>
                       {locations.map((location) => {
-                        const specialists = getSpecialistNamesForLocation(data, specialistDay, location)
+                        const specialists = uniqueSortedNames(specialistWorkPreviewMap[location.id] ?? [])
                         return (
                           <div key={`specialist-preview-row-${location.id}`} className="specialist-preview-row">
                             <strong>{location.name}</strong>
@@ -6817,6 +7081,7 @@ function App() {
                                     type="button"
                                     className="chip removable"
                                     title="Uzmanı kaldır"
+                                    disabled={!specialistDateEditMode || specialistDay !== specialistEditDay}
                                     onClick={() =>
                                       removeSpecialistWorkAssignment(
                                         specialistDay,
@@ -6848,6 +7113,7 @@ function App() {
                 </p>
                 <textarea
                   value={specialistDutyText}
+                  disabled={!specialistDateEditMode}
                   onChange={(event) => setSpecialistDutyText(event.target.value)}
                   placeholder={
                     '1 Nisan 2026 - Sami Yarkın Sözüer - Sancaktepe\n' +
@@ -6858,7 +7124,12 @@ function App() {
                   }
                 />
                 <div className="form-row specialist-save-row">
-                  <button type="button" className="secondary" onClick={importSpecialistDutyLines}>
+                  <button
+                    type="button"
+                    className="secondary"
+                    disabled={!specialistDateEditMode}
+                    onClick={importSpecialistDutyLines}
+                  >
                     Nöbetçi Uzmanları Kaydet
                   </button>
                 </div>
@@ -6886,6 +7157,7 @@ function App() {
                               type="button"
                               className="chip removable"
                               title="Nöbetçi uzmanı kaldır"
+                              disabled={!specialistDateEditMode || specialistDay !== specialistEditDay}
                               onClick={() =>
                                 removeSpecialistDutyAssignment(
                                   specialistDay,
@@ -7058,85 +7330,109 @@ function App() {
                 ))}
               </div>
 
-              <h3 className="observer-tab-title observer-room-title">Oda Bazlı</h3>
-              <div className="form-row">
-                <select
-                  value={observerWeekRoom}
-                  onChange={(event) => setObserverWeekRoom(event.target.value)}
+              <h3 className="observer-tab-title observer-room-title">Detay Görünümü</h3>
+              <div className="subpanel-toggle observer-week-detail-tabs">
+                <button
+                  type="button"
+                  className={observerWeekDetailView === 'room' ? 'active' : ''}
+                  onClick={() => setObserverWeekDetailView('room')}
                 >
-                  <option value="">Oda seç</option>
-                  {observerWeekRoomOptions.map((location) => (
-                    <option key={`observer-week-room-${location.id}`} value={location.id}>
-                      {location.site} / {location.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="timeline-grid">
-                {weekAssignmentsForRoom.map(({ day, names, specialistNames, dayTypeLabel }) => (
-                  <article key={`timeline-room-${day.key}`} className="timeline-card">
-                    <header>
-                      <strong>{day.shortLabel}</strong>
-                      <small>{day.key}</small>
-                    </header>
-                    <div className="chip-wrap">
-                      {specialistNames.length ? (
-                        <span className="chip soft chip-with-meta">
-                          <small className="chip-meta">Uzm: {specialistNames.join(', ')}</small>
-                        </span>
-                      ) : null}
-                      {names.length ? (
-                        names.map((name) => (
-                          <span key={`${day.key}-${observerWeekRoom}-${name}`} className="chip soft">
-                            {name}
-                          </span>
-                        ))
-                      ) : dayTypeLabel ? (
-                        <span className="empty offday-text">{dayTypeLabel} günü</span>
-                      ) : (
-                        <span className="empty">Bu odada atama görünmüyor</span>
-                      )}
-                    </div>
-                  </article>
-                ))}
-              </div>
-
-              <h3 className="observer-tab-title observer-room-title">Nöbet Bazlı</h3>
-              <div className="form-row">
-                <select
-                  value={observerWeekDutySite}
-                  onChange={(event) => setObserverWeekDutySite(event.target.value as DutySite)}
+                  Oda Bazlı
+                </button>
+                <button
+                  type="button"
+                  className={observerWeekDetailView === 'duty' ? 'active' : ''}
+                  onClick={() => setObserverWeekDetailView('duty')}
                 >
-                  {DUTY_SITES.map((site) => (
-                    <option key={`observer-week-duty-site-${site}`} value={site}>
-                      {site}
-                    </option>
-                  ))}
-                </select>
+                  Nöbet Bazlı
+                </button>
               </div>
 
-              <div className="timeline-grid">
-                {weekDutyAssignmentsForSite.map(({ day, names }) => (
-                  <article key={`timeline-duty-${day.key}`} className="timeline-card">
-                    <header>
-                      <strong>{day.shortLabel}</strong>
-                      <small>{day.key}</small>
-                    </header>
-                    <div className="chip-wrap">
-                      {names.length ? (
-                        names.map((name) => (
-                          <span key={`${day.key}-${observerWeekDutySite}-${name}`} className="chip duty-site-chip">
-                            {name}
-                          </span>
-                        ))
-                      ) : (
-                        <span className="empty">Bu hastanede nöbetçi görünmüyor</span>
-                      )}
-                    </div>
-                  </article>
-                ))}
-              </div>
+              {observerWeekDetailView === 'room' ? (
+                <>
+                  <div className="form-row">
+                    <select
+                      value={observerWeekRoom}
+                      onChange={(event) => setObserverWeekRoom(event.target.value)}
+                    >
+                      <option value="">Oda seç</option>
+                      {observerWeekRoomOptions.map((location) => (
+                        <option key={`observer-week-room-${location.id}`} value={location.id}>
+                          {location.site} / {location.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="timeline-grid">
+                    {weekAssignmentsForRoom.map(({ day, names, specialistNames, dayTypeLabel }) => (
+                      <article key={`timeline-room-${day.key}`} className="timeline-card">
+                        <header>
+                          <strong>{day.shortLabel}</strong>
+                          <small>{day.key}</small>
+                        </header>
+                        <div className="chip-wrap">
+                          {specialistNames.length ? (
+                            <span className="chip soft chip-with-meta">
+                              <small className="chip-meta">Uzm: {specialistNames.join(', ')}</small>
+                            </span>
+                          ) : null}
+                          {names.length ? (
+                            names.map((name) => (
+                              <span key={`${day.key}-${observerWeekRoom}-${name}`} className="chip soft">
+                                {name}
+                              </span>
+                            ))
+                          ) : dayTypeLabel ? (
+                            <span className="empty offday-text">{dayTypeLabel} günü</span>
+                          ) : (
+                            <span className="empty">Bu odada atama görünmüyor</span>
+                          )}
+                        </div>
+                      </article>
+                    ))}
+                  </div>
+                </>
+              ) : null}
+
+              {observerWeekDetailView === 'duty' ? (
+                <>
+                  <div className="form-row">
+                    <select
+                      value={observerWeekDutySite}
+                      onChange={(event) => setObserverWeekDutySite(event.target.value as DutySite)}
+                    >
+                      {DUTY_SITES.map((site) => (
+                        <option key={`observer-week-duty-site-${site}`} value={site}>
+                          {site}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="timeline-grid">
+                    {weekDutyAssignmentsForSite.map(({ day, names }) => (
+                      <article key={`timeline-duty-${day.key}`} className="timeline-card">
+                        <header>
+                          <strong>{day.shortLabel}</strong>
+                          <small>{day.key}</small>
+                        </header>
+                        <div className="chip-wrap">
+                          {names.length ? (
+                            names.map((name) => (
+                              <span key={`${day.key}-${observerWeekDutySite}-${name}`} className="chip duty-site-chip">
+                                {name}
+                              </span>
+                            ))
+                          ) : (
+                            <span className="empty">Bu hastanede nöbetçi görünmüyor</span>
+                          )}
+                        </div>
+                      </article>
+                    ))}
+                  </div>
+                </>
+              ) : null}
             </section>
           ) : null}
 
