@@ -19,9 +19,9 @@ import AssistantMonthlyTableView, {
 } from './AssistantMonthlyTableView'
 
 type PanelMode = 'admin' | 'observer'
-type AdminSection = 'assistants' | 'locations' | 'duty' | 'planner' | 'specialists'
+type AdminSection = 'assistants' | 'locations' | 'duty' | 'planner' | 'specialists' | 'backups'
 type ObserverSection = 'myPanel' | 'personWeek' | 'dailyMap'
-type ObserverWeekDetailView = 'room' | 'duty'
+type ObserverWeekDetailView = 'person' | 'room' | 'duty'
 type PlannerView = 'rooms' | 'status'
 type LocationKind = 'normal' | 'leave' | 'duty' | 'postDuty'
 type LocationTone = 'sand' | 'sage' | 'amber' | 'sky' | 'rose'
@@ -134,7 +134,18 @@ interface Notice {
 interface AdminLoginGuardState {
   failedAttempts: number
   blockedUntil: number
-  rememberedPassword: string
+  rememberedAdmin: boolean
+}
+
+interface BackupEntry {
+  id: number
+  savedAt: string
+  source: string
+  payload: RemotePortalPayload
+  assistantCount: number
+  locationCount: number
+  dutyDayCount: number
+  assignmentDayCount: number
 }
 
 interface DutyParseIssue {
@@ -168,7 +179,7 @@ const CLOUD_SAFE_GUARD_TEXT =
   'Bulut verisi okunamadığı için güvenlik gereği yerelden buluta yazma kapatıldı.'
 const CLOUD_CONFLICT_TEXT =
   'Bulutta daha yeni bir kayıt var. Güvenlik için üzerine yazma engellendi; sayfayı yenileyip tekrar dene.'
-const APP_PASSWORD = 'a.918273'
+const APP_PASSWORD_HASH = '37db5704c214af212d89246fd809bac16bc924bab57601ed34078ff1625e8f43'
 const ADMIN_BLOCK_STEP = 5
 const ADMIN_FIRST_BLOCK_MS = 60 * 60 * 1000
 const ADMIN_SECOND_BLOCK_MS = 24 * 60 * 60 * 1000
@@ -1617,7 +1628,7 @@ function parseDutyQuickLines(
       }
 
       const match = line.match(
-        /^(\d{1,2}[./-]\d{1,2}(?:[./-]\d{2,4})?|\d{4}-\d{2}-\d{2})\s*(?:[:\-])?\s*(.+)$/u,
+        /^(\d{1,2}[./-]\d{1,2}(?:[./-]\d{2,4})?|\d{4}-\d{2}-\d{2})\s*(?:[:-])?\s*(.+)$/u,
       )
       if (!match) {
         issues.push({
@@ -2408,10 +2419,10 @@ function sanitizeAdminLoginGuard(raw: unknown): AdminLoginGuardState {
     return {
       failedAttempts: 0,
       blockedUntil: 0,
-      rememberedPassword: '',
+      rememberedAdmin: false,
     }
   }
-  const record = raw as Partial<AdminLoginGuardState>
+  const record = raw as Partial<AdminLoginGuardState> & { rememberedPassword?: unknown }
   const failedAttempts =
     typeof record.failedAttempts === 'number' && Number.isFinite(record.failedAttempts) && record.failedAttempts > 0
       ? Math.floor(record.failedAttempts)
@@ -2420,11 +2431,12 @@ function sanitizeAdminLoginGuard(raw: unknown): AdminLoginGuardState {
     typeof record.blockedUntil === 'number' && Number.isFinite(record.blockedUntil) && record.blockedUntil > 0
       ? Math.floor(record.blockedUntil)
       : 0
-  const rememberedPassword = typeof record.rememberedPassword === 'string' ? record.rememberedPassword : ''
+  const rememberedAdmin =
+    record.rememberedAdmin === true || record.rememberedPassword === 'a.918273'
   return {
     failedAttempts: Math.min(failedAttempts, 500),
     blockedUntil,
-    rememberedPassword,
+    rememberedAdmin,
   }
 }
 
@@ -2433,7 +2445,7 @@ function safeReadAdminLoginGuard(): AdminLoginGuardState {
     return {
       failedAttempts: 0,
       blockedUntil: 0,
-      rememberedPassword: '',
+      rememberedAdmin: false,
     }
   }
   const raw = localStorage.getItem(ADMIN_LOGIN_GUARD_KEY)
@@ -2441,7 +2453,7 @@ function safeReadAdminLoginGuard(): AdminLoginGuardState {
     return {
       failedAttempts: 0,
       blockedUntil: 0,
-      rememberedPassword: '',
+      rememberedAdmin: false,
     }
   }
   try {
@@ -2451,8 +2463,63 @@ function safeReadAdminLoginGuard(): AdminLoginGuardState {
     return {
       failedAttempts: 0,
       blockedUntil: 0,
-      rememberedPassword: '',
+      rememberedAdmin: false,
     }
+  }
+}
+
+async function sha256Hex(value: string): Promise<string> {
+  if (typeof crypto === 'undefined' || !crypto.subtle) {
+    return ''
+  }
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value))
+  return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('')
+}
+
+function buildRemotePayload(plannerState: PlannerState, bindings: Record<string, string>): RemotePortalPayload {
+  return {
+    plannerState,
+    userBindings: bindings,
+  }
+}
+
+function summarizeBackupRow(row: unknown): BackupEntry | null {
+  if (!row || typeof row !== 'object') {
+    return null
+  }
+  const record = row as {
+    id?: unknown
+    saved_at?: unknown
+    source?: unknown
+    payload?: unknown
+  }
+  if (typeof record.id !== 'number' || typeof record.saved_at !== 'string') {
+    return null
+  }
+
+  const payload =
+    record.payload && typeof record.payload === 'object'
+      ? (record.payload as RemotePortalPayload)
+      : {}
+  const fallback = buildFallbackState()
+  const plannerState =
+    payload.plannerState && typeof payload.plannerState === 'object'
+      ? sanitizePlannerState(payload.plannerState as Partial<PlannerState>, fallback)
+      : fallback
+
+  return {
+    id: record.id,
+    savedAt: record.saved_at,
+    source: typeof record.source === 'string' ? record.source : 'auto-save',
+    payload,
+    assistantCount: plannerState.assistants.length,
+    locationCount: plannerState.locations.filter((location) => location.kind === 'normal').length,
+    dutyDayCount: Object.keys(plannerState.dutyRoster).filter(
+      (dayKey) => (plannerState.dutyRoster[dayKey] ?? []).length > 0,
+    ).length,
+    assignmentDayCount: Object.keys(plannerState.manualAssignments).filter(
+      (dayKey) => Object.values(plannerState.manualAssignments[dayKey] ?? {}).some((names) => names.length > 0),
+    ).length,
   }
 }
 
@@ -2490,7 +2557,7 @@ function App() {
   const [blockClockMs, setBlockClockMs] = useState(() => Date.now())
   const initialAdminLoginGuard = useMemo(() => safeReadAdminLoginGuard(), [])
   const [adminLoginGuard, setAdminLoginGuard] = useState<AdminLoginGuardState>(initialAdminLoginGuard)
-  const [passwordInput, setPasswordInput] = useState(initialAdminLoginGuard.rememberedPassword)
+  const [passwordInput, setPasswordInput] = useState('')
   const [assistantUsernameInput, setAssistantUsernameInput] = useState('')
   const [assistantUserPickerOpen, setAssistantUserPickerOpen] = useState(false)
   const [data, setData] = useState<PlannerState>(() => safeReadState())
@@ -2511,6 +2578,9 @@ function App() {
   const cloudCanWriteRef = useRef(false)
   const cloudRevisionRef = useRef<string | null>(null)
   const cloudSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const [backupEntries, setBackupEntries] = useState<BackupEntry[]>([])
+  const [isBackupLoading, setIsBackupLoading] = useState(false)
+  const [backupStatusText, setBackupStatusText] = useState('')
 
   const [assistantInput, setAssistantInput] = useState('')
   const [assistantRankInput, setAssistantRankInput] = useState<SeniorityLevel>(1)
@@ -2556,7 +2626,7 @@ function App() {
   const [observerWeekRoom, setObserverWeekRoom] = useState('')
   const [observerWeekDutySite, setObserverWeekDutySite] = useState<DutySite>('Sancaktepe')
   const [observerWeekDetailView, setObserverWeekDetailView] =
-    useState<ObserverWeekDetailView>('room')
+    useState<ObserverWeekDetailView>('person')
   const [plannerMonth, setPlannerMonth] = useState(currentMonthISO)
   const [activePlannerDay, setActivePlannerDay] = useState(todayISO)
   const [plannerWeeklyExportOpen, setPlannerWeeklyExportOpen] = useState(false)
@@ -2766,11 +2836,7 @@ function App() {
     [plannerMonthDays],
   )
   const cloudPayload = useMemo(
-    () =>
-      JSON.stringify({
-        plannerState: data,
-        userBindings,
-      }),
+    () => JSON.stringify(buildRemotePayload(data, userBindings)),
     [data, userBindings],
   )
   const isTableLikeFullscreenOpen =
@@ -3319,14 +3385,20 @@ function App() {
     }
   }
 
-  const loginAsAdmin = () => {
+  const loginAsAdmin = async () => {
     const now = Date.now()
     if (adminLoginGuard.blockedUntil > now) {
       showWarning(`Çok fazla yanlış deneme. ${formatRemainingBlock(adminLoginGuard.blockedUntil - now)} sonra tekrar dene.`)
       return
     }
 
-    if (passwordInput.trim() !== APP_PASSWORD) {
+    const passwordCandidate = passwordInput.trim()
+    const passwordAccepted =
+      adminLoginGuard.rememberedAdmin && !passwordCandidate
+        ? true
+        : (await sha256Hex(passwordCandidate)) === APP_PASSWORD_HASH
+
+    if (!passwordAccepted) {
       const nextFailedAttempts = adminLoginGuard.failedAttempts + 1
       let blockedUntil = 0
       let blockDurationMs = 0
@@ -3358,10 +3430,10 @@ function App() {
     setAdminLoginGuard({
       failedAttempts: 0,
       blockedUntil: 0,
-      rememberedPassword: APP_PASSWORD,
+      rememberedAdmin: true,
     })
     setSession({ role: 'admin' })
-    setPasswordInput(APP_PASSWORD)
+    setPasswordInput('')
     setNotice(null)
   }
 
@@ -3402,7 +3474,7 @@ function App() {
     setAssistantMonthlyTableOpen(false)
     setObserverDutyListOpen(false)
     setMode('admin')
-    setPasswordInput(adminLoginGuard.rememberedPassword)
+    setPasswordInput('')
     setAssistantUsernameInput('')
     setAssistantUserPickerOpen(false)
     setNotice(null)
@@ -3410,6 +3482,9 @@ function App() {
 
   const selectAdminSection = (section: AdminSection) => {
     setAdminSection(section)
+    if (section === 'backups') {
+      void refreshBackups()
+    }
   }
 
   const selectObserverSection = (section: ObserverSection) => {
@@ -3733,6 +3808,133 @@ function App() {
 
   const closeObserverDutyList = () => {
     setObserverDutyListOpen(false)
+  }
+
+  const refreshBackups = async () => {
+    if (!isSupabaseConfigured || !supabase) {
+      setBackupEntries([])
+      setBackupStatusText('Bulut bağlantısı olmadığı için yedekler okunamadı.')
+      showWarning('Yedekleri görmek için Supabase bağlantısı gerekli.')
+      return
+    }
+
+    setIsBackupLoading(true)
+    setBackupStatusText('Yedekler yükleniyor...')
+    const { data: rows, error } = await supabase
+      .from(REMOTE_STATE_HISTORY_TABLE)
+      .select('id, saved_at, source, payload')
+      .order('saved_at', { ascending: false })
+      .limit(30)
+
+    if (error) {
+      setIsBackupLoading(false)
+      setBackupStatusText('Yedek listesi okunamadı.')
+      showWarning('Yedek listesi okunamadı. Supabase history tablosu ve izinlerini kontrol et.')
+      return
+    }
+
+    const entries = (rows ?? [])
+      .map((row) => summarizeBackupRow(row))
+      .filter((entry): entry is BackupEntry => Boolean(entry))
+    setBackupEntries(entries)
+    setBackupStatusText(entries.length ? `${entries.length} yedek listelendi.` : 'Henüz yedek kaydı yok.')
+    setIsBackupLoading(false)
+  }
+
+  const createManualBackup = async () => {
+    if (!isSupabaseConfigured || !supabase) {
+      showWarning('Manuel yedek için Supabase bağlantısı gerekli.')
+      return
+    }
+
+    setIsBackupLoading(true)
+    const payload = buildRemotePayload(data, userBindings)
+    const { error } = await supabase.from(REMOTE_STATE_HISTORY_TABLE).insert({
+      state_id: REMOTE_STATE_ROW_ID,
+      payload,
+      saved_at: new Date().toISOString(),
+      source: 'manual-backup',
+    })
+
+    if (error) {
+      setIsBackupLoading(false)
+      showWarning('Manuel yedek alınamadı. Supabase history tablosunu kontrol et.')
+      return
+    }
+
+    showSuccess('Manuel yedek alındı.')
+    await refreshBackups()
+  }
+
+  const restoreBackup = async (backupId: number) => {
+    if (!isSupabaseConfigured || !supabase) {
+      showWarning('Geri yükleme için Supabase bağlantısı gerekli.')
+      return
+    }
+    const backup = backupEntries.find((entry) => entry.id === backupId)
+    if (!backup) {
+      showWarning('Geri yüklenecek yedek bulunamadı.')
+      return
+    }
+    if (
+      typeof window !== 'undefined' &&
+      !window.confirm(
+        `${new Date(backup.savedAt).toLocaleString('tr-TR')} tarihli yedeği geri yüklemek istediğine emin misin? Mevcut yayın verisi bu yedekle değişir.`,
+      )
+    ) {
+      return
+    }
+
+    const fallback = buildFallbackState()
+    const restoredState =
+      backup.payload.plannerState && typeof backup.payload.plannerState === 'object'
+        ? sanitizePlannerState(backup.payload.plannerState as Partial<PlannerState>, fallback)
+        : fallback
+    const restoredBindings = sanitizeUserBindings(backup.payload.userBindings)
+    const restoredPayload = buildRemotePayload(restoredState, restoredBindings)
+    const nextUpdatedAt = new Date().toISOString()
+
+    setIsBackupLoading(true)
+    const { data: updatedRows, error } = await supabase
+      .from(REMOTE_STATE_TABLE)
+      .update({
+        payload: restoredPayload,
+        updated_at: nextUpdatedAt,
+      })
+      .eq('id', REMOTE_STATE_ROW_ID)
+      .select('updated_at')
+
+    if (error) {
+      setIsBackupLoading(false)
+      showWarning('Yedek geri yüklenemedi. Bulut kaydı güncellenemedi.')
+      return
+    }
+
+    const restoredUpdatedAt =
+      Array.isArray(updatedRows) && typeof updatedRows[0]?.updated_at === 'string'
+        ? updatedRows[0].updated_at
+        : nextUpdatedAt
+
+    await supabase.from(REMOTE_STATE_HISTORY_TABLE).insert({
+      state_id: REMOTE_STATE_ROW_ID,
+      payload: restoredPayload,
+      saved_at: restoredUpdatedAt,
+      source: `restore-${backup.id}`,
+    })
+
+    const syncedPayload = JSON.stringify(restoredPayload)
+    cloudPayloadRef.current = syncedPayload
+    cloudRevisionRef.current = restoredUpdatedAt
+    cloudHydratedRef.current = true
+    cloudCanWriteRef.current = true
+    setData(restoredState)
+    setUserBindings(restoredBindings)
+    setCloudState('ready')
+    setCloudStateText(isCloudWriteEnabled ? 'Bulut kaydı aktif.' : CLOUD_READ_ONLY_TEXT)
+    setCloudLastSavedAt(restoredUpdatedAt)
+    setIsBackupLoading(false)
+    showSuccess('Seçilen yedek geri yüklendi.')
+    await refreshBackups()
   }
 
   const saveOwnersMonth = () => {
@@ -4275,7 +4477,7 @@ function App() {
       return
     }
 
-    let issueMessages = [...issueMessagesFromParser]
+    const issueMessages = [...issueMessagesFromParser]
 
     setData((previous) => {
       const mergedDuty: DutyRoster = { ...previous.dutyRoster }
@@ -5528,29 +5730,49 @@ function App() {
                 ) : null}
               </td>
 
-              {DUTY_SITES.map((site) => (
-                <td
-                  key={`${keyPrefix}-cell-${row.dayKey}-${site}`}
-                  className={`site-col-cell site-col-${dutySiteClassName(site)}`}
-                >
-                  {row.bySite[site].length ? (
-                    <div className="duty-name-stack">
-                      {row.bySite[site].map((entry) => (
-                        <span
-                          key={`${keyPrefix}-name-${row.dayKey}-${site}-${entry.kind}-${entry.label}`}
-                          className={`duty-name-line ${
-                            entry.kind === 'specialist' ? 'specialist-duty-name-line' : ''
-                          }`}
-                        >
-                          {entry.label}
-                        </span>
-                      ))}
-                    </div>
-                  ) : (
-                    <span className="empty tiny">-</span>
-                  )}
-                </td>
-              ))}
+              {DUTY_SITES.map((site) => {
+                const specialistNames = row.bySite[site].filter((entry) => entry.kind === 'specialist')
+                const assistantNames = row.bySite[site].filter((entry) => entry.kind === 'assistant')
+
+                return (
+                  <td
+                    key={`${keyPrefix}-cell-${row.dayKey}-${site}`}
+                    className={`site-col-cell site-col-${dutySiteClassName(site)}`}
+                  >
+                    {specialistNames.length || assistantNames.length ? (
+                      <div className="duty-name-stack">
+                        {specialistNames.length ? (
+                          <div className="duty-specialist-row" aria-label={`${site} nöbetçi uzmanları`}>
+                            {specialistNames.map((entry) => (
+                              <span
+                                key={`${keyPrefix}-specialist-${row.dayKey}-${site}-${entry.label}`}
+                                className="duty-name-line specialist-duty-name-line"
+                              >
+                                {entry.label}
+                              </span>
+                            ))}
+                          </div>
+                        ) : null}
+
+                        {assistantNames.length ? (
+                          <div className="duty-assistant-row" aria-label={`${site} nöbetçi asistanları`}>
+                            {assistantNames.map((entry) => (
+                              <span
+                                key={`${keyPrefix}-assistant-${row.dayKey}-${site}-${entry.label}`}
+                                className="duty-name-line"
+                              >
+                                {entry.label}
+                              </span>
+                            ))}
+                          </div>
+                        ) : null}
+                      </div>
+                    ) : (
+                      <span className="empty tiny">-</span>
+                    )}
+                  </td>
+                )
+              })}
             </tr>
           ))}
         </tbody>
@@ -6027,8 +6249,12 @@ function App() {
                   <p className="hint-text">
                     Geçici bloke aktif. Kalan süre: {formatRemainingBlock(adminBlockRemainingMs)}
                   </p>
+                ) : adminLoginGuard.rememberedAdmin && !passwordInput ? (
+                  <p className="hint-text">
+                    Bu cihazda admin girişi hatırlanıyor. Giriş'e basman yeterli.
+                  </p>
                 ) : (
-                  <p className="hint-text">Bu cihazda şifre hatırlanır.</p>
+                  <p className="hint-text">Doğru girişten sonra bu cihazda admin oturumu hatırlanır.</p>
                 )}
               </div>
               <div className="login-actions">
@@ -6312,6 +6538,13 @@ function App() {
                 onClick={() => selectAdminSection('specialists')}
               >
                 Uzman
+              </button>
+              <button
+                type="button"
+                className={adminSection === 'backups' ? 'active' : ''}
+                onClick={() => selectAdminSection('backups')}
+              >
+                Yedekler
               </button>
             </div>
           </section>
@@ -7200,6 +7433,71 @@ function App() {
               </article>
             </section>
           ) : null}
+
+          {adminSection === 'backups' ? (
+            <section className="card fade-up delay-5 backup-admin-card">
+              <div className="assistant-section-head">
+                <h2>Yedekler</h2>
+                <span className="assistant-count-pill">{backupEntries.length} kayıt</span>
+              </div>
+              <p className="subtext">
+                Online verinin yanlışlıkla ezilmesine karşı manuel yedek alabilir ve son kayıt noktalarına
+                dönebilirsin. Geri yükleme mevcut yayın verisini seçilen yedekle değiştirir.
+              </p>
+
+              <div className="form-row backup-action-row">
+                <button type="button" className="secondary" disabled={isBackupLoading} onClick={createManualBackup}>
+                  Manuel Yedek Al
+                </button>
+                <button type="button" className="ghost-button" disabled={isBackupLoading} onClick={refreshBackups}>
+                  Yedekleri Yenile
+                </button>
+              </div>
+
+              {backupStatusText ? <p className="hint-text planner-hint">{backupStatusText}</p> : null}
+
+              <div className="backup-grid">
+                {backupEntries.length ? (
+                  backupEntries.map((entry) => (
+                    <article key={`backup-${entry.id}`} className="backup-card">
+                      <header>
+                        <strong>{new Date(entry.savedAt).toLocaleString('tr-TR')}</strong>
+                        <small>{entry.source}</small>
+                      </header>
+                      <div className="backup-meta-grid">
+                        <span>
+                          <strong>{entry.assistantCount}</strong>
+                          Asistan
+                        </span>
+                        <span>
+                          <strong>{entry.locationCount}</strong>
+                          Alan
+                        </span>
+                        <span>
+                          <strong>{entry.dutyDayCount}</strong>
+                          Nöbet günü
+                        </span>
+                        <span>
+                          <strong>{entry.assignmentDayCount}</strong>
+                          Planlı gün
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        className="ghost-button"
+                        disabled={isBackupLoading}
+                        onClick={() => restoreBackup(entry.id)}
+                      >
+                        Bu Yedeğe Dön
+                      </button>
+                    </article>
+                  ))
+                ) : (
+                  <span className="empty">Yedek listesi boş. Manuel yedek alarak ilk güvenli noktayı oluştur.</span>
+                )}
+              </div>
+            </section>
+          ) : null}
         </main>
       ) : (
         <main className="stack-layout">
@@ -7307,52 +7605,14 @@ function App() {
                 Bu haftayı kişi bazlı veya oda bazlı olarak tek ekranda takip edebilirsin.
               </p>
 
-              <h3 className="observer-tab-title">Kişi Bazlı</h3>
-              <div className="form-row">
-                <select
-                  value={observerAssistant}
-                  onChange={(event) => setObserverAssistant(event.target.value)}
-                >
-                  <option value="">Kişi seç</option>
-                  {data.assistants.map((assistant) => (
-                    <option key={assistant} value={assistant}>
-                      {assistant}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="timeline-grid">
-                {weekAssignmentsForPerson.map(({ day, locations, dayTypeLabel }) => (
-                  <article key={`timeline-${day.key}`} className="timeline-card">
-                    <header>
-                      <strong>{day.shortLabel}</strong>
-                      <small>{day.key}</small>
-                    </header>
-                    <div className="chip-wrap">
-                      {locations.length ? (
-                        locations.map((location) => (
-                          <span key={`${day.key}-${location.id}`} className="chip soft chip-with-meta">
-                            {getSpecialistLabelForLocation(data, day.key, location) ? (
-                              <small className="chip-meta">
-                                {getSpecialistLabelForLocation(data, day.key, location)}
-                              </small>
-                            ) : null}
-                            <span>{getWeeklyPersonLocationLabel(data, day.key, observerAssistant, location)}</span>
-                          </span>
-                        ))
-                      ) : dayTypeLabel ? (
-                        <span className="empty offday-text">{dayTypeLabel} günü</span>
-                      ) : (
-                        <span className="empty">Atama görünmüyor</span>
-                      )}
-                    </div>
-                  </article>
-                ))}
-              </div>
-
-              <h3 className="observer-tab-title observer-room-title">Detay Görünümü</h3>
               <div className="subpanel-toggle observer-week-detail-tabs">
+                <button
+                  type="button"
+                  className={observerWeekDetailView === 'person' ? 'active' : ''}
+                  onClick={() => setObserverWeekDetailView('person')}
+                >
+                  Kişi Bazlı
+                </button>
                 <button
                   type="button"
                   className={observerWeekDetailView === 'room' ? 'active' : ''}
@@ -7368,6 +7628,53 @@ function App() {
                   Nöbet Bazlı
                 </button>
               </div>
+
+              {observerWeekDetailView === 'person' ? (
+                <>
+                  <div className="form-row">
+                    <select
+                      value={observerAssistant}
+                      onChange={(event) => setObserverAssistant(event.target.value)}
+                    >
+                      <option value="">Kişi seç</option>
+                      {data.assistants.map((assistant) => (
+                        <option key={assistant} value={assistant}>
+                          {assistant}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="timeline-grid">
+                    {weekAssignmentsForPerson.map(({ day, locations, dayTypeLabel }) => (
+                      <article key={`timeline-${day.key}`} className="timeline-card">
+                        <header>
+                          <strong>{day.shortLabel}</strong>
+                          <small>{day.key}</small>
+                        </header>
+                        <div className="chip-wrap">
+                          {locations.length ? (
+                            locations.map((location) => (
+                              <span key={`${day.key}-${location.id}`} className="chip soft chip-with-meta">
+                                {getSpecialistLabelForLocation(data, day.key, location) ? (
+                                  <small className="chip-meta">
+                                    {getSpecialistLabelForLocation(data, day.key, location)}
+                                  </small>
+                                ) : null}
+                                <span>{getWeeklyPersonLocationLabel(data, day.key, observerAssistant, location)}</span>
+                              </span>
+                            ))
+                          ) : dayTypeLabel ? (
+                            <span className="empty offday-text">{dayTypeLabel} günü</span>
+                          ) : (
+                            <span className="empty">Atama görünmüyor</span>
+                          )}
+                        </div>
+                      </article>
+                    ))}
+                  </div>
+                </>
+              ) : null}
 
               {observerWeekDetailView === 'room' ? (
                 <>

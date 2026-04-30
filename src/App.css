@@ -388,7 +388,7 @@ h4 {
 .subpanel-toggle {
   margin-top: 0.65rem;
   display: grid;
-  grid-template-columns: repeat(5, minmax(100px, 1fr));
+  grid-template-columns: repeat(6, minmax(100px, 1fr));
   gap: 0.48rem;
 }
 
@@ -768,6 +768,85 @@ button.assistant-chip:active {
   font-size: 0.82rem;
 }
 
+.backup-admin-card {
+  border-color: rgba(112, 131, 121, 0.28);
+  background: linear-gradient(180deg, rgba(255, 253, 247, 0.94), rgba(246, 248, 243, 0.88));
+}
+
+.backup-action-row {
+  grid-template-columns: minmax(150px, 230px) minmax(150px, 230px);
+  justify-content: start;
+}
+
+.backup-grid {
+  margin-top: 0.85rem;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(235px, 1fr));
+  gap: 0.7rem;
+}
+
+.backup-card {
+  border: 1px solid rgba(96, 118, 107, 0.25);
+  border-radius: 15px;
+  padding: 0.78rem;
+  background: rgba(255, 255, 255, 0.82);
+  box-shadow: 0 12px 26px rgba(64, 53, 36, 0.07);
+}
+
+.backup-card header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.65rem;
+}
+
+.backup-card header strong {
+  font-size: 0.95rem;
+  color: #21382f;
+}
+
+.backup-card header small {
+  border-radius: 999px;
+  padding: 0.18rem 0.48rem;
+  background: rgba(47, 143, 115, 0.1);
+  color: #23725b;
+  font-size: 0.68rem;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.backup-meta-grid {
+  margin: 0.72rem 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.46rem;
+}
+
+.backup-meta-grid span {
+  border: 1px dashed rgba(96, 118, 107, 0.2);
+  border-radius: 11px;
+  padding: 0.45rem 0.5rem;
+  background: rgba(246, 250, 246, 0.72);
+  color: var(--ink-500);
+  font-size: 0.74rem;
+}
+
+.backup-meta-grid strong {
+  display: block;
+  color: var(--ink-900);
+  font-size: 1rem;
+}
+
+@media (max-width: 760px) {
+  .backup-action-row {
+    grid-template-columns: 1fr;
+  }
+
+  .backup-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 .offday-text {
   color: #8f6742;
   font-weight: 600;
@@ -1042,12 +1121,26 @@ body.table-pan-unlocked .duty-list-table-wrap {
 
 .duty-name-stack {
   display: grid;
-  gap: 0.12rem;
+  gap: 0.22rem;
+}
+
+.duty-specialist-row,
+.duty-assistant-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 0.16rem 0.22rem;
+}
+
+.duty-specialist-row {
+  padding-bottom: 0.12rem;
+  border-bottom: 1px dashed rgba(77, 107, 94, 0.22);
 }
 
 .duty-name-line {
-  display: block;
-  width: 100%;
+  display: inline-flex;
+  align-items: center;
+  width: auto;
   max-width: 100%;
   font-size: 0.9rem;
   font-weight: 700;
@@ -1058,6 +1151,7 @@ body.table-pan-unlocked .duty-list-table-wrap {
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(245, 249, 247, 0.92));
   border: 1px solid rgba(91, 102, 97, 0.22);
   padding: 0.1rem 0.3rem;
+  line-height: 1.2;
   box-shadow: 0 1px 0 rgba(255, 255, 255, 0.75);
 }
 
@@ -1236,7 +1330,7 @@ body.table-pan-unlocked .duty-list-table-wrap {
 .observer-week-detail-tabs {
   margin-top: 0.5rem;
   margin-bottom: 0.62rem;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
 .observer-week-detail-tabs button {
@@ -1761,15 +1855,33 @@ body.table-pan-unlocked .assistant-monthly-calendar-scroll {
 .location-meta {
   display: flex;
   justify-content: space-between;
-  align-items: center;
+  align-items: flex-start;
   gap: 0.5rem;
+  min-width: 0;
+}
+
+.location-meta strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  line-height: 1.25;
 }
 
 .location-meta span {
+  flex: 0 0 auto;
   font-size: 0.72rem;
   color: var(--ink-500);
   text-transform: uppercase;
   letter-spacing: 0.05em;
+}
+
+.location-meta .owner-inline {
+  display: inline;
+  flex: initial;
+  min-width: 0;
+  color: #6a7770;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .planner-specialist-inline {
@@ -2377,6 +2489,31 @@ code {
 
   .planner-side-panel {
     order: 2;
+  }
+
+  .location-meta {
+    display: grid;
+    grid-template-columns: 1fr;
+    align-items: start;
+    gap: 0.22rem;
+  }
+
+  .location-meta strong {
+    font-size: clamp(0.96rem, 4.4vw, 1.12rem);
+  }
+
+  .location-meta > span:not(.owner-inline) {
+    width: fit-content;
+    font-size: 0.64rem;
+    line-height: 1.2;
+  }
+
+  .location-meta .owner-inline {
+    display: block;
+    margin-top: 0.16rem;
+    font-size: 0.64rem;
+    line-height: 1.35;
+    letter-spacing: 0.06em;
   }
 
   .subpanel-toggle.observer-toggle {
