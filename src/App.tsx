@@ -2666,6 +2666,19 @@ function App() {
       }),
     [data, userBindings],
   )
+  const isTableLikeFullscreenOpen =
+    (session?.role === 'admin' && plannerWeeklyExportOpen) ||
+    (session?.role === 'assistant' && (assistantMonthlyTableOpen || observerDutyListOpen))
+
+  useEffect(() => {
+    if (typeof document === 'undefined') {
+      return
+    }
+    document.body.classList.toggle('table-pan-unlocked', isTableLikeFullscreenOpen)
+    return () => {
+      document.body.classList.remove('table-pan-unlocked')
+    }
+  }, [isTableLikeFullscreenOpen])
 
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(data))

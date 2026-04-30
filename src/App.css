@@ -27,6 +27,10 @@
   overflow-x: clip;
 }
 
+.page-shell.weekly-export-shell {
+  overflow-x: visible;
+}
+
 .card {
   background: rgba(255, 253, 247, 0.86);
   border: 1px solid rgba(215, 209, 192, 0.8);
@@ -930,6 +934,13 @@ button.assistant-chip:active {
   overscroll-behavior-x: contain;
 }
 
+body.table-pan-unlocked .duty-list-table-wrap {
+  overflow-x: auto;
+  overflow-y: visible;
+  touch-action: pan-x pan-y pinch-zoom;
+  overscroll-behavior-x: auto;
+}
+
 .duty-list-table {
   width: 100%;
   border-collapse: separate;
@@ -1474,6 +1485,12 @@ button.assistant-chip:active {
   overscroll-behavior-x: auto;
 }
 
+body.table-pan-unlocked .weekly-export-table-wrap {
+  overflow-x: auto;
+  overflow-y: visible;
+  touch-action: pan-x pan-y pinch-zoom;
+}
+
 .weekly-export-table {
   width: 100%;
   min-width: 980px;
@@ -1650,6 +1667,13 @@ button.assistant-chip:active {
   -webkit-overflow-scrolling: touch;
   touch-action: auto;
   overscroll-behavior-x: contain;
+}
+
+body.table-pan-unlocked .assistant-monthly-calendar-scroll {
+  overflow-x: auto;
+  overflow-y: auto;
+  touch-action: pan-x pan-y pinch-zoom;
+  overscroll-behavior-x: auto;
 }
 
 .assistant-monthly-calendar-inner {

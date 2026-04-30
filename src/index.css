@@ -52,6 +52,16 @@ body::before {
   overflow-x: clip;
 }
 
+body.table-pan-unlocked {
+  overflow-x: auto;
+  touch-action: pan-x pan-y pinch-zoom;
+  overscroll-behavior-x: auto;
+}
+
+body.table-pan-unlocked #root {
+  overflow-x: visible;
+}
+
 h1,
 h2,
 h3,
