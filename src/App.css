@@ -209,6 +209,37 @@ h4 {
   gap: 0.7rem;
 }
 
+.secure-login-panel {
+  display: grid;
+  gap: 0.38rem;
+  padding: 0.75rem;
+  border: 1px solid rgba(47, 143, 115, 0.22);
+  border-radius: 16px;
+  background: linear-gradient(135deg, rgba(215, 239, 227, 0.34), rgba(255, 255, 255, 0.78));
+}
+
+.secure-login-panel span {
+  display: block;
+  color: var(--mint-strong);
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+.secure-login-panel strong {
+  display: block;
+  margin-top: 0.15rem;
+  color: var(--ink-900);
+  font-size: 0.88rem;
+}
+
+.secure-login-panel label {
+  color: var(--ink-500);
+  font-size: 0.76rem;
+  font-weight: 700;
+}
+
 .portal-welcome-card {
   text-align: center;
   gap: 0.9rem;

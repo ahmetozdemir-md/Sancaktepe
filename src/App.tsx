@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import './App.css'
 import {
   isCloudWriteEnabled,
+  isSupabaseAdminAuthRequired,
   REMOTE_STATE_HISTORY_TABLE,
   isSupabaseConfigured,
   REMOTE_STATE_ROW_ID,
@@ -26,6 +27,7 @@ type PlannerView = 'rooms' | 'status'
 type LocationKind = 'normal' | 'leave' | 'duty' | 'postDuty'
 type LocationTone = 'sand' | 'sage' | 'amber' | 'sky' | 'rose'
 type DutySite = 'Sancaktepe' | 'Feriha Öz' | 'Çekmeköy'
+type AdminCloudAuthStatus = 'disabled' | 'checking' | 'signed-out' | 'signed-in' | 'unauthorized' | 'error'
 type SpecialistDutySite =
   | 'Sancaktepe'
   | 'Çekmeköy'
@@ -180,7 +182,9 @@ const STORAGE_KEY = 'assistant-scheduler-v1'
 const USER_BINDING_KEY = 'assistant-user-binding-v1'
 const LAST_ASSISTANT_USER_KEY = 'assistant-last-user-v1'
 const ADMIN_LOGIN_GUARD_KEY = 'assistant-admin-login-guard-v1'
+const ADMIN_AUTH_EMAIL_KEY = 'assistant-admin-auth-email-v1'
 const CLOUD_READ_ONLY_TEXT = 'Bulut salt-okunur modda (yerelden buluta yazma kapalı).'
+const CLOUD_AUTH_LOCKED_TEXT = 'Bulut yazma kilitli: güvenli admin girişi gerekli.'
 const CLOUD_SAFE_GUARD_TEXT =
   'Bulut verisi okunamadığı için güvenlik gereği yerelden buluta yazma kapatıldı.'
 const CLOUD_CONFLICT_TEXT =
@@ -2476,6 +2480,13 @@ function safeReadAdminLoginGuard(): AdminLoginGuardState {
   }
 }
 
+function safeReadAdminAuthEmail() {
+  if (typeof window === 'undefined') {
+    return ''
+  }
+  return localStorage.getItem(ADMIN_AUTH_EMAIL_KEY) ?? ''
+}
+
 async function sha256Hex(value: string): Promise<string> {
   if (typeof crypto === 'undefined' || !crypto.subtle) {
     return ''
@@ -2566,6 +2577,17 @@ function App() {
   const initialAdminLoginGuard = useMemo(() => safeReadAdminLoginGuard(), [])
   const [adminLoginGuard, setAdminLoginGuard] = useState<AdminLoginGuardState>(initialAdminLoginGuard)
   const [passwordInput, setPasswordInput] = useState('')
+  const [adminCloudAuthEmail, setAdminCloudAuthEmail] = useState(() => safeReadAdminAuthEmail())
+  const [adminCloudAuthPassword, setAdminCloudAuthPassword] = useState('')
+  const [adminCloudAuthStatus, setAdminCloudAuthStatus] = useState<AdminCloudAuthStatus>(
+    isSupabaseAdminAuthRequired ? 'checking' : 'disabled',
+  )
+  const [adminCloudAuthMessage, setAdminCloudAuthMessage] = useState(
+    isSupabaseAdminAuthRequired
+      ? 'Güvenli admin oturumu kontrol ediliyor...'
+      : 'Güvenli admin modu kapalı.',
+  )
+  const [isAdminCloudAuthVerified, setIsAdminCloudAuthVerified] = useState(!isSupabaseAdminAuthRequired)
   const [assistantUsernameInput, setAssistantUsernameInput] = useState('')
   const [assistantUserPickerOpen, setAssistantUserPickerOpen] = useState(false)
   const assistantLoginManuallyClearedRef = useRef(false)
@@ -2585,6 +2607,7 @@ function App() {
   const cloudHydratedRef = useRef(false)
   const cloudPayloadRef = useRef('')
   const cloudCanWriteRef = useRef(false)
+  const adminCloudWriteUnlockedRef = useRef(!isSupabaseAdminAuthRequired)
   const cloudRevisionRef = useRef<string | null>(null)
   const cloudSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const cloudHistoryBackupLastAtRef = useRef(0)
@@ -2886,6 +2909,7 @@ function App() {
     (session?.role === 'admin' && plannerWeeklyExportOpen) ||
     (session?.role === 'assistant' && (assistantMonthlyTableOpen || observerDutyListOpen))
   const adminBlockRemainingMs = Math.max(0, adminLoginGuard.blockedUntil - blockClockMs)
+  const isSecureCloudWriteUnlocked = !isSupabaseAdminAuthRequired || isAdminCloudAuthVerified
 
   useEffect(() => {
     if (typeof document === 'undefined') {
@@ -2912,6 +2936,116 @@ function App() {
       localStorage.setItem(ADMIN_LOGIN_GUARD_KEY, JSON.stringify(adminLoginGuard))
     }
   }, [adminLoginGuard])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return
+    }
+    const normalizedEmail = adminCloudAuthEmail.trim()
+    if (normalizedEmail) {
+      localStorage.setItem(ADMIN_AUTH_EMAIL_KEY, normalizedEmail)
+    } else {
+      localStorage.removeItem(ADMIN_AUTH_EMAIL_KEY)
+    }
+  }, [adminCloudAuthEmail])
+
+  useEffect(() => {
+    if (!isSupabaseAdminAuthRequired) {
+      adminCloudWriteUnlockedRef.current = true
+      setIsAdminCloudAuthVerified(true)
+      setAdminCloudAuthStatus('disabled')
+      setAdminCloudAuthMessage('Güvenli admin modu kapalı.')
+      return
+    }
+
+    if (!isSupabaseConfigured || !supabase) {
+      adminCloudWriteUnlockedRef.current = false
+      cloudCanWriteRef.current = false
+      setIsAdminCloudAuthVerified(false)
+      setAdminCloudAuthStatus('error')
+      setAdminCloudAuthMessage('Güvenli admin girişi için Supabase bağlantısı gerekli.')
+      return
+    }
+
+    const client = supabase
+    let cancelled = false
+
+    const lockCloudWrite = () => {
+      adminCloudWriteUnlockedRef.current = false
+      cloudCanWriteRef.current = false
+      setIsAdminCloudAuthVerified(false)
+    }
+
+    const verifyPortalAdmin = async (userId: string, email?: string | null) => {
+      setAdminCloudAuthStatus('checking')
+      setAdminCloudAuthMessage('Güvenli admin yetkisi kontrol ediliyor...')
+
+      const { data: adminRow, error } = await client
+        .from('portal_admins')
+        .select('user_id')
+        .eq('user_id', userId)
+        .maybeSingle()
+
+      if (cancelled) {
+        return false
+      }
+
+      if (error) {
+        lockCloudWrite()
+        setAdminCloudAuthStatus('error')
+        setAdminCloudAuthMessage('portal_admins tablosu veya RLS kurulumu hazır değil.')
+        return false
+      }
+
+      if (!adminRow) {
+        lockCloudWrite()
+        setAdminCloudAuthStatus('unauthorized')
+        setAdminCloudAuthMessage('Bu Supabase kullanıcısı portal admini olarak yetkili değil.')
+        return false
+      }
+
+      adminCloudWriteUnlockedRef.current = true
+      cloudCanWriteRef.current = cloudHydratedRef.current && isCloudWriteEnabled
+      setIsAdminCloudAuthVerified(true)
+      setAdminCloudAuthStatus('signed-in')
+      setAdminCloudAuthMessage('Güvenli admin oturumu aktif.')
+      if (email) {
+        setAdminCloudAuthEmail(email)
+      }
+      if (cloudHydratedRef.current) {
+        setCloudStateText(isCloudWriteEnabled ? 'Bulut kaydı aktif.' : CLOUD_READ_ONLY_TEXT)
+      }
+      return true
+    }
+
+    void client.auth.getSession().then(({ data: authData, error }) => {
+      if (cancelled) {
+        return
+      }
+      if (error || !authData.session?.user) {
+        lockCloudWrite()
+        setAdminCloudAuthStatus('signed-out')
+        setAdminCloudAuthMessage('Güvenli admin girişi gerekli.')
+        return
+      }
+      void verifyPortalAdmin(authData.session.user.id, authData.session.user.email)
+    })
+
+    const { data: authListener } = client.auth.onAuthStateChange((_event, nextSession) => {
+      if (!nextSession?.user) {
+        lockCloudWrite()
+        setAdminCloudAuthStatus('signed-out')
+        setAdminCloudAuthMessage('Güvenli admin girişi gerekli.')
+        return
+      }
+      void verifyPortalAdmin(nextSession.user.id, nextSession.user.email)
+    })
+
+    return () => {
+      cancelled = true
+      authListener.subscription.unsubscribe()
+    }
+  }, [])
 
   useEffect(() => {
     setBlockClockMs(Date.now())
@@ -2994,25 +3128,31 @@ function App() {
 
         cloudPayloadRef.current = syncedPayload
         cloudHydratedRef.current = true
-        cloudCanWriteRef.current = true
+        cloudCanWriteRef.current = isCloudWriteEnabled && adminCloudWriteUnlockedRef.current
         cloudRevisionRef.current = typeof row.updated_at === 'string' && row.updated_at ? row.updated_at : null
         setData(nextPlannerState)
         setUserBindings(nextUserBindings)
         setCloudState('ready')
-        setCloudStateText(isCloudWriteEnabled ? 'Bulut kaydı aktif.' : CLOUD_READ_ONLY_TEXT)
+        setCloudStateText(
+          !isCloudWriteEnabled
+            ? CLOUD_READ_ONLY_TEXT
+            : adminCloudWriteUnlockedRef.current
+              ? 'Bulut kaydı aktif.'
+              : CLOUD_AUTH_LOCKED_TEXT,
+        )
         if (typeof row.updated_at === 'string' && row.updated_at) {
           setCloudLastSavedAt(row.updated_at)
         }
         return
       }
 
-      if (!isCloudWriteEnabled) {
+      if (!isCloudWriteEnabled || !adminCloudWriteUnlockedRef.current) {
         cloudPayloadRef.current = JSON.stringify(currentSnapshot)
         cloudHydratedRef.current = true
         cloudCanWriteRef.current = false
         cloudRevisionRef.current = null
         setCloudState('ready')
-        setCloudStateText(CLOUD_READ_ONLY_TEXT)
+        setCloudStateText(isCloudWriteEnabled ? CLOUD_AUTH_LOCKED_TEXT : CLOUD_READ_ONLY_TEXT)
         return
       }
 
@@ -3519,6 +3659,73 @@ function App() {
       return
     }
 
+    if (isSupabaseAdminAuthRequired) {
+      if (!isSupabaseConfigured || !supabase) {
+        showWarning('Güvenli admin girişi için Supabase bağlantısı gerekli.')
+        return
+      }
+
+      if (!isAdminCloudAuthVerified) {
+        const email = adminCloudAuthEmail.trim()
+        const cloudPassword = adminCloudAuthPassword.trim()
+
+        if (!email || !cloudPassword) {
+          showWarning('Güvenli modda Supabase admin e-posta ve şifresi de gerekli.')
+          return
+        }
+
+        setAdminCloudAuthStatus('checking')
+        setAdminCloudAuthMessage('Supabase admin girişi yapılıyor...')
+
+        const { data: authData, error: signInError } = await supabase.auth.signInWithPassword({
+          email,
+          password: cloudPassword,
+        })
+
+        if (signInError || !authData.user) {
+          adminCloudWriteUnlockedRef.current = false
+          cloudCanWriteRef.current = false
+          setIsAdminCloudAuthVerified(false)
+          setAdminCloudAuthStatus('signed-out')
+          setAdminCloudAuthMessage('Supabase admin girişi başarısız.')
+          showWarning('Supabase admin e-posta veya şifresi hatalı.')
+          return
+        }
+
+        const { data: adminRow, error: adminError } = await supabase
+          .from('portal_admins')
+          .select('user_id')
+          .eq('user_id', authData.user.id)
+          .maybeSingle()
+
+        if (adminError || !adminRow) {
+          await supabase.auth.signOut()
+          adminCloudWriteUnlockedRef.current = false
+          cloudCanWriteRef.current = false
+          setIsAdminCloudAuthVerified(false)
+          setAdminCloudAuthStatus(adminError ? 'error' : 'unauthorized')
+          setAdminCloudAuthMessage(
+            adminError
+              ? 'portal_admins tablosu veya RLS kurulumu hazır değil.'
+              : 'Bu Supabase kullanıcısı portal admini olarak yetkili değil.',
+          )
+          showWarning(
+            adminError
+              ? 'Güvenli admin tablosu hazır değil. 003 SQL dosyası uygulanmalı.'
+              : 'Bu Supabase kullanıcısı portal admini olarak yetkilendirilmemiş.',
+          )
+          return
+        }
+
+        adminCloudWriteUnlockedRef.current = true
+        cloudCanWriteRef.current = cloudHydratedRef.current && isCloudWriteEnabled
+        setIsAdminCloudAuthVerified(true)
+        setAdminCloudAuthStatus('signed-in')
+        setAdminCloudAuthMessage('Güvenli admin oturumu aktif.')
+        setAdminCloudAuthEmail(email)
+      }
+    }
+
     setAdminLoginGuard({
       failedAttempts: 0,
       blockedUntil: 0,
@@ -3526,6 +3733,7 @@ function App() {
     })
     setSession({ role: 'admin' })
     setPasswordInput('')
+    setAdminCloudAuthPassword('')
     setNotice(null)
   }
 
@@ -3560,6 +3768,9 @@ function App() {
   }
 
   const logout = () => {
+    if (isSupabaseAdminAuthRequired && session?.role === 'admin' && supabase) {
+      void supabase.auth.signOut()
+    }
     setSession(null)
     setLoginView('choose')
     setPlannerWeeklyExportOpen(false)
@@ -3568,8 +3779,16 @@ function App() {
     setMode('admin')
     assistantLoginManuallyClearedRef.current = false
     setPasswordInput('')
+    setAdminCloudAuthPassword('')
     setAssistantUsernameInput('')
     setAssistantUserPickerOpen(false)
+    if (isSupabaseAdminAuthRequired) {
+      adminCloudWriteUnlockedRef.current = false
+      cloudCanWriteRef.current = false
+      setIsAdminCloudAuthVerified(false)
+      setAdminCloudAuthStatus('signed-out')
+      setAdminCloudAuthMessage('Güvenli admin girişi gerekli.')
+    }
     setNotice(null)
   }
 
@@ -3910,6 +4129,12 @@ function App() {
       showWarning('Yedekleri görmek için Supabase bağlantısı gerekli.')
       return
     }
+    if (!isSecureCloudWriteUnlocked) {
+      setBackupEntries([])
+      setBackupStatusText('Yedekleri görmek için güvenli admin girişi gerekli.')
+      showWarning('Yedekler güvenli modda sadece Supabase admin oturumu ile okunabilir.')
+      return
+    }
 
     setIsBackupLoading(true)
     setBackupStatusText('Yedekler yükleniyor...')
@@ -3939,6 +4164,9 @@ function App() {
     payload: RemotePortalPayload = buildRemotePayload(data, userBindings),
   ): Promise<BackupInsertResult> => {
     if (!isSupabaseConfigured || !supabase) {
+      return { ok: false, skipped: true, missingTable: false }
+    }
+    if (!isSecureCloudWriteUnlocked) {
       return { ok: false, skipped: true, missingTable: false }
     }
 
@@ -3995,6 +4223,10 @@ function App() {
       showWarning('Manuel yedek için Supabase bağlantısı gerekli.')
       return
     }
+    if (!isSecureCloudWriteUnlocked) {
+      showWarning('Manuel yedek almak için güvenli Supabase admin girişi gerekli.')
+      return
+    }
 
     setIsBackupLoading(true)
     const result = await insertBackupSnapshot('manual-backup')
@@ -4016,6 +4248,10 @@ function App() {
   const restoreBackup = async (backupId: number) => {
     if (!isSupabaseConfigured || !supabase) {
       showWarning('Geri yükleme için Supabase bağlantısı gerekli.')
+      return
+    }
+    if (!isSecureCloudWriteUnlocked) {
+      showWarning('Yedek geri yüklemek için güvenli Supabase admin girişi gerekli.')
       return
     }
     const backup = backupEntries.find((entry) => entry.id === backupId)
@@ -6523,6 +6759,42 @@ function App() {
                   <p className="hint-text">Doğru girişten sonra bu cihazda admin oturumu hatırlanır.</p>
                 )}
               </div>
+              {isSupabaseAdminAuthRequired ? (
+                <div className={`secure-login-panel secure-login-${adminCloudAuthStatus}`}>
+                  <div>
+                    <span>Güvenli Supabase Admin</span>
+                    <strong>
+                      {isAdminCloudAuthVerified ? 'Oturum doğrulandı' : adminCloudAuthMessage}
+                    </strong>
+                  </div>
+                  {!isAdminCloudAuthVerified ? (
+                    <>
+                      <label htmlFor="admin-cloud-email">Supabase Admin E-posta</label>
+                      <input
+                        id="admin-cloud-email"
+                        type="email"
+                        value={adminCloudAuthEmail}
+                        onChange={(event) => setAdminCloudAuthEmail(event.target.value)}
+                        autoComplete="username"
+                        placeholder="admin e-posta"
+                      />
+                      <label htmlFor="admin-cloud-password">Supabase Admin Şifresi</label>
+                      <input
+                        id="admin-cloud-password"
+                        type="password"
+                        value={adminCloudAuthPassword}
+                        onChange={(event) => setAdminCloudAuthPassword(event.target.value)}
+                        autoComplete="current-password"
+                        placeholder="Supabase şifresi"
+                      />
+                    </>
+                  ) : (
+                    <p className="hint-text">
+                      Bu cihazdaki güvenli Supabase oturumu aktif. Yerel admin şifresiyle devam edebilirsin.
+                    </p>
+                  )}
+                </div>
+              ) : null}
               <div className="login-actions">
                 <button type="button" onClick={loginAsAdmin} disabled={adminBlockRemainingMs > 0}>
                   {adminBlockRemainingMs > 0 ? 'Bloklu' : 'Giriş'}
@@ -6738,6 +7010,13 @@ function App() {
                   </small>
                 ) : null}
               </div>
+
+              {isSupabaseAdminAuthRequired ? (
+                <div className={`session-role cloud-sync cloud-${isSecureCloudWriteUnlocked ? 'ready' : 'error'}`}>
+                  <span>Admin Güvenlik</span>
+                  <strong>{adminCloudAuthMessage}</strong>
+                </div>
+              ) : null}
             </>
           ) : null}
 
