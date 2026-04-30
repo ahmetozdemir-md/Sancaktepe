@@ -2560,6 +2560,7 @@ function App() {
   const [passwordInput, setPasswordInput] = useState('')
   const [assistantUsernameInput, setAssistantUsernameInput] = useState('')
   const [assistantUserPickerOpen, setAssistantUserPickerOpen] = useState(false)
+  const assistantLoginManuallyClearedRef = useRef(false)
   const [data, setData] = useState<PlannerState>(() => safeReadState())
   const [userBindings, setUserBindings] = useState<Record<string, string>>(() => safeReadUserBindings())
   const [notice, setNotice] = useState<Notice | null>(null)
@@ -2578,6 +2579,9 @@ function App() {
   const cloudCanWriteRef = useRef(false)
   const cloudRevisionRef = useRef<string | null>(null)
   const cloudSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const observerWeeklyScrollerRef = useRef<HTMLDivElement | null>(null)
+  const observerDailyWeekScrollerRef = useRef<HTMLDivElement | null>(null)
+  const observerDailyDayScrollerRef = useRef<HTMLDivElement | null>(null)
   const [backupEntries, setBackupEntries] = useState<BackupEntry[]>([])
   const [isBackupLoading, setIsBackupLoading] = useState(false)
   const [backupStatusText, setBackupStatusText] = useState('')
@@ -2622,6 +2626,7 @@ function App() {
   const [observerDutyMonthActive, setObserverDutyMonthActive] = useState(currentMonthISO)
   const [observerDutyListOpen, setObserverDutyListOpen] = useState(false)
   const [activeObserverWeek, setActiveObserverWeek] = useState('')
+  const [observerWeeklyWeekStart, setObserverWeeklyWeekStart] = useState(currentWeekStartISO)
   const [observerDay, setObserverDay] = useState('')
   const [observerWeekRoom, setObserverWeekRoom] = useState('')
   const [observerWeekDutySite, setObserverWeekDutySite] = useState<DutySite>('Sancaktepe')
@@ -2639,11 +2644,39 @@ function App() {
   const weekDays = useMemo(() => buildWeek(data.weekStartISO), [data.weekStartISO])
   const plannerMonthDays = useMemo(() => listMonthDays(plannerMonth), [plannerMonth])
   const dutyMonthDays = useMemo(() => listMonthDays(dutyMonth), [dutyMonth])
-  const observerWeekGroups = useMemo(() => buildWeekGroupsForMonth(observerMonth), [observerMonth])
-  const observerActiveWeekDays = useMemo(
-    () => observerWeekGroups.find((group) => group.weekStartISO === activeObserverWeek)?.days ?? [],
-    [activeObserverWeek, observerWeekGroups],
+  const observerRollingWeekOptions = useMemo(
+    () =>
+      Array.from({ length: 7 }, (_, index) => {
+        const offset = index - 2
+        const weekStart = toISODate(addDays(fromISODate(currentWeekStartISO), offset * 7))
+        const days = buildWeek(weekStart)
+        const firstDay = days[0]?.key ?? weekStart
+        const lastDay = days[6]?.key ?? weekStart
+        const label =
+          offset === -2
+            ? '2 hafta önce'
+            : offset === -1
+              ? 'Geçen hafta'
+              : offset === 0
+                ? 'Bu hafta'
+                : offset === 1
+                  ? 'Gelecek hafta'
+                  : `${offset} hafta sonra`
+
+        return {
+          weekStartISO: weekStart,
+          label,
+          rangeLabel: `${formatDayMonthLabel(firstDay)} - ${formatDayMonthLabel(lastDay)}`,
+          days,
+        }
+      }),
+    [currentWeekStartISO],
   )
+  const observerActiveWeekDays = useMemo(
+    () => observerRollingWeekOptions.find((group) => group.weekStartISO === activeObserverWeek)?.days ?? [],
+    [activeObserverWeek, observerRollingWeekOptions],
+  )
+  const observerWeeklyDays = useMemo(() => buildWeek(observerWeeklyWeekStart), [observerWeeklyWeekStart])
   const sortedLocations = useMemo(() => sortLocationsForState(data.locations, todayISO), [data.locations, todayISO])
   const roomLocations = useMemo(
     () =>
@@ -3127,7 +3160,11 @@ function App() {
   }, [cloudPayload])
 
   useEffect(() => {
-    if ((loginView !== 'assistant' && loginView !== 'choose') || assistantUsernameInput.trim()) {
+    if (
+      (loginView !== 'assistant' && loginView !== 'choose') ||
+      assistantUsernameInput.trim() ||
+      assistantLoginManuallyClearedRef.current
+    ) {
       return
     }
     if (typeof window === 'undefined') {
@@ -3242,20 +3279,20 @@ function App() {
   }, [data.assistants, observerAssistant, session])
 
   useEffect(() => {
-    if (!observerWeekGroups.length) {
+    if (!observerRollingWeekOptions.length) {
       if (activeObserverWeek) {
         setActiveObserverWeek('')
       }
       return
     }
 
-    if (!observerWeekGroups.some((group) => group.weekStartISO === activeObserverWeek)) {
-      const preferredWeek = observerWeekGroups.find((group) =>
+    if (!observerRollingWeekOptions.some((group) => group.weekStartISO === activeObserverWeek)) {
+      const preferredWeek = observerRollingWeekOptions.find((group) =>
         group.days.some((day) => day.key === todayISO),
       )
-      setActiveObserverWeek(preferredWeek?.weekStartISO ?? observerWeekGroups[0].weekStartISO)
+      setActiveObserverWeek(preferredWeek?.weekStartISO ?? observerRollingWeekOptions[0].weekStartISO)
     }
-  }, [activeObserverWeek, observerWeekGroups, todayISO])
+  }, [activeObserverWeek, observerRollingWeekOptions, todayISO])
 
   useEffect(() => {
     if (!observerActiveWeekDays.length) {
@@ -3270,6 +3307,47 @@ function App() {
       setObserverDay(preferredDay?.key ?? observerActiveWeekDays[0].key)
     }
   }, [observerActiveWeekDays, observerDay, todayISO])
+
+  useEffect(() => {
+    if (
+      observerRollingWeekOptions.length &&
+      !observerRollingWeekOptions.some((week) => week.weekStartISO === observerWeeklyWeekStart)
+    ) {
+      setObserverWeeklyWeekStart(currentWeekStartISO)
+    }
+  }, [currentWeekStartISO, observerRollingWeekOptions, observerWeeklyWeekStart])
+
+  useEffect(() => {
+    const scrollItemToStart = (container: HTMLDivElement | null, selector: string) => {
+      if (!container) {
+        return
+      }
+
+      const target = container.querySelector<HTMLElement>(selector)
+      if (!target) {
+        return
+      }
+
+      const scrollToTarget = () => {
+        const containerRect = container.getBoundingClientRect()
+        const targetRect = target.getBoundingClientRect()
+        const left = Math.max(0, targetRect.left - containerRect.left + container.scrollLeft)
+        container.scrollTo({ left, behavior: 'auto' })
+      }
+
+      window.requestAnimationFrame(scrollToTarget)
+      window.setTimeout(scrollToTarget, 80)
+    }
+
+    if (observerSection === 'personWeek') {
+      scrollItemToStart(observerWeeklyScrollerRef.current, `[data-week-start="${currentWeekStartISO}"]`)
+    }
+
+    if (observerSection === 'dailyMap') {
+      scrollItemToStart(observerDailyWeekScrollerRef.current, `[data-week-start="${currentWeekStartISO}"]`)
+      scrollItemToStart(observerDailyDayScrollerRef.current, `[data-day-key="${observerDay}"]`)
+    }
+  }, [currentWeekStartISO, observerDay, observerRollingWeekOptions, observerSection])
 
   useEffect(() => {
     if (!plannerMonthDays.length) {
@@ -3474,6 +3552,7 @@ function App() {
     setAssistantMonthlyTableOpen(false)
     setObserverDutyListOpen(false)
     setMode('admin')
+    assistantLoginManuallyClearedRef.current = false
     setPasswordInput('')
     setAssistantUsernameInput('')
     setAssistantUserPickerOpen(false)
@@ -4716,12 +4795,61 @@ function App() {
       (issue) => `${issue.lineNumber}. satır: ${issue.message} (${issue.rawLine})`,
     )
     const targetDay = specialistEditDay
+    const parsedDayKeys = Object.keys(parsed.data).sort()
 
     if (!parsed.totalNames) {
       setSpecialistDutyIssues(issueMessages)
       showWarning(
         'Geçerli nöbetçi uzman satırı bulunamadı. Örnek: 1 Nisan 2026 - Sami Yarkın Sözüer - Sancaktepe',
       )
+      return
+    }
+
+    const hasMultipleDays = parsedDayKeys.some((dayKey) => dayKey !== targetDay)
+    if (hasMultipleDays) {
+      if (issueMessages.length) {
+        setSpecialistDutyIssues([
+          ...issueMessages,
+          'Çok günlük nöbetçi uzman aktarımında uyarı olduğu için hiçbir kayıt eklenmedi.',
+        ])
+        showWarning('Format uyarısı var. Güvenlik için çok günlük nöbetçi uzman listesi uygulanmadı.')
+        return
+      }
+
+      const approved = window.confirm(
+        `${parsedDayKeys.length} güne ait ${parsed.totalNames} nöbetçi uzman kaydı uygulanacak. Bu günlerdeki eski nöbetçi uzman kayıtları yeni listeyle değiştirilsin mi?`,
+      )
+      if (!approved) {
+        setSpecialistDutyIssues(['Çok günlük aktarım onaylanmadı. Kayıt yapılmadı.'])
+        showWarning('Çok günlük nöbetçi uzman aktarımı iptal edildi.')
+        return
+      }
+
+      setData((previous) => {
+        const nextDutyRoster = { ...previous.specialistDutyRoster }
+        parsedDayKeys.forEach((dayKey) => {
+          const normalizedEntries = cloneSpecialistDutyDayAssignments(parsed.data[dayKey])
+          if (normalizedEntries.length) {
+            nextDutyRoster[dayKey] = normalizedEntries
+          } else {
+            delete nextDutyRoster[dayKey]
+          }
+        })
+
+        return {
+          ...previous,
+          specialistDutyRoster: nextDutyRoster,
+        }
+      })
+
+      setSpecialistWorkDraft({})
+      setSpecialistDutyDraft([])
+      setSpecialistWorkText('')
+      setSpecialistDutyText('')
+      setSpecialistWorkIssues([])
+      setSpecialistDutyIssues([])
+      setSpecialistDateEditMode(false)
+      showSuccess(`${parsedDayKeys.length} güne ait ${parsed.totalNames} nöbetçi uzman kaydı uygulandı.`)
       return
     }
 
@@ -5245,7 +5373,7 @@ function App() {
       return []
     }
 
-    return weekDays.map((day) => {
+    return observerWeeklyDays.map((day) => {
       const locations = sortedLocations.filter((location) =>
         getAssignmentsForLocation(data, day.key, location).includes(observerAssistant),
       )
@@ -5257,7 +5385,7 @@ function App() {
         dayTypeLabel,
       }
     })
-  }, [data, observerAssistant, sortedLocations, weekDays])
+  }, [data, observerAssistant, observerWeeklyDays, sortedLocations])
 
   const weekAssignmentsForRoom = useMemo(() => {
     const room = sortedLocations.find((location) => location.id === observerWeekRoom)
@@ -5265,7 +5393,7 @@ function App() {
       return []
     }
 
-    return weekDays.map((day) => {
+    return observerWeeklyDays.map((day) => {
       const names = getDisplayAssignmentsForLocation(data, day.key, room)
       const specialistNames = getSpecialistNamesForLocation(data, day.key, room)
       const dayTypeLabel = getDayTypeLabel(day.key)
@@ -5276,10 +5404,10 @@ function App() {
         dayTypeLabel,
       }
     })
-  }, [data, observerWeekRoom, sortedLocations, weekDays])
+  }, [data, observerWeekRoom, observerWeeklyDays, sortedLocations])
 
   const weekDutyAssignmentsForSite = useMemo(() => {
-    return weekDays.map((day) => {
+    return observerWeeklyDays.map((day) => {
       const names = sortDutyAssignments(
         (data.dutyRoster[day.key] ?? []).filter((entry) => entry.site === observerWeekDutySite),
         data.assistantRanks,
@@ -5289,7 +5417,7 @@ function App() {
         names,
       }
     })
-  }, [data.assistantRanks, data.dutyRoster, observerWeekDutySite, weekDays])
+  }, [data.assistantRanks, data.dutyRoster, observerWeekDutySite, observerWeeklyDays])
 
   const loggedAssistantName = session?.role === 'assistant' ? session.assistantName ?? '' : ''
   const myWeekAssignments = useMemo(() => {
@@ -6218,7 +6346,7 @@ function App() {
       <div className="page-shell login-shell">
         <section className="card login-card fade-up">
           <p className="eyebrow">Giriş</p>
-          <h1>Asistan Portalı</h1>
+          <h1>Asistan Sistemi</h1>
           <p className="subtext">Giriş türünü seçip devam et.</p>
 
           <div className="login-actions">
@@ -6295,7 +6423,9 @@ function App() {
                       setTimeout(() => setAssistantUserPickerOpen(false), 120)
                     }}
                     onChange={(event) => {
-                      setAssistantUsernameInput(event.target.value)
+                      const nextValue = event.target.value
+                      assistantLoginManuallyClearedRef.current = !nextValue.trim()
+                      setAssistantUsernameInput(nextValue)
                       setAssistantUserPickerOpen(true)
                     }}
                     placeholder="İsim ara"
@@ -6317,6 +6447,7 @@ function App() {
                             type="button"
                             onMouseDown={(event) => event.preventDefault()}
                             onClick={() => {
+                              assistantLoginManuallyClearedRef.current = false
                               setAssistantUsernameInput(account.assistantName)
                               setAssistantUserPickerOpen(false)
                             }}
@@ -7363,7 +7494,8 @@ function App() {
                 <h3>Nöbetçi Uzmanlar</h3>
                 <p className="subtext">
                   Yapıştırma formatı: <code>Tarih - Uzman Adı - NöbetYeri</code>. Nöbet yeri:
-                  Sancaktepe, Çekmeköy, Feriha C123, Feriha C456, Feriha G123.
+                  Sancaktepe, Çekmeköy, Feriha C123, Feriha C456, Feriha G123. Aynı kutuya
+                  aylık/çok günlük liste yapıştırılabilir.
                 </p>
                 <textarea
                   value={specialistDutyText}
@@ -7605,6 +7737,25 @@ function App() {
                 Bu haftayı kişi bazlı veya oda bazlı olarak tek ekranda takip edebilirsin.
               </p>
 
+              <div
+                ref={observerWeeklyScrollerRef}
+                className="planner-day-tabs observer-rolling-week-tabs"
+                aria-label="Hafta seç"
+              >
+                {observerRollingWeekOptions.map((week) => (
+                  <button
+                    key={`observer-rolling-week-${week.weekStartISO}`}
+                    type="button"
+                    data-week-start={week.weekStartISO}
+                    className={observerWeeklyWeekStart === week.weekStartISO ? 'active' : ''}
+                    onClick={() => setObserverWeeklyWeekStart(week.weekStartISO)}
+                  >
+                    <strong>{week.label}</strong>
+                    <span>{week.rangeLabel}</span>
+                  </button>
+                ))}
+              </div>
+
               <div className="subpanel-toggle observer-week-detail-tabs">
                 <button
                   type="button"
@@ -7789,15 +7940,20 @@ function App() {
             </div>
 
             <h3 className="observer-tab-title">Hafta Seç</h3>
-            <div className="planner-day-tabs observer-week-tabs">
-              {observerWeekGroups.map((group) => (
+            <div
+              ref={observerDailyWeekScrollerRef}
+              className="planner-day-tabs observer-week-tabs observer-rolling-week-tabs"
+            >
+              {observerRollingWeekOptions.map((group) => (
                 <button
                   key={`observer-week-${group.weekStartISO}`}
                   type="button"
+                  data-week-start={group.weekStartISO}
                   className={activeObserverWeek === group.weekStartISO ? 'active' : ''}
                   onClick={() => setActiveObserverWeek(group.weekStartISO)}
                 >
-                  {group.label}
+                  <strong>{group.label}</strong>
+                  <span>{group.rangeLabel}</span>
                 </button>
               ))}
             </div>
@@ -7805,11 +7961,15 @@ function App() {
             {observerActiveWeekDays.length ? (
               <>
                 <h3 className="observer-tab-title">Gün Seç</h3>
-                <div className="planner-day-tabs observer-day-tabs">
+                <div
+                  ref={observerDailyDayScrollerRef}
+                  className="planner-day-tabs observer-day-tabs observer-rolling-day-tabs"
+                >
                 {observerActiveWeekDays.map((day) => (
                   <button
                     key={`observer-day-${day.key}`}
                     type="button"
+                    data-day-key={day.key}
                     className={observerDay === day.key ? 'active' : ''}
                     onClick={() => setObserverDay(day.key)}
                   >

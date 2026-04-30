@@ -1337,6 +1337,46 @@ body.table-pan-unlocked .duty-list-table-wrap {
   min-width: 0;
 }
 
+.observer-rolling-week-tabs,
+.observer-rolling-day-tabs {
+  display: flex;
+  grid-template-columns: none;
+  overflow-x: auto;
+  gap: 0.45rem;
+  margin-top: 0.85rem;
+  padding-bottom: 0.2rem;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+  scroll-snap-type: x proximity;
+}
+
+.observer-rolling-week-tabs button,
+.observer-rolling-day-tabs button {
+  flex: 0 0 calc((100% - 0.9rem) / 3);
+  min-width: 132px;
+  display: grid;
+  gap: 0.16rem;
+  text-align: center;
+  white-space: normal;
+  scroll-snap-align: start;
+}
+
+.observer-rolling-week-tabs button strong {
+  font-size: 0.78rem;
+  line-height: 1.15;
+}
+
+.observer-rolling-week-tabs button span {
+  font-size: 0.66rem;
+  line-height: 1.15;
+  color: inherit;
+  opacity: 0.78;
+}
+
+.observer-rolling-day-tabs button {
+  min-width: 104px;
+}
+
 .day-card {
   border: 1px solid rgba(99, 121, 111, 0.24);
   border-radius: 16px;
@@ -1750,9 +1790,9 @@ body.table-pan-unlocked .weekly-export-table-wrap {
 }
 
 .assistant-monthly-table-sheet {
-  border: 1px solid rgba(70, 81, 75, 0.28);
-  border-radius: 14px;
-  background: #fff;
+  border: none;
+  border-radius: 0;
+  background: transparent;
   padding: 0.65rem;
 }
 
@@ -2819,6 +2859,7 @@ code {
     min-width: 400%;
     transform: scale(0.25);
     transform-origin: top left;
+    font-size: 1.15rem;
   }
 
   .assistant-monthly-table-sheet .duty-list-table col.duty-col-day {
@@ -2830,9 +2871,36 @@ code {
     padding: 0.16rem 0.2rem;
   }
 
+  .assistant-monthly-table-sheet .duty-list-table thead th {
+    font-size: 2.18rem;
+    line-height: 1.08;
+  }
+
+  .assistant-monthly-table-sheet .duty-list-table .day-col-main {
+    gap: 0.2rem;
+  }
+
+  .assistant-monthly-table-sheet .duty-list-table .day-col-main strong,
+  .assistant-monthly-table-sheet .duty-list-table .day-col-main span {
+    font-size: 2.18rem;
+    font-weight: 800;
+    line-height: 1.05;
+  }
+
+  .assistant-monthly-table-sheet .duty-list-table .holiday-reason-inline {
+    font-size: 1.72rem;
+    line-height: 1.08;
+    font-weight: 700;
+  }
+
   .assistant-monthly-table-sheet .duty-name-line {
-    font-size: 0.62rem;
-    padding: 0.02rem 0.14rem;
+    font-size: 2.18rem;
+    padding: 0.07rem 0.34rem;
+  }
+
+  .assistant-monthly-table-sheet .specialist-duty-name-line {
+    font-size: 1.68rem;
+    padding: 0.06rem 0.3rem;
   }
 
   .weekly-export-table {
@@ -2937,6 +3005,32 @@ code {
   .portal-app-icon-ring img {
     width: 84px;
     height: 84px;
+  }
+}
+
+@media (max-width: 980px) {
+  .planner-day-tabs.observer-rolling-week-tabs,
+  .planner-day-tabs.observer-rolling-day-tabs {
+    display: flex;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    gap: 0.45rem;
+    padding-bottom: 0.2rem;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: thin;
+  }
+
+  .planner-day-tabs.observer-rolling-week-tabs button,
+  .planner-day-tabs.observer-rolling-day-tabs button {
+    flex: 0 0 calc((100% - 0.9rem) / 3);
+    min-width: 104px;
+    white-space: normal;
+    text-align: center;
+    line-height: 1.18;
+  }
+
+  .planner-day-tabs.observer-rolling-week-tabs button {
+    min-width: 132px;
   }
 }
 
