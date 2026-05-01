@@ -611,9 +611,22 @@ function getScheduledWorkHoursForDay(date: Date): number {
 
 function calculateDutyOvertimeHoursForDay(dutyDate: Date): number {
   const dutyHours = 24
-  const currentDayPlannedHours = getScheduledWorkHoursForDay(dutyDate)
-  const nextDayPlannedHours = getScheduledWorkHoursForDay(addDays(dutyDate, 1))
-  return Math.max(0, dutyHours - currentDayPlannedHours - nextDayPlannedHours)
+  const dutyDayWorkHours = getScheduledWorkHoursForDay(dutyDate)
+  const nextDayWorkHours = getScheduledWorkHoursForDay(addDays(dutyDate, 1))
+  const hasDutyDayWork = dutyDayWorkHours > 0
+  const hasNextDayWork = nextDayWorkHours > 0
+
+  if (!hasDutyDayWork && !hasNextDayWork) {
+    return dutyHours
+  }
+  if (!hasDutyDayWork) {
+    return Math.max(0, dutyHours - nextDayWorkHours)
+  }
+  if (!hasNextDayWork) {
+    return Math.max(0, dutyHours - dutyDayWorkHours)
+  }
+
+  return Math.max(0, dutyHours - dutyDayWorkHours - nextDayWorkHours)
 }
 
 function startOfISOWeek(date: Date): Date {
@@ -5472,19 +5485,6 @@ function App() {
     }
 
     if (location.kind === 'normal') {
-      const occupiedNormalLocation = plannerState.locations.find((item) => {
-        if (item.kind !== 'normal' || item.id === location.id) {
-          return false
-        }
-        return getAssignmentsForLocation(plannerState, dayKey, item).includes(candidate)
-      })
-      if (occupiedNormalLocation) {
-        showWarning(
-          `${candidate} aynı gün birden fazla odaya yazılamaz. Şu an: ${occupiedNormalLocation.site} / ${occupiedNormalLocation.name}`,
-        )
-        return
-      }
-
       const blockedStatusLocation = plannerState.locations.find((item) => {
         if (item.kind === 'normal' || item.kind === 'duty') {
           return false
@@ -5496,6 +5496,25 @@ function App() {
           `${candidate} ${blockedStatusLocation.site} / ${blockedStatusLocation.name} durumunda olduğu için odaya yazılamaz.`,
         )
         return
+      }
+
+      const occupiedNormalLocation = plannerState.locations.find((item) => {
+        if (item.kind !== 'normal' || item.id === location.id) {
+          return false
+        }
+        return getAssignmentsForLocation(plannerState, dayKey, item).includes(candidate)
+      })
+      if (occupiedNormalLocation) {
+        const confirmed =
+          typeof window !== 'undefined' &&
+          window.confirm(
+            `${candidate} bugün zaten ${occupiedNormalLocation.site} / ${occupiedNormalLocation.name} alanında görünüyor.\n\n` +
+              `${location.site} / ${location.name} alanına ikinci oda olarak da eklemek istiyor musun?`,
+          )
+        if (!confirmed) {
+          showWarning(`${candidate} ikinci odaya eklenmedi.`)
+          return
+        }
       }
     } else {
       const existing = findAssignedLocationForPerson(plannerState, dayKey, candidate, locationId)
