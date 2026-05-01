@@ -217,6 +217,11 @@ const SPECIALIST_DUTY_SITE_LABELS: Record<SpecialistDutySite, string> = {
   'Feriha C456': 'C4-5-6',
   'Feriha G123': 'G1-2-3',
 }
+const DUTY_SITE_SHORT_LABELS: Record<DutySite, string> = {
+  Sancaktepe: 's',
+  'Feriha Öz': 'f',
+  Çekmeköy: 'ç',
+}
 const LOCATION_SITE_ID_PREFIX: Record<DutySite, string> = {
   Sancaktepe: 'sancak',
   'Feriha Öz': 'feriha-oz',
@@ -6320,6 +6325,13 @@ function App() {
     const plannerState = getPlannerStateForDay(dayKey)
     const isEditableDay = isPlannerDayInEditMode(dayKey)
     const ownersForDay = getLocationOwnersForDay(plannerState, dayKey)
+    const dutySiteByAssistant = new Map(
+      (plannerState.dutyRoster[dayKey] ?? []).map((entry) => [entry.name, entry.site]),
+    )
+    const getPlannerAssignedChipLabel = (assistantName: string) => {
+      const dutySite = dutySiteByAssistant.get(assistantName)
+      return dutySite ? `${assistantName}(${DUTY_SITE_SHORT_LABELS[dutySite]})` : assistantName
+    }
     return groups.map(([siteName, locations]) => (
       <div className="site-block" key={`${dayKey}-${siteName}-${plannerView}`}>
         <h4>{siteName}</h4>
@@ -6468,7 +6480,7 @@ function App() {
                       disabled={!isEditableDay}
                       onClick={() => removeAssignment(dayKey, location.id, name)}
                     >
-                      {name}
+                      {getPlannerAssignedChipLabel(name)}
                     </button>
                   ))
                 ) : (
