@@ -5880,7 +5880,10 @@ function App() {
   }, [data.dutyRoster, loggedAssistantName, observerMonth])
 
   const myWeeklyActiveDayCount = useMemo(
-    () => myWeekAssignments.filter((day) => day.locations.length > 0).length,
+    () =>
+      myWeekAssignments.filter((day) =>
+        day.locations.some((location) => location.kind === 'normal' || location.kind === 'duty'),
+      ).length,
     [myWeekAssignments],
   )
 
