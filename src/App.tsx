@@ -154,6 +154,13 @@ interface LoginEventEntry {
   ipHash: string | null
 }
 
+interface LoginEventRawRow {
+  id?: unknown
+  person_name?: unknown
+  created_at?: unknown
+  ip_hash?: unknown
+}
+
 interface LoginConnectionGroup {
   connectionHash: string
   assistantNames: string[]
@@ -4287,6 +4294,7 @@ function App() {
       showWarning('Giriş kayıtlarını görmek için Supabase bağlantısı gerekli.')
       return
     }
+    const loginEventsClient = supabase
     if (isSupabaseAdminAuthRequired && !isSecureCloudWriteUnlocked) {
       setLoginEventStats(EMPTY_LOGIN_EVENT_STATS)
       setLoginEventsStatusText('Giriş kayıtlarını görmek için güvenli admin girişi gerekli.')
@@ -4303,20 +4311,20 @@ function App() {
     setLoginEventsStatusText('Giriş kayıtları yükleniyor...')
 
     const [lastEntriesResult, totalCountResult, todayRowsResult, todayCountResult] = await Promise.all([
-      supabase
+      loginEventsClient
         .from(LOGIN_EVENTS_TABLE)
-        .select('id, person_name, created_at, ip_hash')
+        .select('*')
         .order('created_at', { ascending: false })
         .limit(50),
-      supabase.from(LOGIN_EVENTS_TABLE).select('id', { count: 'exact', head: true }),
-      supabase
+      loginEventsClient.from(LOGIN_EVENTS_TABLE).select('id', { count: 'exact', head: true }),
+      loginEventsClient
         .from(LOGIN_EVENTS_TABLE)
-        .select('person_name, created_at, ip_hash')
+        .select('*')
         .gte('created_at', todayStart.toISOString())
         .lt('created_at', tomorrowStart.toISOString())
         .order('created_at', { ascending: false })
         .limit(500),
-      supabase
+      loginEventsClient
         .from(LOGIN_EVENTS_TABLE)
         .select('id', { count: 'exact', head: true })
         .gte('created_at', todayStart.toISOString())
@@ -4328,12 +4336,17 @@ function App() {
     if (readError) {
       setIsLoginEventsLoading(false)
       setLoginEventStats(EMPTY_LOGIN_EVENT_STATS)
-      setLoginEventsStatusText('Giriş kayıtları okunamadı.')
+      setLoginEventsStatusText(`Giriş kayıtları okunamadı: ${readError.message}`)
       showWarning('Giriş kayıtları okunamadı. Supabase login_events tablosu ve izinlerini kontrol et.')
       return
     }
 
-    const lastEntries = (lastEntriesResult.data ?? [])
+    const lastRows = (lastEntriesResult.data ?? []) as LoginEventRawRow[]
+    const todayRows = (todayRowsResult.data ?? []) as LoginEventRawRow[]
+    const connectionColumnVisible = [...lastRows, ...todayRows].some((row) =>
+      Object.prototype.hasOwnProperty.call(row, 'ip_hash'),
+    )
+    const lastEntries = lastRows
       .map((row) => ({
         id: Number(row.id),
         personName: String(row.person_name ?? '').trim(),
@@ -4342,7 +4355,6 @@ function App() {
       }))
       .filter((entry) => entry.personName && entry.createdAt)
 
-    const todayRows = todayRowsResult.data ?? []
     const todayDistinctNames = uniqueSortedNames(todayRows.map((row) => String(row.person_name ?? '')))
     const todayConnectionMap = new Map<string, { names: string[]; loginCount: number }>()
     todayRows.forEach((row) => {
@@ -4372,7 +4384,11 @@ function App() {
       todayConnectionGroups,
       lastEntries,
     })
-    setLoginEventsStatusText('Giriş kayıtları güncellendi.')
+    setLoginEventsStatusText(
+      !connectionColumnVisible && (lastRows.length > 0 || todayRows.length > 0)
+        ? 'Giriş kayıtları okundu. Aynı bağlantı analizi için Supabase SQL içinde ip_hash kolonu eklenmeli.'
+        : 'Giriş kayıtları güncellendi.',
+    )
     setIsLoginEventsLoading(false)
   }
 
