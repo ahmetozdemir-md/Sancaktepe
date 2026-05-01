@@ -273,7 +273,8 @@ const MOVABLE_OFFICIAL_HOLIDAYS_BY_YEAR: Record<number, OfficialHolidayEntry[]> 
     { date: '2026-03-20', reason: 'Ramazan Bayramı 1. Gün' },
     { date: '2026-03-21', reason: 'Ramazan Bayramı 2. Gün' },
     { date: '2026-03-22', reason: 'Ramazan Bayramı 3. Gün' },
-    { date: '2026-05-26', reason: 'Kurban Bayramı Arifesi (Yarım Gün)' },
+    { date: '2026-05-25', reason: 'Kurban Bayramı İdari Tatili' },
+    { date: '2026-05-26', reason: 'Kurban Bayramı Arifesi' },
     { date: '2026-05-27', reason: 'Kurban Bayramı 1. Gün' },
     { date: '2026-05-28', reason: 'Kurban Bayramı 2. Gün' },
     { date: '2026-05-29', reason: 'Kurban Bayramı 3. Gün' },
@@ -1168,7 +1169,7 @@ function getWeeklyExportUnitLabel(location: WorkLocation): string {
 }
 
 function buildWeek(weekStartISO: string): DayInfo[] {
-  const start = fromISODate(weekStartISO)
+  const start = startOfISOWeek(fromISODate(weekStartISO))
   return Array.from({ length: 7 }, (_, index) => addDays(start, index))
     .map((day) => ({
       key: toISODate(day),
@@ -2693,7 +2694,7 @@ function App() {
   const [plannerDraftAssignments, setPlannerDraftAssignments] = useState<ManualAssignments>({})
   const [plannerEditModes, setPlannerEditModes] = useState<Record<string, boolean>>({})
 
-  const weekDays = useMemo(() => buildWeek(data.weekStartISO), [data.weekStartISO])
+  const weekDays = useMemo(() => buildWeek(currentWeekStartISO), [currentWeekStartISO])
   const plannerMonthDays = useMemo(() => listMonthDays(plannerMonth), [plannerMonth])
   const dutyMonthDays = useMemo(() => listMonthDays(dutyMonth), [dutyMonth])
   const observerRollingWeekOptions = useMemo(
