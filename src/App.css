@@ -912,6 +912,29 @@ button.assistant-chip:active {
   font-weight: 800;
 }
 
+.login-connection-list {
+  display: grid;
+  gap: 0.62rem;
+}
+
+.login-connection-card {
+  border: 1px dashed rgba(47, 143, 115, 0.28);
+  border-radius: 14px;
+  padding: 0.72rem;
+  background: rgba(237, 249, 243, 0.62);
+  display: grid;
+  gap: 0.28rem;
+}
+
+.login-connection-card > strong {
+  color: #155f4d;
+}
+
+.login-connection-card > span {
+  color: var(--ink-500);
+  font-size: 0.82rem;
+}
+
 .login-events-table-wrap {
   overflow-x: auto;
   border: 1px solid rgba(96, 118, 107, 0.18);

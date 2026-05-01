@@ -151,12 +151,20 @@ interface LoginEventEntry {
   id: number
   personName: string
   createdAt: string
+  ipHash: string | null
+}
+
+interface LoginConnectionGroup {
+  connectionHash: string
+  assistantNames: string[]
+  loginCount: number
 }
 
 interface LoginEventStats {
   totalCount: number
   todayTotalCount: number
   todayDistinctNames: string[]
+  todayConnectionGroups: LoginConnectionGroup[]
   lastEntries: LoginEventEntry[]
 }
 
@@ -202,6 +210,7 @@ interface RemotePortalPayload {
 const STORAGE_KEY = 'assistant-scheduler-v1'
 const USER_BINDING_KEY = 'assistant-user-binding-v1'
 const LAST_ASSISTANT_USER_KEY = 'assistant-last-user-v1'
+const LOGIN_EVENT_CLEANUP_KEY = 'assistant-login-event-cleanup-v1'
 const ADMIN_LOGIN_GUARD_KEY = 'assistant-admin-login-guard-v1'
 const ADMIN_AUTH_EMAIL_KEY = 'assistant-admin-auth-email-v1'
 const CLOUD_READ_ONLY_TEXT = 'Bulut salt-okunur modda (yerelden buluta yazma kapalı).'
@@ -214,10 +223,13 @@ const APP_PASSWORD_HASH = '37db5704c214af212d89246fd809bac16bc924bab57601ed34078
 const ADMIN_BLOCK_STEP = 5
 const ADMIN_FIRST_BLOCK_MS = 60 * 60 * 1000
 const ADMIN_SECOND_BLOCK_MS = 24 * 60 * 60 * 1000
+const LOGIN_EVENT_RETENTION_DAYS = 14
+const LOGIN_EVENT_CLEANUP_INTERVAL_MS = 24 * 60 * 60 * 1000
 const EMPTY_LOGIN_EVENT_STATS: LoginEventStats = {
   totalCount: 0,
   todayTotalCount: 0,
   todayDistinctNames: [],
+  todayConnectionGroups: [],
   lastEntries: [],
 }
 const DUTY_SITES: DutySite[] = ['Sancaktepe', 'Feriha Öz', 'Çekmeköy']
@@ -668,6 +680,10 @@ function uniqueSortedNames(names: string[]): string[] {
   return [...new Set(names.map((name) => name.trim()).filter(Boolean))].sort((a, b) =>
     a.localeCompare(b, 'tr'),
   )
+}
+
+function formatConnectionHashLabel(ipHash: string | null): string {
+  return ipHash ? `Bağlantı ${ipHash.slice(0, 8).toLocaleUpperCase('tr')}` : '-'
 }
 
 function normalizeAssistantName(rawName: string): string {
@@ -3825,6 +3841,46 @@ function App() {
       return
     }
 
+    if (typeof window !== 'undefined') {
+      try {
+        const response = await fetch('/api/login-event', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ personName }),
+        })
+        const contentType = response.headers.get('content-type') ?? ''
+        if (response.ok && contentType.includes('application/json')) {
+          const result = (await response.json()) as { ok?: boolean }
+          if (result.ok) {
+            return
+          }
+        }
+      } catch (error) {
+        console.warn('Sunucu giriş kaydı denenemedi, doğrudan Supabase kaydı deneniyor.', error)
+      }
+    }
+
+    const now = Date.now()
+    const lastCleanup =
+      typeof window === 'undefined'
+        ? 0
+        : Number(localStorage.getItem(LOGIN_EVENT_CLEANUP_KEY) ?? '0')
+    const shouldCleanup = !lastCleanup || now - lastCleanup > LOGIN_EVENT_CLEANUP_INTERVAL_MS
+
+    if (shouldCleanup) {
+      const cutoff = new Date(now - LOGIN_EVENT_RETENTION_DAYS * 24 * 60 * 60 * 1000).toISOString()
+      const { error: cleanupError } = await supabase
+        .from(LOGIN_EVENTS_TABLE)
+        .delete()
+        .lt('created_at', cutoff)
+
+      if (cleanupError) {
+        console.warn('Eski giriş kayıtları temizlenemedi:', cleanupError.message)
+      } else if (typeof window !== 'undefined') {
+        localStorage.setItem(LOGIN_EVENT_CLEANUP_KEY, String(now))
+      }
+    }
+
     const { error } = await supabase.from(LOGIN_EVENTS_TABLE).insert({
       person_name: personName,
       created_at: new Date().toISOString(),
@@ -4249,13 +4305,13 @@ function App() {
     const [lastEntriesResult, totalCountResult, todayRowsResult, todayCountResult] = await Promise.all([
       supabase
         .from(LOGIN_EVENTS_TABLE)
-        .select('id, person_name, created_at')
+        .select('id, person_name, created_at, ip_hash')
         .order('created_at', { ascending: false })
         .limit(50),
       supabase.from(LOGIN_EVENTS_TABLE).select('id', { count: 'exact', head: true }),
       supabase
         .from(LOGIN_EVENTS_TABLE)
-        .select('person_name, created_at')
+        .select('person_name, created_at, ip_hash')
         .gte('created_at', todayStart.toISOString())
         .lt('created_at', tomorrowStart.toISOString())
         .order('created_at', { ascending: false })
@@ -4282,17 +4338,38 @@ function App() {
         id: Number(row.id),
         personName: String(row.person_name ?? '').trim(),
         createdAt: String(row.created_at ?? ''),
+        ipHash: typeof row.ip_hash === 'string' && row.ip_hash ? row.ip_hash : null,
       }))
       .filter((entry) => entry.personName && entry.createdAt)
 
-    const todayDistinctNames = uniqueSortedNames(
-      (todayRowsResult.data ?? []).map((row) => String(row.person_name ?? '')),
-    )
+    const todayRows = todayRowsResult.data ?? []
+    const todayDistinctNames = uniqueSortedNames(todayRows.map((row) => String(row.person_name ?? '')))
+    const todayConnectionMap = new Map<string, { names: string[]; loginCount: number }>()
+    todayRows.forEach((row) => {
+      const ipHash = typeof row.ip_hash === 'string' ? row.ip_hash : ''
+      const personName = String(row.person_name ?? '').trim()
+      if (!ipHash || !personName) {
+        return
+      }
+      const current = todayConnectionMap.get(ipHash) ?? { names: [], loginCount: 0 }
+      current.names.push(personName)
+      current.loginCount += 1
+      todayConnectionMap.set(ipHash, current)
+    })
+    const todayConnectionGroups = [...todayConnectionMap.entries()]
+      .map(([connectionHash, value]) => ({
+        connectionHash,
+        assistantNames: uniqueSortedNames(value.names),
+        loginCount: value.loginCount,
+      }))
+      .filter((group) => group.assistantNames.length > 1)
+      .sort((a, b) => b.assistantNames.length - a.assistantNames.length || b.loginCount - a.loginCount)
 
     setLoginEventStats({
       totalCount: totalCountResult.count ?? lastEntries.length,
-      todayTotalCount: todayCountResult.count ?? todayRowsResult.data?.length ?? 0,
+      todayTotalCount: todayCountResult.count ?? todayRows.length,
       todayDistinctNames,
+      todayConnectionGroups,
       lastEntries,
     })
     setLoginEventsStatusText('Giriş kayıtları güncellendi.')
@@ -8289,6 +8366,10 @@ function App() {
                   <strong>{loginEventStats.totalCount}</strong>
                 </article>
                 <article className="my-summary-card login-event-summary-card">
+                  <span>Bugün Çoklu Asistan Bağlantısı</span>
+                  <strong>{loginEventStats.todayConnectionGroups.length}</strong>
+                </article>
+                <article className="my-summary-card login-event-summary-card">
                   <span>Son Giriş</span>
                   <strong>
                     {loginEventStats.lastEntries[0]
@@ -8317,6 +8398,31 @@ function App() {
                 </div>
               </article>
 
+              <article className="login-events-today-card">
+                <h3>Aynı Bağlantıdan Girenler</h3>
+                {loginEventStats.todayConnectionGroups.length ? (
+                  <div className="login-connection-list">
+                    {loginEventStats.todayConnectionGroups.map((group) => (
+                      <div key={`login-connection-${group.connectionHash}`} className="login-connection-card">
+                        <strong>{formatConnectionHashLabel(group.connectionHash)}</strong>
+                        <span>
+                          {group.assistantNames.length} farklı asistan, {group.loginCount} giriş
+                        </span>
+                        <div className="chip-wrap">
+                          {group.assistantNames.map((name) => (
+                            <span key={`login-connection-${group.connectionHash}-${name}`} className="chip login-name-chip">
+                              {name}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <span className="empty">Bugün aynı bağlantıdan birden fazla farklı asistan girişi görünmüyor.</span>
+                )}
+              </article>
+
               <article className="login-events-table-card">
                 <h3>Son 50 Giriş</h3>
                 <div className="login-events-table-wrap">
@@ -8324,6 +8430,7 @@ function App() {
                     <thead>
                       <tr>
                         <th>Asistan</th>
+                        <th>Bağlantı</th>
                         <th>Tarih</th>
                         <th>Saat</th>
                       </tr>
@@ -8335,6 +8442,7 @@ function App() {
                           return (
                             <tr key={`login-event-${entry.id}`}>
                               <td>{entry.personName}</td>
+                              <td>{formatConnectionHashLabel(entry.ipHash)}</td>
                               <td>{entryDate.toLocaleDateString('tr-TR')}</td>
                               <td>
                                 {entryDate.toLocaleTimeString('tr-TR', {
@@ -8347,7 +8455,7 @@ function App() {
                         })
                       ) : (
                         <tr>
-                          <td colSpan={3}>Giriş kaydı bulunamadı.</td>
+                          <td colSpan={4}>Giriş kaydı bulunamadı.</td>
                         </tr>
                       )}
                     </tbody>
