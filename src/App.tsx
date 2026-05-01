@@ -2615,6 +2615,7 @@ function App() {
   const observerWeeklyScrollerRef = useRef<HTMLDivElement | null>(null)
   const observerDailyWeekScrollerRef = useRef<HTMLDivElement | null>(null)
   const observerDailyDayScrollerRef = useRef<HTMLDivElement | null>(null)
+  const plannerMonthDayScrollerRef = useRef<HTMLDivElement | null>(null)
   const [backupEntries, setBackupEntries] = useState<BackupEntry[]>([])
   const [isBackupLoading, setIsBackupLoading] = useState(false)
   const [backupStatusText, setBackupStatusText] = useState('')
@@ -2888,6 +2889,15 @@ function App() {
     () =>
       plannerMonthDays.map((dayKey) => {
         const date = fromISODate(dayKey)
+        const compactDate = date.toLocaleDateString('tr-TR', {
+          day: '2-digit',
+          month: '2-digit',
+        })
+        const weekdayLabel = date
+          .toLocaleDateString('tr-TR', {
+            weekday: 'short',
+          })
+          .replace('.', '')
         return {
           key: dayKey,
           label: date.toLocaleDateString('tr-TR', {
@@ -2895,6 +2905,8 @@ function App() {
             month: '2-digit',
             weekday: 'short',
           }),
+          compactDate,
+          weekdayLabel,
           dayTypeLabel: getDayTypeLabel(dayKey),
           roomAssignmentBlocked: !isRoomAssignableDay(date),
         }
@@ -3070,9 +3082,31 @@ function App() {
             ...previous,
             blockedUntil: 0,
           }
-        : previous,
+      : previous,
     )
   }, [adminBlockRemainingMs, adminLoginGuard.blockedUntil])
+
+  useEffect(() => {
+    const scroller = plannerMonthDayScrollerRef.current
+    if (!scroller) {
+      return
+    }
+
+    const activeButton = scroller.querySelector<HTMLButtonElement>(
+      `[data-planner-day="${activePlannerDay}"]`,
+    )
+    if (!activeButton) {
+      return
+    }
+
+    window.requestAnimationFrame(() => {
+      const left = activeButton.offsetLeft - scroller.clientWidth * 0.12
+      scroller.scrollTo({
+        left: Math.max(0, left),
+        behavior: 'smooth',
+      })
+    })
+  }, [activePlannerDay, plannerMonth])
 
   useEffect(() => {
     let cancelled = false
@@ -6964,7 +6998,7 @@ function App() {
           </div>
 
           <section className="assistant-monthly-table-sheet duty-list-module">
-            <h1>{session.assistantName ?? 'Asistan'} - Aylık Nöbet Listesi</h1>
+            <h1>Aylık Nöbet Listesi</h1>
             <p>{observerDutyMonthTitle}</p>
             {renderDutyListTable(observerDutyTableModel, 'observer-duty-page')}
           </section>
@@ -7578,17 +7612,19 @@ function App() {
               </button>
             </div>
 
-            <div className="planner-day-tabs planner-month-tabs">
+            <div className="planner-day-tabs planner-month-tabs" ref={plannerMonthDayScrollerRef}>
               {plannerDayOptions.map((day) => (
                 <button
                   key={`planner-tab-${day.key}`}
                   type="button"
+                  data-planner-day={day.key}
                   className={`${activePlannerDay === day.key ? 'active' : ''}${
                     day.roomAssignmentBlocked ? ' nonworking' : ''
                   }`}
                   onClick={() => setActivePlannerDay(day.key)}
                 >
-                  {day.label}
+                  <span className="planner-month-tab-date">{day.compactDate}</span>
+                  <span className="planner-month-tab-weekday">{day.weekdayLabel}</span>
                 </button>
               ))}
             </div>
@@ -7820,7 +7856,10 @@ function App() {
                       setSpecialistDay(day.key)
                     }}
                   >
-                    {day.shortLabel} ({fromISODate(day.key).toLocaleDateString('tr-TR', { weekday: 'short' })})
+                    <span className="planner-month-tab-date">{day.shortLabel}</span>
+                    <span className="planner-month-tab-weekday">
+                      {fromISODate(day.key).toLocaleDateString('tr-TR', { weekday: 'short' }).replace('.', '')}
+                    </span>
                   </button>
                 ))}
               </div>

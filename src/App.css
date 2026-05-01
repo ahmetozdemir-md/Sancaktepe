@@ -1337,6 +1337,51 @@ body.table-pan-unlocked .duty-list-table-wrap {
   padding-right: 0.15rem;
 }
 
+.planner-day-tabs.planner-month-tabs {
+  display: flex;
+  grid-template-columns: none;
+  flex-wrap: nowrap;
+  gap: 0.5rem;
+  max-height: none;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 0.25rem 0.05rem 0.48rem;
+  scroll-snap-type: x proximity;
+  scrollbar-width: thin;
+  -webkit-overflow-scrolling: touch;
+}
+
+.planner-day-tabs.planner-month-tabs button {
+  flex: 0 0 max(104px, calc((100% - 2.5rem) / 6));
+  min-width: 0;
+  min-height: 56px;
+  display: grid;
+  align-content: center;
+  justify-items: center;
+  gap: 0.08rem;
+  padding: 0.45rem 0.55rem;
+  text-align: center;
+  white-space: normal;
+  scroll-snap-align: start;
+}
+
+.planner-month-tab-date {
+  display: block;
+  font-size: 0.94rem;
+  font-weight: 850;
+  line-height: 1.05;
+}
+
+.planner-month-tab-weekday {
+  display: block;
+  color: inherit;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  line-height: 1;
+  opacity: 0.82;
+}
+
 .planner-day-tabs button.nonworking {
   background: rgba(255, 232, 170, 0.42);
   border-color: rgba(176, 124, 67, 0.33);
@@ -2025,12 +2070,40 @@ body.table-pan-unlocked .assistant-monthly-calendar-scroll {
   margin-top: 0.15rem;
 }
 
+.planner-day-tabs.specialist-week-tabs {
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+}
+
 .planner-day-tabs.specialist-week-tabs button {
-  min-width: 220px;
+  min-width: 0;
+  text-align: center;
+}
+
+.planner-day-tabs.specialist-day-tabs {
+  display: flex;
+  grid-template-columns: none;
+  flex-wrap: nowrap;
+  gap: 0.5rem;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 0.25rem 0.05rem 0.48rem;
+  scroll-snap-type: x proximity;
+  scrollbar-width: thin;
+  -webkit-overflow-scrolling: touch;
 }
 
 .planner-day-tabs.specialist-day-tabs button {
-  min-width: 180px;
+  flex: 0 0 max(104px, calc((100% - 2.5rem) / 6));
+  min-width: 0;
+  min-height: 56px;
+  display: grid;
+  align-content: center;
+  justify-items: center;
+  gap: 0.08rem;
+  padding: 0.45rem 0.55rem;
+  text-align: center;
+  white-space: normal;
+  scroll-snap-align: start;
 }
 
 .specialist-input-card {
@@ -2787,8 +2860,7 @@ code {
 
   .planner-day-tabs.observer-week-tabs,
   .planner-day-tabs.observer-day-tabs,
-  .planner-day-tabs.specialist-week-tabs,
-  .planner-day-tabs.specialist-day-tabs {
+  .planner-day-tabs.specialist-week-tabs {
     display: grid;
     grid-template-columns: 1fr;
     overflow: visible;
@@ -2798,12 +2870,27 @@ code {
 
   .planner-day-tabs.observer-week-tabs button,
   .planner-day-tabs.observer-day-tabs button,
-  .planner-day-tabs.specialist-week-tabs button,
-  .planner-day-tabs.specialist-day-tabs button {
+  .planner-day-tabs.specialist-week-tabs button {
     min-width: 0;
     white-space: normal;
     line-height: 1.25;
     text-align: left;
+  }
+
+  .planner-day-tabs.specialist-day-tabs {
+    display: flex;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overflow-y: hidden;
+    gap: 0.45rem;
+    padding-bottom: 0.2rem;
+  }
+
+  .planner-day-tabs.specialist-day-tabs button {
+    flex: 0 0 max(104px, calc((100% - 2.5rem) / 6));
+    min-width: 0;
+    text-align: center;
+    white-space: normal;
   }
 
   .day-card {
