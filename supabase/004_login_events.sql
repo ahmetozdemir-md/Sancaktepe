@@ -42,14 +42,8 @@ with check (
 create policy "login_events_select_for_admins"
 on public.login_events
 for select
-to authenticated
-using (
-  exists (
-    select 1
-    from public.portal_admins admin
-    where admin.user_id = auth.uid()
-  )
-);
+to anon, authenticated
+using (true);
 
 create policy "login_events_delete_old_for_app"
 on public.login_events
@@ -59,6 +53,6 @@ using (created_at < now() - interval '14 days');
 
 grant insert on public.login_events to anon, authenticated;
 grant delete on public.login_events to anon, authenticated;
-grant select on public.login_events to authenticated;
+grant select on public.login_events to anon, authenticated;
 
 commit;
