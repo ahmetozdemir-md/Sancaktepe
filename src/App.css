@@ -868,12 +868,92 @@ button.assistant-chip:active {
   font-size: 1rem;
 }
 
+.login-events-admin-card {
+  border-color: rgba(47, 143, 115, 0.24);
+  background:
+    radial-gradient(circle at top right, rgba(47, 143, 115, 0.12), transparent 32%),
+    linear-gradient(180deg, rgba(255, 253, 247, 0.95), rgba(246, 248, 243, 0.88));
+}
+
+.compact-action {
+  min-height: 38px;
+  padding: 0.58rem 0.95rem;
+}
+
+.login-event-summary-grid {
+  margin-top: 0.8rem;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.62rem;
+}
+
+.login-event-summary-card {
+  background: rgba(255, 255, 255, 0.84);
+}
+
+.login-events-today-card,
+.login-events-table-card {
+  margin-top: 0.85rem;
+  border: 1px solid rgba(96, 118, 107, 0.22);
+  border-radius: 16px;
+  padding: 0.85rem;
+  background: rgba(255, 255, 255, 0.74);
+}
+
+.login-events-today-card h3,
+.login-events-table-card h3 {
+  margin-bottom: 0.45rem;
+}
+
+.login-name-chip {
+  border-color: rgba(47, 143, 115, 0.34);
+  background: rgba(225, 244, 236, 0.88);
+  color: #155f4d;
+  font-weight: 800;
+}
+
+.login-events-table-wrap {
+  overflow-x: auto;
+  border: 1px solid rgba(96, 118, 107, 0.18);
+  border-radius: 14px;
+}
+
+.login-events-table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 480px;
+  font-size: 0.92rem;
+}
+
+.login-events-table th,
+.login-events-table td {
+  border-bottom: 1px solid rgba(96, 118, 107, 0.14);
+  padding: 0.58rem 0.7rem;
+  text-align: left;
+}
+
+.login-events-table th {
+  background: rgba(47, 143, 115, 0.1);
+  color: #1d5949;
+  font-size: 0.78rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.login-events-table tr:last-child td {
+  border-bottom: 0;
+}
+
 @media (max-width: 760px) {
   .backup-action-row {
     grid-template-columns: 1fr;
   }
 
   .backup-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .login-event-summary-grid {
     grid-template-columns: 1fr;
   }
 }

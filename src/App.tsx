@@ -3,6 +3,7 @@ import './App.css'
 import {
   isCloudWriteEnabled,
   isSupabaseAdminAuthRequired,
+  LOGIN_EVENTS_TABLE,
   REMOTE_STATE_HISTORY_TABLE,
   isSupabaseConfigured,
   REMOTE_STATE_ROW_ID,
@@ -20,7 +21,14 @@ import AssistantMonthlyTableView, {
 } from './AssistantMonthlyTableView'
 
 type PanelMode = 'admin' | 'observer'
-type AdminSection = 'assistants' | 'locations' | 'duty' | 'planner' | 'specialists' | 'backups'
+type AdminSection =
+  | 'assistants'
+  | 'locations'
+  | 'duty'
+  | 'planner'
+  | 'specialists'
+  | 'backups'
+  | 'loginEvents'
 type ObserverSection = 'myPanel' | 'personWeek' | 'dailyMap'
 type ObserverWeekDetailView = 'person' | 'room' | 'duty'
 type PlannerView = 'rooms' | 'status'
@@ -139,6 +147,19 @@ interface AdminLoginGuardState {
   rememberedAdmin: boolean
 }
 
+interface LoginEventEntry {
+  id: number
+  personName: string
+  createdAt: string
+}
+
+interface LoginEventStats {
+  totalCount: number
+  todayTotalCount: number
+  todayDistinctNames: string[]
+  lastEntries: LoginEventEntry[]
+}
+
 interface BackupEntry {
   id: number
   savedAt: string
@@ -193,6 +214,12 @@ const APP_PASSWORD_HASH = '37db5704c214af212d89246fd809bac16bc924bab57601ed34078
 const ADMIN_BLOCK_STEP = 5
 const ADMIN_FIRST_BLOCK_MS = 60 * 60 * 1000
 const ADMIN_SECOND_BLOCK_MS = 24 * 60 * 60 * 1000
+const EMPTY_LOGIN_EVENT_STATS: LoginEventStats = {
+  totalCount: 0,
+  todayTotalCount: 0,
+  todayDistinctNames: [],
+  lastEntries: [],
+}
 const DUTY_SITES: DutySite[] = ['Sancaktepe', 'Feriha Öz', 'Çekmeköy']
 const SPECIALIST_DUTY_SITES: SpecialistDutySite[] = [
   'Sancaktepe',
@@ -2638,6 +2665,9 @@ function App() {
   const [backupEntries, setBackupEntries] = useState<BackupEntry[]>([])
   const [isBackupLoading, setIsBackupLoading] = useState(false)
   const [backupStatusText, setBackupStatusText] = useState('')
+  const [loginEventStats, setLoginEventStats] = useState<LoginEventStats>(EMPTY_LOGIN_EVENT_STATS)
+  const [isLoginEventsLoading, setIsLoginEventsLoading] = useState(false)
+  const [loginEventsStatusText, setLoginEventsStatusText] = useState('')
 
   const [assistantInput, setAssistantInput] = useState('')
   const [assistantRankInput, setAssistantRankInput] = useState<SeniorityLevel>(1)
@@ -3790,6 +3820,21 @@ function App() {
     setNotice(null)
   }
 
+  const recordAssistantLoginEvent = useCallback(async (personName: string) => {
+    if (!isSupabaseConfigured || !supabase) {
+      return
+    }
+
+    const { error } = await supabase.from(LOGIN_EVENTS_TABLE).insert({
+      person_name: personName,
+      created_at: new Date().toISOString(),
+    })
+
+    if (error) {
+      console.warn('Asistan giriş kaydı tutulamadı:', error.message)
+    }
+  }, [])
+
   const loginAsAssistant = () => {
     if (!matchedAssistantAccount) {
       showWarning('Lütfen listede bulunan bir asistan ismi seç.')
@@ -3812,6 +3857,7 @@ function App() {
     if (typeof window !== 'undefined') {
       localStorage.setItem(LAST_ASSISTANT_USER_KEY, selectedAssistantName)
     }
+    void recordAssistantLoginEvent(selectedAssistantName)
     setNotice(null)
     setObserverAssistant(selectedAssistantName)
     setAssistantTableMonthDraft(observerMonth)
@@ -3849,6 +3895,9 @@ function App() {
     setAdminSection(section)
     if (section === 'backups') {
       void refreshBackups()
+    }
+    if (section === 'loginEvents') {
+      void refreshLoginEvents()
     }
   }
 
@@ -4173,6 +4222,81 @@ function App() {
 
   const closeObserverDutyList = () => {
     setObserverDutyListOpen(false)
+  }
+
+  const refreshLoginEvents = async () => {
+    if (!isSupabaseConfigured || !supabase) {
+      setLoginEventStats(EMPTY_LOGIN_EVENT_STATS)
+      setLoginEventsStatusText('Bulut bağlantısı olmadığı için giriş kayıtları okunamadı.')
+      showWarning('Giriş kayıtlarını görmek için Supabase bağlantısı gerekli.')
+      return
+    }
+    if (isSupabaseAdminAuthRequired && !isSecureCloudWriteUnlocked) {
+      setLoginEventStats(EMPTY_LOGIN_EVENT_STATS)
+      setLoginEventsStatusText('Giriş kayıtlarını görmek için güvenli admin girişi gerekli.')
+      showWarning('Giriş kayıtları güvenli modda sadece Supabase admin oturumu ile okunabilir.')
+      return
+    }
+
+    const todayStart = new Date()
+    todayStart.setHours(0, 0, 0, 0)
+    const tomorrowStart = new Date(todayStart)
+    tomorrowStart.setDate(tomorrowStart.getDate() + 1)
+
+    setIsLoginEventsLoading(true)
+    setLoginEventsStatusText('Giriş kayıtları yükleniyor...')
+
+    const [lastEntriesResult, totalCountResult, todayRowsResult, todayCountResult] = await Promise.all([
+      supabase
+        .from(LOGIN_EVENTS_TABLE)
+        .select('id, person_name, created_at')
+        .order('created_at', { ascending: false })
+        .limit(50),
+      supabase.from(LOGIN_EVENTS_TABLE).select('id', { count: 'exact', head: true }),
+      supabase
+        .from(LOGIN_EVENTS_TABLE)
+        .select('person_name, created_at')
+        .gte('created_at', todayStart.toISOString())
+        .lt('created_at', tomorrowStart.toISOString())
+        .order('created_at', { ascending: false })
+        .limit(500),
+      supabase
+        .from(LOGIN_EVENTS_TABLE)
+        .select('id', { count: 'exact', head: true })
+        .gte('created_at', todayStart.toISOString())
+        .lt('created_at', tomorrowStart.toISOString()),
+    ])
+
+    const readError =
+      lastEntriesResult.error ?? totalCountResult.error ?? todayRowsResult.error ?? todayCountResult.error
+    if (readError) {
+      setIsLoginEventsLoading(false)
+      setLoginEventStats(EMPTY_LOGIN_EVENT_STATS)
+      setLoginEventsStatusText('Giriş kayıtları okunamadı.')
+      showWarning('Giriş kayıtları okunamadı. Supabase login_events tablosu ve izinlerini kontrol et.')
+      return
+    }
+
+    const lastEntries = (lastEntriesResult.data ?? [])
+      .map((row) => ({
+        id: Number(row.id),
+        personName: String(row.person_name ?? '').trim(),
+        createdAt: String(row.created_at ?? ''),
+      }))
+      .filter((entry) => entry.personName && entry.createdAt)
+
+    const todayDistinctNames = uniqueSortedNames(
+      (todayRowsResult.data ?? []).map((row) => String(row.person_name ?? '')),
+    )
+
+    setLoginEventStats({
+      totalCount: totalCountResult.count ?? lastEntries.length,
+      todayTotalCount: todayCountResult.count ?? todayRowsResult.data?.length ?? 0,
+      todayDistinctNames,
+      lastEntries,
+    })
+    setLoginEventsStatusText('Giriş kayıtları güncellendi.')
+    setIsLoginEventsLoading(false)
   }
 
   const refreshBackups = async () => {
@@ -7167,6 +7291,13 @@ function App() {
               >
                 Yedekler
               </button>
+              <button
+                type="button"
+                className={adminSection === 'loginEvents' ? 'active' : ''}
+                onClick={() => selectAdminSection('loginEvents')}
+              >
+                Girişler
+              </button>
             </div>
           </section>
 
@@ -8123,6 +8254,106 @@ function App() {
                   <span className="empty">Yedek listesi boş. Manuel yedek alarak ilk güvenli noktayı oluştur.</span>
                 )}
               </div>
+            </section>
+          ) : null}
+
+          {adminSection === 'loginEvents' ? (
+            <section className="card fade-up delay-5 login-events-admin-card">
+              <div className="assistant-section-head">
+                <h2>Giriş Kayıtları</h2>
+                <button
+                  type="button"
+                  className="ghost-button compact-action"
+                  disabled={isLoginEventsLoading}
+                  onClick={refreshLoginEvents}
+                >
+                  Yenile
+                </button>
+              </div>
+              <p className="subtext">
+                Asistan ismiyle yapılan girişler burada ayrı bir kayıt defteri olarak tutulur. Bu bölüm
+                planlama verisini değiştirmez; sadece <code>login_events</code> tablosunu okur.
+              </p>
+
+              <div className="login-event-summary-grid">
+                <article className="my-summary-card login-event-summary-card">
+                  <span>Bugün Giriş Yapan Farklı Kişi</span>
+                  <strong>{loginEventStats.todayDistinctNames.length}</strong>
+                </article>
+                <article className="my-summary-card login-event-summary-card">
+                  <span>Bugünkü Toplam Giriş</span>
+                  <strong>{loginEventStats.todayTotalCount}</strong>
+                </article>
+                <article className="my-summary-card login-event-summary-card">
+                  <span>Toplam Giriş Sayısı</span>
+                  <strong>{loginEventStats.totalCount}</strong>
+                </article>
+                <article className="my-summary-card login-event-summary-card">
+                  <span>Son Giriş</span>
+                  <strong>
+                    {loginEventStats.lastEntries[0]
+                      ? new Date(loginEventStats.lastEntries[0].createdAt).toLocaleString('tr-TR')
+                      : '-'}
+                  </strong>
+                </article>
+              </div>
+
+              {loginEventsStatusText ? (
+                <p className="hint-text planner-hint">{loginEventsStatusText}</p>
+              ) : null}
+
+              <article className="login-events-today-card">
+                <h3>Bugün Giriş Yapan Asistanlar</h3>
+                <div className="chip-wrap">
+                  {loginEventStats.todayDistinctNames.length ? (
+                    loginEventStats.todayDistinctNames.map((name) => (
+                      <span key={`login-today-${name}`} className="chip login-name-chip">
+                        {name}
+                      </span>
+                    ))
+                  ) : (
+                    <span className="empty">Bugün henüz kayıtlı asistan girişi yok.</span>
+                  )}
+                </div>
+              </article>
+
+              <article className="login-events-table-card">
+                <h3>Son 50 Giriş</h3>
+                <div className="login-events-table-wrap">
+                  <table className="login-events-table">
+                    <thead>
+                      <tr>
+                        <th>Asistan</th>
+                        <th>Tarih</th>
+                        <th>Saat</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {loginEventStats.lastEntries.length ? (
+                        loginEventStats.lastEntries.map((entry) => {
+                          const entryDate = new Date(entry.createdAt)
+                          return (
+                            <tr key={`login-event-${entry.id}`}>
+                              <td>{entry.personName}</td>
+                              <td>{entryDate.toLocaleDateString('tr-TR')}</td>
+                              <td>
+                                {entryDate.toLocaleTimeString('tr-TR', {
+                                  hour: '2-digit',
+                                  minute: '2-digit',
+                                })}
+                              </td>
+                            </tr>
+                          )
+                        })
+                      ) : (
+                        <tr>
+                          <td colSpan={3}>Giriş kaydı bulunamadı.</td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </article>
             </section>
           ) : null}
         </main>
