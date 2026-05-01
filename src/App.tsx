@@ -6024,11 +6024,15 @@ function App() {
           specialistLabel: getSpecialistLabelForLocation(data, dayKey, location),
         }))
       const duty = (data.dutyRoster[dayKey] ?? []).find((entry) => entry.name === loggedAssistantName) ?? null
+      const previousDayKey = toISODate(addDays(fromISODate(dayKey), -1))
+      const postDuty =
+        (data.dutyRoster[previousDayKey] ?? []).find((entry) => entry.name === loggedAssistantName) ?? null
       entries[dayKey] = {
         dayTypeLabel: getDayTypeLabel(dayKey),
         holidayReason: getOfficialHolidayReason(dayKey),
         locations,
         dutySite: duty?.site ?? null,
+        postDutySite: postDuty?.site ?? null,
       }
     })
     return entries

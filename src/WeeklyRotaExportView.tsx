@@ -48,23 +48,36 @@ function WeeklyRotaExportView({
   return (
     <div className="weekly-export-page">
       <div className="weekly-export-toolbar no-print">
-        <button type="button" className="ghost-button" onClick={onClose}>
-          Planlamaya Dön
-        </button>
-        <button type="button" className="ghost-button" onClick={onPrevWeek}>
-          Önceki Hafta
-        </button>
-        <span className="weekly-export-week-label">{weekRangeLabel}</span>
-        <button type="button" className="ghost-button" onClick={onNextWeek}>
-          Sonraki Hafta
-        </button>
-        <button type="button" className="secondary" onClick={onPrint}>
-          Yazdır / PDF Al
-        </button>
+        <div className="weekly-export-toolbar-group">
+          <button type="button" className="ghost-button" onClick={onClose}>
+            Planlamaya Dön
+          </button>
+          <button type="button" className="ghost-button" onClick={onPrevWeek}>
+            Önceki Hafta
+          </button>
+        </div>
+
+        <div className="weekly-export-week-card" aria-label="Seçili hafta">
+          <span>Seçili Hafta</span>
+          <strong>{weekRangeLabel}</strong>
+        </div>
+
+        <div className="weekly-export-toolbar-group weekly-export-toolbar-group-right">
+          <button type="button" className="ghost-button" onClick={onNextWeek}>
+            Sonraki Hafta
+          </button>
+          <button type="button" className="secondary" onClick={onPrint}>
+            Yazdır / PDF Al
+          </button>
+        </div>
       </div>
 
       <section className="weekly-export-sheet">
-        <h1>{title}</h1>
+        <div className="weekly-export-title-block">
+          <span>Çalışma Listesi</span>
+          <h1>{title}</h1>
+          <p>{weekRangeLabel}</p>
+        </div>
         <div className="weekly-export-table-wrap">
           <table className="weekly-export-table">
             <thead>

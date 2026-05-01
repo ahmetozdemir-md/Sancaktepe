@@ -1018,6 +1018,11 @@ button.assistant-chip:active {
   color: #2c4f41;
 }
 
+.duty-site-feriha {
+  background: rgba(229, 241, 233, 0.94);
+  color: #2c4f41;
+}
+
 .duty-site-cekmekoy {
   background: rgba(221, 237, 239, 0.92);
   color: #294a4d;
@@ -1669,14 +1674,34 @@ body.table-pan-unlocked .duty-list-table-wrap {
 
 .weekly-export-page {
   display: grid;
-  gap: 0.7rem;
+  gap: 1rem;
 }
 
 .weekly-export-toolbar {
-  display: grid;
-  grid-template-columns: auto auto 1fr auto auto;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+  align-items: center;
+  justify-content: space-between;
+  border: 1px solid rgba(47, 143, 115, 0.18);
+  border-radius: 20px;
+  padding: 0.62rem;
+  background:
+    radial-gradient(circle at left, rgba(245, 213, 143, 0.28), transparent 36%),
+    linear-gradient(135deg, rgba(255, 253, 247, 0.92), rgba(236, 246, 240, 0.86));
+  box-shadow: 0 14px 36px rgba(51, 61, 55, 0.08);
+  backdrop-filter: blur(10px);
+}
+
+.weekly-export-toolbar-group {
+  display: flex;
+  flex-wrap: wrap;
   gap: 0.45rem;
   align-items: center;
+}
+
+.weekly-export-toolbar-group-right {
+  justify-content: flex-end;
 }
 
 .weekly-export-week-label {
@@ -1686,25 +1711,86 @@ body.table-pan-unlocked .duty-list-table-wrap {
   font-size: 0.92rem;
 }
 
+.weekly-export-week-card {
+  min-width: min(100%, 320px);
+  display: grid;
+  justify-items: center;
+  gap: 0.12rem;
+  border: 1px solid rgba(47, 143, 115, 0.2);
+  border-radius: 16px;
+  padding: 0.48rem 0.9rem;
+  background: rgba(255, 255, 255, 0.72);
+  box-shadow: 0 8px 22px rgba(47, 143, 115, 0.08);
+}
+
+.weekly-export-week-card span {
+  color: var(--mint-strong);
+  font-size: 0.68rem;
+  font-weight: 850;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.weekly-export-week-card strong {
+  color: var(--ink-900);
+  font-size: 0.98rem;
+}
+
 .weekly-export-sheet {
-  border: 1px solid rgba(70, 81, 75, 0.28);
-  border-radius: 14px;
-  background: #fff;
-  padding: 0.6rem;
+  border: 1px solid rgba(47, 143, 115, 0.18);
+  border-radius: 24px;
+  background:
+    radial-gradient(circle at 8% 4%, rgba(245, 213, 143, 0.2), transparent 28%),
+    linear-gradient(145deg, rgba(255, 253, 247, 0.96), rgba(246, 251, 247, 0.94));
+  padding: 0.78rem;
+  box-shadow: 0 20px 50px rgba(42, 51, 46, 0.1);
+}
+
+.weekly-export-title-block {
+  display: grid;
+  justify-items: center;
+  gap: 0.22rem;
+  margin-bottom: 0.78rem;
+  border-radius: 18px;
+  padding: 0.9rem 1rem;
+  background:
+    linear-gradient(135deg, rgba(32, 58, 49, 0.96), rgba(47, 143, 115, 0.92)),
+    radial-gradient(circle at right, rgba(245, 213, 143, 0.22), transparent 40%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.16), 0 12px 26px rgba(31, 41, 36, 0.16);
+}
+
+.weekly-export-title-block span {
+  color: rgba(236, 255, 246, 0.78);
+  font-size: 0.7rem;
+  font-weight: 850;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.weekly-export-title-block p {
+  margin: 0;
+  color: rgba(255, 255, 255, 0.82);
+  font-size: 0.9rem;
+  font-weight: 700;
 }
 
 .weekly-export-sheet h1 {
   text-align: center;
   font-size: clamp(1.35rem, 2.2vw, 2rem);
-  margin: 0 0 0.4rem;
+  margin: 0;
   letter-spacing: 0.02em;
-  font-weight: 800;
+  font-weight: 900;
+  color: #fff;
 }
 
 .weekly-export-table-wrap {
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
-  border: 1px solid #1a1a1a;
+  border: 1px solid rgba(63, 69, 66, 0.16);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.62);
+  padding: 0.28rem;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.82);
   touch-action: pan-x pinch-zoom;
   overscroll-behavior-x: auto;
 }
@@ -1718,31 +1804,46 @@ body.table-pan-unlocked .weekly-export-table-wrap {
 .weekly-export-table {
   width: 100%;
   min-width: 980px;
-  border-collapse: collapse;
+  border-collapse: separate;
+  border-spacing: 3px;
   table-layout: fixed;
 }
 
 .weekly-export-table th,
 .weekly-export-table td {
-  border: 1px solid #1f1f1f;
-  padding: 0.24rem 0.3rem;
+  border: 1px solid rgba(58, 66, 62, 0.16);
+  border-radius: 8px;
+  padding: 0.28rem 0.34rem;
   vertical-align: top;
   font-size: 0.79rem;
   line-height: 1.2;
 }
 
 .weekly-export-table thead th {
-  background: #efefef;
+  background: linear-gradient(135deg, #243b33, #315a4d);
+  color: #fff;
   text-align: center;
   font-weight: 800;
+  border-color: rgba(255, 255, 255, 0.12);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
+
+.weekly-export-table thead th strong {
+  display: block;
+  font-size: 0.86rem;
+  letter-spacing: 0.01em;
 }
 
 .weekly-export-table thead th span {
   display: block;
-  margin-top: 0.08rem;
-  font-weight: 700;
+  width: fit-content;
+  margin: 0.12rem auto 0;
+  border-radius: 999px;
+  padding: 0.08rem 0.38rem;
+  font-weight: 850;
   font-size: 0.72rem;
-  color: #34413b;
+  color: #dff6ed;
+  background: rgba(255, 255, 255, 0.12);
 }
 
 .weekly-export-table .group-col {
@@ -1754,6 +1855,7 @@ body.table-pan-unlocked .weekly-export-table-wrap {
   width: 72px;
   text-align: center;
   font-weight: 800;
+  color: #32443d;
 }
 
 .weekly-export-table .day-col {
@@ -1762,8 +1864,10 @@ body.table-pan-unlocked .weekly-export-table-wrap {
 
 .weekly-export-table .group-label {
   position: relative;
-  font-weight: 800;
-  letter-spacing: 0.04em;
+  font-weight: 900;
+  letter-spacing: 0.06em;
+  color: #22352e;
+  border-color: rgba(34, 53, 46, 0.14);
 }
 
 .weekly-export-table .group-label span {
@@ -1777,7 +1881,7 @@ body.table-pan-unlocked .weekly-export-table-wrap {
   display: flex;
   flex-wrap: wrap;
   align-items: flex-start;
-  gap: 0.08rem 0.18rem;
+  gap: 0.12rem 0.2rem;
 }
 
 .weekly-export-assistant-chip {
@@ -1790,19 +1894,25 @@ body.table-pan-unlocked .weekly-export-table-wrap {
   max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
-  border: 1px solid rgba(41, 55, 50, 0.34);
-  border-radius: 7px;
-  padding: 0.07rem 0.28rem;
-  background: rgba(255, 255, 255, 0.72);
+  color: #2d4038;
+  border: 1px solid rgba(47, 82, 69, 0.22);
+  border-radius: 999px;
+  padding: 0.08rem 0.34rem;
+  background: rgba(255, 255, 255, 0.78);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.84) inset, 0 4px 10px rgba(36, 50, 43, 0.06);
 }
 
 .weekly-export-specialist-line {
   display: block !important;
   width: 100%;
   font-size: 0.64rem !important;
-  font-style: italic;
   letter-spacing: 0.02em;
   color: #235544;
+  font-weight: 850;
+  border: 1px dashed rgba(47, 143, 115, 0.28);
+  border-radius: 7px;
+  padding: 0.05rem 0.24rem;
+  background: rgba(239, 250, 244, 0.78);
 }
 
 .weekly-export-empty {
@@ -1812,38 +1922,38 @@ body.table-pan-unlocked .weekly-export-table-wrap {
 
 .weekly-export-row.tone-sancak th,
 .weekly-export-row.tone-sancak td {
-  background: #f7e2ce;
+  background: linear-gradient(135deg, rgba(252, 231, 213, 0.9), rgba(255, 246, 238, 0.96));
 }
 
 .weekly-export-row.tone-cekmekoy th,
 .weekly-export-row.tone-cekmekoy td {
-  background: #deeddc;
+  background: linear-gradient(135deg, rgba(222, 238, 219, 0.92), rgba(246, 253, 244, 0.97));
 }
 
 .weekly-export-row.tone-feriha th,
 .weekly-export-row.tone-feriha td {
-  background: #f7efcc;
+  background: linear-gradient(135deg, rgba(250, 239, 199, 0.92), rgba(255, 252, 238, 0.97));
 }
 
 .weekly-export-row.tone-diger th,
 .weekly-export-row.tone-diger td {
-  background: #dbe9f9;
+  background: linear-gradient(135deg, rgba(218, 234, 249, 0.92), rgba(246, 251, 255, 0.97));
 }
 
 .weekly-export-row .group-label.tone-sancak {
-  background: #efcca8;
+  background: linear-gradient(180deg, #efc89f, #f7dfc5);
 }
 
 .weekly-export-row .group-label.tone-cekmekoy {
-  background: #cde3ca;
+  background: linear-gradient(180deg, #c8dfc4, #e4f2e1);
 }
 
 .weekly-export-row .group-label.tone-feriha {
-  background: #ecd98f;
+  background: linear-gradient(180deg, #edd785, #fbefbf);
 }
 
 .weekly-export-row .group-label.tone-diger {
-  background: #bdd7f1;
+  background: linear-gradient(180deg, #b9d5ef, #dfedfb);
 }
 
 .planner-export-row {
@@ -2045,6 +2155,40 @@ body.table-pan-unlocked .assistant-monthly-calendar-scroll {
 .timeline-card small {
   color: var(--ink-500);
   font-size: 0.73rem;
+}
+
+.timeline-card .chip {
+  border: 1px solid rgba(47, 143, 115, 0.34);
+  background: linear-gradient(135deg, rgba(236, 250, 243, 0.98), rgba(255, 255, 255, 0.98));
+  color: #203f35;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.78) inset, 0 6px 14px rgba(47, 143, 115, 0.09);
+  font-weight: 800;
+}
+
+.timeline-card .chip.soft {
+  border-style: solid;
+}
+
+.timeline-card .chip-with-meta {
+  border-color: rgba(177, 122, 67, 0.4);
+  background: linear-gradient(135deg, rgba(255, 245, 224, 0.98), rgba(255, 255, 255, 0.98));
+  color: #4f3925;
+}
+
+.timeline-card .chip-meta {
+  width: fit-content;
+  border-radius: 999px;
+  padding: 0.06rem 0.28rem;
+  background: rgba(47, 143, 115, 0.12);
+  color: #226f5a;
+  font-weight: 900;
+}
+
+.timeline-card .duty-site-chip {
+  border-color: rgba(51, 114, 143, 0.42);
+  background: linear-gradient(135deg, rgba(224, 244, 252, 0.98), rgba(255, 255, 255, 0.98));
+  color: #244d63;
+  font-weight: 850;
 }
 
 .focus-location {
@@ -2320,36 +2464,54 @@ body.table-pan-unlocked .assistant-monthly-calendar-scroll {
 .my-calendar-holiday-reason {
   display: inline-flex;
   width: fit-content;
-  font-size: 0.7rem;
-  font-weight: 700;
+  font-size: 0.74rem;
+  font-weight: 850;
   color: #7a4a16;
-  background: rgba(255, 230, 184, 0.62);
-  border: 1px solid rgba(186, 130, 48, 0.38);
-  border-radius: 8px;
-  padding: 0.13rem 0.4rem;
+  background: linear-gradient(135deg, rgba(255, 225, 164, 0.92), rgba(255, 244, 212, 0.98));
+  border: 1px solid rgba(186, 130, 48, 0.58);
+  border-radius: 9px;
+  padding: 0.18rem 0.46rem;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.72) inset, 0 4px 10px rgba(151, 104, 36, 0.09);
 }
 
 .my-calendar-duty {
   display: inline-flex;
   width: fit-content;
   align-items: center;
-  font-size: 0.72rem;
-  font-weight: 800;
+  font-size: 0.76rem;
+  font-weight: 900;
   border-radius: 999px;
-  padding: 0.16rem 0.5rem;
-  border: 1px solid rgba(31, 60, 50, 0.2);
+  padding: 0.2rem 0.56rem;
+  border: 1px solid rgba(31, 60, 50, 0.34);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.72) inset, 0 5px 12px rgba(31, 60, 50, 0.1);
+}
+
+.my-calendar-post-duty {
+  display: inline-flex;
+  width: fit-content;
+  align-items: center;
+  color: #5d3529;
+  font-size: 0.76rem;
+  font-weight: 900;
+  border-radius: 999px;
+  padding: 0.2rem 0.56rem;
+  border: 1px solid rgba(148, 81, 63, 0.36);
+  background: linear-gradient(135deg, rgba(255, 222, 214, 0.94), rgba(255, 247, 244, 0.98));
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.72) inset, 0 5px 12px rgba(148, 81, 63, 0.1);
 }
 
 .my-calendar-location {
   display: inline-grid;
   width: fit-content;
-  font-size: clamp(0.56rem, 0.9vw, 0.72rem);
+  font-size: clamp(0.62rem, 0.95vw, 0.78rem);
   line-height: 1.25;
-  border-radius: 8px;
-  border: 1px dashed rgba(63, 69, 66, 0.24);
-  padding: 0.15rem 0.42rem;
-  background: rgba(255, 255, 255, 0.85);
+  color: var(--ink-900);
+  border-radius: 9px;
+  border: 1px solid rgba(47, 143, 115, 0.34);
+  padding: 0.2rem 0.48rem;
+  background: linear-gradient(135deg, rgba(247, 255, 250, 0.98), rgba(255, 255, 255, 0.96));
   gap: 0.08rem;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.78) inset, 0 5px 12px rgba(47, 143, 115, 0.08);
 }
 
 .my-calendar-specialist-label {
@@ -2527,11 +2689,16 @@ code {
   }
 
   .weekly-export-toolbar {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: stretch;
   }
 
   .weekly-export-week-label {
     grid-column: 1 / -1;
+  }
+
+  .weekly-export-week-card {
+    order: 3;
+    flex: 1 1 100%;
   }
 }
 
@@ -2725,6 +2892,16 @@ code {
 
   .weekly-export-sheet {
     padding: 0.45rem;
+  }
+
+  .weekly-export-toolbar-group,
+  .weekly-export-toolbar-group-right {
+    flex: 1 1 100%;
+  }
+
+  .weekly-export-toolbar-group .ghost-button,
+  .weekly-export-toolbar-group .secondary {
+    flex: 1 1 0;
   }
 
   .weekly-export-table {
@@ -3062,7 +3239,8 @@ code {
     font-size: 0.52rem;
   }
 
-  .my-calendar-duty {
+  .my-calendar-duty,
+  .my-calendar-post-duty {
     font-size: 0.69rem;
     padding: 0.12rem 0.43rem;
   }
@@ -3200,6 +3378,22 @@ code {
     background: #fff !important;
   }
 
+  .weekly-export-title-block {
+    margin-bottom: 0.25rem;
+    padding: 0;
+    background: #fff !important;
+    box-shadow: none;
+  }
+
+  .weekly-export-title-block span {
+    display: none;
+  }
+
+  .weekly-export-title-block p {
+    color: #000 !important;
+    font-size: 0.78rem;
+  }
+
   .weekly-export-sheet h1 {
     margin-bottom: 0.25rem;
     font-size: 1.45rem;
@@ -3214,6 +3408,8 @@ code {
   .weekly-export-table {
     width: 100% !important;
     min-width: 100%;
+    border-collapse: collapse;
+    border-spacing: 0;
     table-layout: auto;
   }
 
@@ -3221,6 +3417,7 @@ code {
   .weekly-export-table td {
     color: #000 !important;
     border-color: #000 !important;
+    border-radius: 0;
     background: #fff !important;
   }
 
@@ -3275,6 +3472,7 @@ code {
   .assistant-monthly-table-sheet .my-calendar-location,
   .assistant-monthly-table-sheet .my-calendar-specialist-label,
   .assistant-monthly-table-sheet .my-calendar-duty,
+  .assistant-monthly-table-sheet .my-calendar-post-duty,
   .assistant-monthly-table-sheet .my-calendar-holiday-reason {
     color: #000 !important;
     border-color: #000 !important;

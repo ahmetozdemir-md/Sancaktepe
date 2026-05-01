@@ -18,6 +18,7 @@ interface AssistantMonthlyCalendarLocationItem {
 interface AssistantMonthlyCalendarDayData {
   locations: AssistantMonthlyCalendarLocationItem[]
   dutySite: string | null
+  postDutySite: string | null
   dayTypeLabel: string | null
   holidayReason: string | null
 }
@@ -108,6 +109,7 @@ function AssistantMonthlyTableView({
                 const dayData = dayDataMap[cell.key]
                 const locations = dayData?.locations ?? []
                 const dutySite = dayData?.dutySite ?? null
+                const postDutySite = dayData?.postDutySite ?? null
                 const dayTypeLabel = dayData?.dayTypeLabel ?? null
                 const holidayReason = cell.inMonth ? dayData?.holidayReason ?? null : null
 
@@ -132,6 +134,12 @@ function AssistantMonthlyTableView({
                         </span>
                       ) : null}
 
+                      {postDutySite ? (
+                        <span className={`my-calendar-post-duty duty-site-${dutySiteClassName(postDutySite)}`}>
+                          Nöbet Ertesi
+                        </span>
+                      ) : null}
+
                       {locations.map((locationItem) => (
                         <span
                           key={`assistant-table-location-${cell.key}-${locationItem.label}`}
@@ -146,7 +154,7 @@ function AssistantMonthlyTableView({
                         </span>
                       ))}
 
-                      {!dutySite && !locations.length ? (
+                      {!dutySite && !postDutySite && !locations.length ? (
                         <span className="empty tiny">
                           {cell.inMonth && dayTypeLabel
                             ? holidayReason
