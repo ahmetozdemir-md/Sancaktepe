@@ -130,6 +130,28 @@ interface DutyTableModel {
   rows: DutyTableRow[]
 }
 
+interface MyWeeklyBriefNormalAssignment {
+  id: string
+  label: string
+  specialists: string[]
+}
+
+interface MyWeeklyBriefDutyInfo {
+  site: DutySite
+  specialists: SpecialistDutyAssignment[]
+  assistants: string[]
+}
+
+interface MyWeeklyBriefDay {
+  day: DayInfo
+  weekdayLabel: string
+  normalAssignments: MyWeeklyBriefNormalAssignment[]
+  leaveLabels: string[]
+  postDutySite: DutySite | null
+  dutyInfo: MyWeeklyBriefDutyInfo | null
+  dayTypeLabel: string | null
+}
+
 interface Notice {
   type: 'ok' | 'warn'
   text: string
@@ -5902,6 +5924,75 @@ function App() {
     })
   }, [data, loggedAssistantName, sortedLocations, weekDays])
 
+  const myWeeklyBriefDays = useMemo<MyWeeklyBriefDay[]>(() => {
+    if (!loggedAssistantName) {
+      return []
+    }
+
+    return weekDays.map((day) => {
+      const assignedLocations = sortedLocations.filter((location) =>
+        getAssignmentsForLocation(data, day.key, location).includes(loggedAssistantName),
+      )
+      const normalAssignments = assignedLocations
+        .filter((location) => location.kind === 'normal')
+        .map((location) => ({
+          id: location.id,
+          label: `${location.site} / ${location.name}`,
+          specialists: getSpecialistNamesForLocation(data, day.key, location),
+        }))
+      const leaveLabels = assignedLocations
+        .filter((location) => location.kind === 'leave')
+        .map((location) => location.name)
+      const dutyAssignment =
+        (data.dutyRoster[day.key] ?? []).find((entry) => entry.name === loggedAssistantName) ?? null
+      const dutyInfo = dutyAssignment
+        ? {
+            site: dutyAssignment.site,
+            specialists: sortSpecialistDutyAssignments(
+              (data.specialistDutyRoster[day.key] ?? []).filter(
+                (entry) => mapSpecialistDutySiteToDutySite(entry.site) === dutyAssignment.site,
+              ),
+            ),
+            assistants: sortDutyAssignments(
+              (data.dutyRoster[day.key] ?? []).filter(
+                (entry) => entry.site === dutyAssignment.site && entry.name !== loggedAssistantName,
+              ),
+              data.assistantRanks,
+            ).map((entry) => entry.name),
+          }
+        : null
+      const previousDayKey = toISODate(addDays(fromISODate(day.key), -1))
+      const postDutySite =
+        (data.dutyRoster[previousDayKey] ?? []).find((entry) => entry.name === loggedAssistantName)?.site ??
+        null
+
+      return {
+        day,
+        weekdayLabel: fromISODate(day.key).toLocaleDateString('tr-TR', { weekday: 'long' }),
+        normalAssignments,
+        leaveLabels,
+        postDutySite,
+        dutyInfo,
+        dayTypeLabel: getDayTypeLabel(day.key),
+      }
+    })
+  }, [
+    data,
+    getSpecialistNamesForLocation,
+    loggedAssistantName,
+    sortedLocations,
+    weekDays,
+  ])
+
+  const myWeeklyBriefRangeLabel = useMemo(() => {
+    const firstDay = weekDays[0]?.key
+    const lastDay = weekDays[6]?.key
+    if (!firstDay || !lastDay) {
+      return 'Bu hafta'
+    }
+    return `${formatDayMonthLabel(firstDay)} - ${formatDayMonthLabel(lastDay)}`
+  }, [weekDays])
+
   const myMonthlyDuties = useMemo(() => {
     if (!loggedAssistantName) {
       return []
@@ -8126,6 +8217,121 @@ function App() {
                   </strong>
                 </article>
               </div>
+
+              <article className="weekly-brief-card">
+                <header>
+                  <div>
+                    <span>Bu Haftanın Özeti</span>
+                    <h3>Sayın {loggedAssistantName || 'Asistan'}, bu hafta planın</h3>
+                  </div>
+                  <small>{myWeeklyBriefRangeLabel}</small>
+                </header>
+
+                <ol className="weekly-brief-list">
+                  {myWeeklyBriefDays.map((briefDay) => {
+                    const hasDailyPlan =
+                      briefDay.normalAssignments.length ||
+                      briefDay.leaveLabels.length ||
+                      briefDay.postDutySite ||
+                      briefDay.dutyInfo
+
+                    return (
+                      <li key={`my-weekly-brief-${briefDay.day.key}`} className="weekly-brief-item">
+                        <div className="weekly-brief-date">
+                          <strong>{briefDay.weekdayLabel}</strong>
+                          <span>{briefDay.day.shortLabel}</span>
+                        </div>
+
+                        <div className="weekly-brief-body">
+                          {briefDay.normalAssignments.map((assignment) => (
+                            <div key={`${briefDay.day.key}-${assignment.id}`} className="weekly-brief-line">
+                              <span className="brief-label">Çalışma yerin</span>
+                              <span className="brief-chip location-chip">{assignment.label}</span>
+                              {assignment.specialists.length ? (
+                                <>
+                                  <span className="brief-label">Uzmanın</span>
+                                  <span className="brief-chip specialist-chip">
+                                    {assignment.specialists.join(', ')}
+                                  </span>
+                                </>
+                              ) : (
+                                <span className="brief-muted">Uzman kaydı görünmüyor</span>
+                              )}
+                            </div>
+                          ))}
+
+                          {briefDay.dutyInfo ? (
+                            <div className="weekly-brief-duty-block">
+                              <div className="weekly-brief-line">
+                                <span className="brief-label">Aynı gün</span>
+                                <span className="brief-chip duty-chip">
+                                  {briefDay.dutyInfo.site} nöbetçisin
+                                </span>
+                              </div>
+
+                              {briefDay.dutyInfo.specialists.length ? (
+                                <div className="weekly-brief-line">
+                                  <span className="brief-label">Nöbetçi uzmanlar</span>
+                                  <div className="brief-chip-row">
+                                    {briefDay.dutyInfo.specialists.map((entry) => (
+                                      <span
+                                        key={`${briefDay.day.key}-brief-duty-specialist-${entry.site}-${entry.name}`}
+                                        className="brief-chip duty-specialist-chip"
+                                      >
+                                        {entry.site === 'Sancaktepe' || entry.site === 'Çekmeköy'
+                                          ? entry.name
+                                          : `${SPECIALIST_DUTY_SITE_LABELS[entry.site]}: ${entry.name}`}
+                                      </span>
+                                    ))}
+                                  </div>
+                                </div>
+                              ) : null}
+
+                              {briefDay.dutyInfo.assistants.length ? (
+                                <div className="weekly-brief-line">
+                                  <span className="brief-label">Birlikte çalışacağın asistanlar</span>
+                                  <div className="brief-chip-row">
+                                    {briefDay.dutyInfo.assistants.map((name) => (
+                                      <span
+                                        key={`${briefDay.day.key}-brief-duty-assistant-${name}`}
+                                        className="brief-chip assistant-chip"
+                                      >
+                                        {name}
+                                      </span>
+                                    ))}
+                                  </div>
+                                </div>
+                              ) : null}
+                            </div>
+                          ) : null}
+
+                          {briefDay.postDutySite ? (
+                            <div className="weekly-brief-line">
+                              <span className="brief-chip post-duty-chip">
+                                Nöbet ertesisin ({briefDay.postDutySite})
+                              </span>
+                            </div>
+                          ) : null}
+
+                          {briefDay.leaveLabels.map((label) => (
+                            <div key={`${briefDay.day.key}-brief-leave-${label}`} className="weekly-brief-line">
+                              <span className="brief-chip leave-chip">{label}</span>
+                            </div>
+                          ))}
+
+                          {!hasDailyPlan ? (
+                            <p className="brief-empty-text">
+                              {briefDay.dayTypeLabel
+                                ? `${briefDay.dayTypeLabel} günü; planlanmış çalışma veya nöbet görünmüyor.`
+                                : 'Planlanmış çalışma veya nöbet görünmüyor.'}
+                            </p>
+                          ) : null}
+                        </div>
+                      </li>
+                    )
+                  })}
+                </ol>
+              </article>
 
               <article className="focus-location my-calendar-export-launch">
                 <h3>Takvim Tablosu</h3>
