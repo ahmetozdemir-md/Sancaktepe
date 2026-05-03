@@ -8291,23 +8291,27 @@ function App() {
                           <strong>{day.shortLabel}</strong>
                           <small>{day.key}</small>
                         </header>
-                        <div className="chip-wrap">
+                        <div className="chip-wrap room-week-chip-stack">
                           {specialistLabel ? (
-                            <span className="chip soft chip-with-meta">
-                              <small className="chip-meta specialist-work-meta">{specialistLabel}</small>
-                            </span>
-                          ) : null}
-                          {names.length ? (
-                            names.map((name) => (
-                              <span key={`${day.key}-${observerWeekRoom}-${name}`} className="chip soft">
-                                {name}
+                            <div className="room-week-specialist-row">
+                              <span className="chip soft chip-with-meta room-week-specialist-chip">
+                                <small className="chip-meta specialist-work-meta">{specialistLabel}</small>
                               </span>
-                            ))
-                          ) : dayTypeLabel ? (
-                            <span className="empty offday-text">{dayTypeLabel} günü</span>
-                          ) : (
-                            <span className="empty">Bu odada atama görünmüyor</span>
-                          )}
+                            </div>
+                          ) : null}
+                          <div className="room-week-assistant-row">
+                            {names.length ? (
+                              names.map((name) => (
+                                <span key={`${day.key}-${observerWeekRoom}-${name}`} className="chip soft">
+                                  {name}
+                                </span>
+                              ))
+                            ) : dayTypeLabel ? (
+                              <span className="empty offday-text">{dayTypeLabel} günü</span>
+                            ) : (
+                              <span className="empty">Bu odada atama görünmüyor</span>
+                            )}
+                          </div>
                         </div>
                       </article>
                     ))}
