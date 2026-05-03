@@ -4373,6 +4373,95 @@ function App() {
     return true
   }
 
+  const persistPlannerStateNow = async (
+    nextPlannerState: PlannerState,
+    sourceLabel: string,
+  ): Promise<boolean> => {
+    if (
+      !isSupabaseConfigured ||
+      !supabase ||
+      !isCloudWriteEnabled ||
+      !cloudCanWriteRef.current
+    ) {
+      showWarning(`${sourceLabel} yerelde işlendi ancak buluta yazılamadı. Üstteki Bulut Senkron uyarısını kontrol et.`)
+      return false
+    }
+
+    setIsCloudSaving(true)
+    const payloadObject = buildRemotePayload(nextPlannerState, userBindings)
+    const payloadString = JSON.stringify(payloadObject)
+
+    const { data: remoteRow, error: remoteReadError } = await supabase
+      .from(REMOTE_STATE_TABLE)
+      .select('updated_at')
+      .eq('id', REMOTE_STATE_ROW_ID)
+      .maybeSingle()
+
+    if (remoteReadError || !remoteRow) {
+      cloudCanWriteRef.current = false
+      setCloudState('error')
+      setCloudStateText(CLOUD_SAFE_GUARD_TEXT)
+      setIsCloudSaving(false)
+      showWarning(`${sourceLabel} yerelde işlendi ancak bulut kaydı okunamadı.`)
+      return false
+    }
+
+    const remoteUpdatedAt =
+      typeof remoteRow.updated_at === 'string' && remoteRow.updated_at ? remoteRow.updated_at : null
+    const knownRevision = cloudRevisionRef.current
+    if (knownRevision && remoteUpdatedAt && knownRevision !== remoteUpdatedAt) {
+      cloudCanWriteRef.current = false
+      setCloudState('error')
+      setCloudStateText(CLOUD_CONFLICT_TEXT)
+      setIsCloudSaving(false)
+      showWarning(`${sourceLabel} yerelde işlendi ancak bulutta daha yeni kayıt olduğu için online yazılmadı.`)
+      return false
+    }
+
+    const nextUpdatedAt = new Date().toISOString()
+    const updateBase = supabase
+      .from(REMOTE_STATE_TABLE)
+      .update({
+        payload: payloadObject,
+        updated_at: nextUpdatedAt,
+      })
+      .eq('id', REMOTE_STATE_ROW_ID)
+    const guardedUpdate = remoteUpdatedAt ? updateBase.eq('updated_at', remoteUpdatedAt) : updateBase
+    const { data: updatedRows, error } = await guardedUpdate.select('updated_at')
+
+    if (error) {
+      cloudCanWriteRef.current = false
+      setCloudState('error')
+      setCloudStateText(CLOUD_CONFLICT_TEXT)
+      setIsCloudSaving(false)
+      showWarning(`${sourceLabel} yerelde işlendi ancak online kayıt güncellenemedi.`)
+      return false
+    }
+
+    const updatedAtFromServer =
+      Array.isArray(updatedRows) && updatedRows.length
+        ? typeof updatedRows[0]?.updated_at === 'string'
+          ? updatedRows[0].updated_at
+          : null
+        : null
+    if (!updatedAtFromServer) {
+      cloudCanWriteRef.current = false
+      setCloudState('error')
+      setCloudStateText(CLOUD_CONFLICT_TEXT)
+      setIsCloudSaving(false)
+      showWarning(`${sourceLabel} yerelde işlendi ancak online kayıt doğrulanamadı.`)
+      return false
+    }
+
+    cloudPayloadRef.current = payloadString
+    cloudRevisionRef.current = updatedAtFromServer
+    setCloudState('ready')
+    setCloudStateText('Bulut kaydı aktif.')
+    setCloudLastSavedAt(updatedAtFromServer)
+    setIsCloudSaving(false)
+    return true
+  }
+
   const createManualBackup = async () => {
     if (!isSupabaseConfigured || !supabase) {
       showWarning('Manuel yedek için Supabase bağlantısı gerekli.')
@@ -5187,29 +5276,29 @@ function App() {
       return
     }
 
-    setData((previous) => {
-      const nextWorkAssignments = { ...previous.specialistWorkAssignments }
-      parsedDayKeys.forEach((dayKey) => {
-        const currentDayMap = cloneSpecialistWorkDayAssignments(nextWorkAssignments[dayKey])
-        Object.entries(parsed.data[dayKey] ?? {}).forEach(([locationId, specialistNames]) => {
-          currentDayMap[locationId] = uniqueSortedNames([
-            ...(currentDayMap[locationId] ?? []),
-            ...specialistNames,
-          ])
-        })
-
-        if (Object.keys(currentDayMap).length) {
-          nextWorkAssignments[dayKey] = currentDayMap
-        } else {
-          delete nextWorkAssignments[dayKey]
-        }
+    const nextWorkAssignments = { ...data.specialistWorkAssignments }
+    parsedDayKeys.forEach((dayKey) => {
+      const currentDayMap = cloneSpecialistWorkDayAssignments(nextWorkAssignments[dayKey])
+      Object.entries(parsed.data[dayKey] ?? {}).forEach(([locationId, specialistNames]) => {
+        currentDayMap[locationId] = uniqueSortedNames([
+          ...(currentDayMap[locationId] ?? []),
+          ...specialistNames,
+        ])
       })
 
-      return {
-        ...previous,
-        specialistWorkAssignments: nextWorkAssignments,
+      if (Object.keys(currentDayMap).length) {
+        nextWorkAssignments[dayKey] = currentDayMap
+      } else {
+        delete nextWorkAssignments[dayKey]
       }
     })
+
+    const nextPlannerState = {
+      ...data,
+      specialistWorkAssignments: nextWorkAssignments,
+    }
+    setData(nextPlannerState)
+    void persistPlannerStateNow(nextPlannerState, 'Günlük çalışma uzman kaydı')
 
     setSpecialistWorkIssues([])
     setSpecialistWorkText('')
@@ -5254,22 +5343,22 @@ function App() {
       return
     }
 
-    setData((previous) => {
-      const nextDutyRoster = { ...previous.specialistDutyRoster }
-      parsedDayKeys.forEach((dayKey) => {
-        const normalizedEntries = cloneSpecialistDutyDayAssignments(parsed.data[dayKey])
-        if (normalizedEntries.length) {
-          nextDutyRoster[dayKey] = normalizedEntries
-        } else {
-          delete nextDutyRoster[dayKey]
-        }
-      })
-
-      return {
-        ...previous,
-        specialistDutyRoster: nextDutyRoster,
+    const nextDutyRoster = { ...data.specialistDutyRoster }
+    parsedDayKeys.forEach((dayKey) => {
+      const normalizedEntries = cloneSpecialistDutyDayAssignments(parsed.data[dayKey])
+      if (normalizedEntries.length) {
+        nextDutyRoster[dayKey] = normalizedEntries
+      } else {
+        delete nextDutyRoster[dayKey]
       }
     })
+
+    const nextPlannerState = {
+      ...data,
+      specialistDutyRoster: nextDutyRoster,
+    }
+    setData(nextPlannerState)
+    void persistPlannerStateNow(nextPlannerState, 'Nöbetçi uzman kaydı')
 
     setSpecialistDutyIssues([])
     setSpecialistDutyText('')
