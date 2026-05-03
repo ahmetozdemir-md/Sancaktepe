@@ -1170,6 +1170,10 @@ function getSpecialistsForLocation(state: PlannerState, dayKey: string, location
   )
 }
 
+function formatSpecialistWorkLabel(names: string[]): string | null {
+  return names.length ? `Uzm: ${names.join(', ')}` : null
+}
+
 function getWeeklyExportUnitLabel(location: WorkLocation): string {
   const name = location.name.trim()
   const normalizedName = normalizeTrToken(name)
@@ -4038,20 +4042,17 @@ function App() {
     location: WorkLocation,
   ): string | null => {
     const names = getSpecialistNamesForLocation(state, dayKey, location)
-    if (!names.length) {
-      return null
-    }
-    return `Uzm: ${names.join(', ')}`
+    return formatSpecialistWorkLabel(names)
   }, [getSpecialistNamesForLocation])
 
-  const getWeeklyPersonLocationLabel = (
+  const getWeeklyPersonLocationLabel = useCallback((
     state: PlannerState,
     dayKey: string,
     assistant: string,
     location: WorkLocation,
   ): string => {
     if (location.kind === 'duty') {
-      const dutyAssignment = getDutyAssignmentForPerson(state, dayKey, assistant)
+      const dutyAssignment = (state.dutyRoster[dayKey] ?? []).find((entry) => entry.name === assistant)
       return dutyAssignment ? `${dutyAssignment.site} Nöbet` : 'Nöbet'
     }
 
@@ -4064,7 +4065,7 @@ function App() {
     }
 
     return `${location.site} / ${location.name}`
-  }
+  }, [])
 
   const startOwnersEdit = () => {
     if (!isValidMonthISO(ownersMonth)) {
@@ -5724,15 +5725,27 @@ function App() {
       const locations = sortedLocations.filter((location) =>
         getAssignmentsForLocation(data, day.key, location).includes(observerAssistant),
       )
+      const assignments = locations.map((location) => ({
+        location,
+        locationLabel: getWeeklyPersonLocationLabel(data, day.key, observerAssistant, location),
+        specialistLabel: getSpecialistLabelForLocation(data, day.key, location),
+      }))
       const dayTypeLabel = getDayTypeLabel(day.key)
 
       return {
         day,
-        locations,
+        assignments,
         dayTypeLabel,
       }
     })
-  }, [data, observerAssistant, observerWeeklyDays, sortedLocations])
+  }, [
+    data,
+    getSpecialistLabelForLocation,
+    getWeeklyPersonLocationLabel,
+    observerAssistant,
+    observerWeeklyDays,
+    sortedLocations,
+  ])
 
   const weekAssignmentsForRoom = useMemo(() => {
     const room = sortedLocations.find((location) => location.id === observerWeekRoom)
@@ -5743,11 +5756,12 @@ function App() {
     return observerWeeklyDays.map((day) => {
       const names = getDisplayAssignmentsForLocation(data, day.key, room)
       const specialistNames = getSpecialistNamesForLocation(data, day.key, room)
+      const specialistLabel = formatSpecialistWorkLabel(specialistNames)
       const dayTypeLabel = getDayTypeLabel(day.key)
       return {
         day,
         names,
-        specialistNames,
+        specialistLabel,
         dayTypeLabel,
       }
     })
@@ -8123,22 +8137,22 @@ function App() {
                   </div>
 
                   <div className="timeline-grid">
-                    {weekAssignmentsForPerson.map(({ day, locations, dayTypeLabel }) => (
+                    {weekAssignmentsForPerson.map(({ day, assignments, dayTypeLabel }) => (
                       <article key={`timeline-${day.key}`} className="timeline-card">
                         <header>
                           <strong>{day.shortLabel}</strong>
                           <small>{day.key}</small>
                         </header>
                         <div className="chip-wrap">
-                          {locations.length ? (
-                            locations.map((location) => (
+                          {assignments.length ? (
+                            assignments.map(({ location, locationLabel, specialistLabel }) => (
                               <span key={`${day.key}-${location.id}`} className="chip soft chip-with-meta">
-                                {getSpecialistLabelForLocation(data, day.key, location) ? (
-                                  <small className="chip-meta">
-                                    {getSpecialistLabelForLocation(data, day.key, location)}
+                                {specialistLabel ? (
+                                  <small className="chip-meta specialist-work-meta">
+                                    {specialistLabel}
                                   </small>
                                 ) : null}
-                                <span>{getWeeklyPersonLocationLabel(data, day.key, observerAssistant, location)}</span>
+                                <span>{locationLabel}</span>
                               </span>
                             ))
                           ) : dayTypeLabel ? (
@@ -8170,16 +8184,16 @@ function App() {
                   </div>
 
                   <div className="timeline-grid">
-                    {weekAssignmentsForRoom.map(({ day, names, specialistNames, dayTypeLabel }) => (
+                    {weekAssignmentsForRoom.map(({ day, names, specialistLabel, dayTypeLabel }) => (
                       <article key={`timeline-room-${day.key}`} className="timeline-card">
                         <header>
                           <strong>{day.shortLabel}</strong>
                           <small>{day.key}</small>
                         </header>
                         <div className="chip-wrap">
-                          {specialistNames.length ? (
+                          {specialistLabel ? (
                             <span className="chip soft chip-with-meta">
-                              <small className="chip-meta">Uzm: {specialistNames.join(', ')}</small>
+                              <small className="chip-meta specialist-work-meta">{specialistLabel}</small>
                             </span>
                           ) : null}
                           {names.length ? (
@@ -8350,7 +8364,7 @@ function App() {
                           <small>{LOCATION_KIND_LABELS[location.kind]}</small>
                         </header>
                         {specialistLabel ? (
-                          <p className="tile-specialist-inline">{specialistLabel}</p>
+                          <p className="tile-specialist-inline specialist-work-meta">{specialistLabel}</p>
                         ) : null}
                         <div className="chip-wrap">
                           {names.length ? (

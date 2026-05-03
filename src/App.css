@@ -674,6 +674,19 @@ textarea {
   color: #2f6e5a;
 }
 
+.specialist-work-meta {
+  border: 1px solid rgba(47, 143, 115, 0.28);
+  background: linear-gradient(135deg, rgba(224, 247, 237, 0.94), rgba(255, 250, 238, 0.94));
+  color: #1f6f59;
+}
+
+.tile-specialist-inline.specialist-work-meta {
+  display: inline-flex;
+  width: fit-content;
+  border-radius: 999px;
+  padding: 0.12rem 0.42rem;
+}
+
 .chip.removable {
   cursor: pointer;
 }
