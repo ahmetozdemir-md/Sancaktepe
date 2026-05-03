@@ -5298,11 +5298,17 @@ function App() {
       specialistWorkAssignments: nextWorkAssignments,
     }
     setData(nextPlannerState)
-    void persistPlannerStateNow(nextPlannerState, 'Günlük çalışma uzman kaydı')
+    const persisted = await persistPlannerStateNow(nextPlannerState, 'Günlük çalışma uzman kaydı')
+    if (!persisted) {
+      setSpecialistWorkIssues([
+        'Günlük çalışma uzman kaydı bu cihazda işlendi; ancak online kayıt doğrulanamadı. Metin silinmedi, tekrar kaydedebilirsin.',
+      ])
+      return
+    }
 
     setSpecialistWorkIssues([])
     setSpecialistWorkText('')
-    showSuccess(`${parsedDayKeys.length} güne ait ${parsed.totalNames} günlük çalışma uzman kaydı uygulandı.`)
+    showSuccess(`${parsedDayKeys.length} güne ait ${parsed.totalNames} günlük çalışma uzman kaydı online kaydedildi.`)
   }
 
   const importSpecialistDutyLines = async () => {
@@ -5358,11 +5364,17 @@ function App() {
       specialistDutyRoster: nextDutyRoster,
     }
     setData(nextPlannerState)
-    void persistPlannerStateNow(nextPlannerState, 'Nöbetçi uzman kaydı')
+    const persisted = await persistPlannerStateNow(nextPlannerState, 'Nöbetçi uzman kaydı')
+    if (!persisted) {
+      setSpecialistDutyIssues([
+        'Nöbetçi uzman kaydı bu cihazda işlendi; ancak online kayıt doğrulanamadı. Metin silinmedi, tekrar kaydedebilirsin.',
+      ])
+      return
+    }
 
     setSpecialistDutyIssues([])
     setSpecialistDutyText('')
-    showSuccess(`${parsedDayKeys.length} güne ait ${parsed.totalNames} nöbetçi uzman kaydı uygulandı.`)
+    showSuccess(`${parsedDayKeys.length} güne ait ${parsed.totalNames} nöbetçi uzman kaydı online kaydedildi.`)
   }
 
   const startPlannerDayEdit = (dayKey: string) => {
