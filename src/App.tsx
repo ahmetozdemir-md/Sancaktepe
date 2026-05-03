@@ -107,12 +107,6 @@ interface DayInfo {
   shortLabel: string
 }
 
-interface WeekGroup {
-  weekStartISO: string
-  label: string
-  days: DayInfo[]
-}
-
 interface CalendarCellInfo {
   key: string
   inMonth: boolean
@@ -1239,41 +1233,6 @@ function formatDayMonthLabel(isoDate: string): string {
   return fromISODate(isoDate).toLocaleDateString('tr-TR', {
     day: 'numeric',
     month: 'long',
-  })
-}
-
-function buildWeekGroupsForMonth(monthISO: string): WeekGroup[] {
-  const monthDays = listMonthDays(monthISO)
-  if (!monthDays.length) {
-    return []
-  }
-
-  const weekStarts = [...new Set(monthDays.map((dayKey) => toISODate(startOfISOWeek(fromISODate(dayKey)))))]
-  const eligibleWeeks = weekStarts
-    .map((weekStartISO) => {
-      const fullWeekDays = buildWeek(weekStartISO)
-      const monthDaysInWeek = fullWeekDays.filter((day) => day.key.startsWith(`${monthISO}-`))
-      const hasWeekdayInMonth = monthDaysInWeek.some((day) => !isWeekend(fromISODate(day.key)))
-
-      return {
-        weekStartISO,
-        fullWeekDays,
-        hasWeekdayInMonth,
-      }
-    })
-    .filter((week) => week.hasWeekdayInMonth)
-
-  return eligibleWeeks.map((week, index) => {
-    const firstDay = week.fullWeekDays[0]?.key
-    const lastDay = week.fullWeekDays[6]?.key
-    const weekRangeLabel =
-      firstDay && lastDay ? `${formatDayMonthLabel(firstDay)} - ${formatDayMonthLabel(lastDay)}` : week.weekStartISO
-
-    return {
-      weekStartISO: week.weekStartISO,
-      label: `${index + 1}. hafta (${weekRangeLabel})`,
-      days: week.fullWeekDays,
-    }
   })
 }
 
@@ -2715,13 +2674,6 @@ function App() {
   const [specialistWorkIssues, setSpecialistWorkIssues] = useState<string[]>([])
   const [specialistDutyText, setSpecialistDutyText] = useState('')
   const [specialistDutyIssues, setSpecialistDutyIssues] = useState<string[]>([])
-  const [specialistMonth, setSpecialistMonth] = useState(currentMonthISO)
-  const [specialistDay, setSpecialistDay] = useState(todayISO)
-  const [activeSpecialistWeek, setActiveSpecialistWeek] = useState('')
-  const [specialistEditDay, setSpecialistEditDay] = useState(todayISO)
-  const [specialistWorkDraft, setSpecialistWorkDraft] = useState<SpecialistWorkDayAssignments>({})
-  const [specialistDutyDraft, setSpecialistDutyDraft] = useState<SpecialistDutyAssignment[]>([])
-  const [specialistDateEditMode, setSpecialistDateEditMode] = useState(false)
 
   const [observerAssistant, setObserverAssistant] = useState('')
   const [observerMonth, setObserverMonth] = useState(currentMonthISO)
@@ -2925,26 +2877,6 @@ function App() {
     ]
     return buildRelativeMonthOptions(plannerMonth, plannerMonths)
   }, [buildRelativeMonthOptions, data.dutyRoster, data.manualAssignments, plannerMonth])
-  const specialistMonthOptions = useMemo(() => {
-    const specialistMonths = [
-      ...Object.keys(data.specialistWorkAssignments)
-        .filter((dayKey) => /^\d{4}-\d{2}-\d{2}$/.test(dayKey))
-        .map((dayKey) => dayKey.slice(0, 7)),
-      ...Object.keys(data.specialistDutyRoster)
-        .filter((dayKey) => /^\d{4}-\d{2}-\d{2}$/.test(dayKey))
-        .map((dayKey) => dayKey.slice(0, 7)),
-    ]
-    return buildRelativeMonthOptions(specialistMonth, specialistMonths)
-  }, [buildRelativeMonthOptions, data.specialistDutyRoster, data.specialistWorkAssignments, specialistMonth])
-  const specialistDayOptions = useMemo(() => listMonthDays(specialistMonth), [specialistMonth])
-  const specialistWeekGroups = useMemo(
-    () => buildWeekGroupsForMonth(specialistMonth),
-    [specialistMonth],
-  )
-  const specialistActiveWeekDays = useMemo(() => {
-    const activeWeek = specialistWeekGroups.find((group) => group.weekStartISO === activeSpecialistWeek)
-    return activeWeek?.days ?? []
-  }, [activeSpecialistWeek, specialistWeekGroups])
   const roomLeftGroups = useMemo(
     () => groupedPlannerRoomLocations.filter(([siteName]) => siteName === 'Sancaktepe'),
     [groupedPlannerRoomLocations],
@@ -3622,54 +3554,6 @@ function App() {
       setActivePlannerDay(preferredDay)
     }
   }, [activePlannerDay, plannerMonthDays, todayISO])
-
-  useEffect(() => {
-    if (!specialistMonthOptions.length) {
-      return
-    }
-
-    const optionValues = specialistMonthOptions.map((option) => option.value)
-    if (!optionValues.includes(specialistMonth)) {
-      const fallback = optionValues[optionValues.length - 1] ?? currentMonthISO
-      setSpecialistMonth(fallback)
-    }
-  }, [currentMonthISO, specialistMonth, specialistMonthOptions])
-
-  useEffect(() => {
-    if (!specialistDayOptions.length) {
-      if (specialistDay) {
-        setSpecialistDay('')
-      }
-      return
-    }
-
-    if (!specialistDayOptions.includes(specialistDay)) {
-      const preferred = specialistDayOptions.includes(todayISO) ? todayISO : specialistDayOptions[0]
-      setSpecialistDay(preferred)
-    }
-  }, [specialistDay, specialistDayOptions, todayISO])
-
-  useEffect(() => {
-    if (!specialistWeekGroups.length) {
-      if (activeSpecialistWeek) {
-        setActiveSpecialistWeek('')
-      }
-      return
-    }
-
-    const selectedWeek = specialistWeekGroups.find(
-      (group) => group.weekStartISO === activeSpecialistWeek,
-    )
-    const selectedWeekHasDay = selectedWeek?.days.some((day) => day.key === specialistDay)
-    if (selectedWeekHasDay) {
-      return
-    }
-
-    const weekForDay = specialistWeekGroups.find((group) =>
-      group.days.some((day) => day.key === specialistDay),
-    )
-    setActiveSpecialistWeek(weekForDay?.weekStartISO ?? specialistWeekGroups[0].weekStartISO)
-  }, [activeSpecialistWeek, specialistDay, specialistWeekGroups])
 
   useEffect(() => {
     if (!observerWeekRoomOptions.length) {
@@ -5264,106 +5148,13 @@ function App() {
     setDutyQuickText('')
   }
 
-  const startSpecialistDateEdit = () => {
-    if (!specialistDay) {
-      showWarning('Önce düzenlemek istediğin günü seç.')
-      return
-    }
-    setSpecialistEditDay(specialistDay)
-    setSpecialistWorkDraft(
-      cloneSpecialistWorkDayAssignments(data.specialistWorkAssignments[specialistDay]),
-    )
-    setSpecialistDutyDraft(
-      cloneSpecialistDutyDayAssignments(data.specialistDutyRoster[specialistDay]),
-    )
-    setSpecialistWorkText('')
-    setSpecialistDutyText('')
-    setSpecialistWorkIssues([])
-    setSpecialistDutyIssues([])
-    setSpecialistDateEditMode(true)
-    showSuccess(`${specialistDay} uzman düzenlemesi açıldı.`)
-  }
-
-  const cancelSpecialistDateEdit = () => {
-    if (!specialistDateEditMode) {
-      return
-    }
-    setSpecialistWorkDraft({})
-    setSpecialistDutyDraft([])
-    setSpecialistWorkText('')
-    setSpecialistDutyText('')
-    setSpecialistWorkIssues([])
-    setSpecialistDutyIssues([])
-    setSpecialistDateEditMode(false)
-    showWarning(`${specialistEditDay} için taslak değişiklikler iptal edildi.`)
-  }
-
-  const saveSpecialistDateEdit = async () => {
-    if (!specialistDateEditMode) {
-      return
-    }
-    if (!specialistEditDay) {
-      showWarning('Kaydetmek için geçerli bir gün bulunamadı.')
-      return
-    }
-    const approved = window.confirm(
-      `${specialistEditDay} tarihindeki uzman değişikliklerini onaylıyor musun?`,
-    )
-    if (!approved) {
-      showWarning('Kaydetme onayı verilmedi. Taslak değişiklikler korunuyor.')
-      return
-    }
-    if (!(await createPreChangeBackup(`before-specialist-save-${specialistEditDay}`, 'specialist-day-save'))) {
-      return
-    }
-
-    setData((previous) => {
-      const nextWorkAssignments = { ...previous.specialistWorkAssignments }
-      const normalizedWork = cloneSpecialistWorkDayAssignments(specialistWorkDraft)
-      if (Object.keys(normalizedWork).length) {
-        nextWorkAssignments[specialistEditDay] = normalizedWork
-      } else {
-        delete nextWorkAssignments[specialistEditDay]
-      }
-
-      const nextDutyRoster = { ...previous.specialistDutyRoster }
-      const normalizedDuty = cloneSpecialistDutyDayAssignments(specialistDutyDraft)
-      if (normalizedDuty.length) {
-        nextDutyRoster[specialistEditDay] = normalizedDuty
-      } else {
-        delete nextDutyRoster[specialistEditDay]
-      }
-
-      return {
-        ...previous,
-        specialistWorkAssignments: nextWorkAssignments,
-        specialistDutyRoster: nextDutyRoster,
-      }
-    })
-
-    setSpecialistWorkDraft({})
-    setSpecialistDutyDraft([])
-    setSpecialistWorkText('')
-    setSpecialistDutyText('')
-    setSpecialistWorkIssues([])
-    setSpecialistDutyIssues([])
-    setSpecialistDateEditMode(false)
-    showSuccess(`${specialistEditDay} uzman değişiklikleri kaydedildi.`)
-  }
-
-  const importSpecialistWorkLines = () => {
-    if (!specialistDateEditMode) {
-      showWarning('Uzman verisi düzenlemek için önce "Değiştir" butonuna bas.')
-      return
-    }
-
-    const yearFromMonth = Number(specialistMonth.slice(0, 4))
-    const fallbackYear = Number.isNaN(yearFromMonth) ? new Date().getFullYear() : yearFromMonth
+  const importSpecialistWorkLines = async () => {
+    const fallbackYear = today.getFullYear()
     const parsed = parseSpecialistWorkQuickLines(specialistWorkText, fallbackYear, data.locations)
     const issueMessages = parsed.issues.map(
       (issue) => `${issue.lineNumber}. satır: ${issue.message} (${issue.rawLine})`,
     )
-    const targetDay = specialistEditDay
+    const parsedDayKeys = Object.keys(parsed.data).sort()
 
     if (!parsed.totalNames) {
       setSpecialistWorkIssues(issueMessages)
@@ -5373,60 +5164,63 @@ function App() {
       return
     }
 
-    const selectedDayMap = parsed.data[targetDay] ?? {}
-    const skippedDayCount = Object.keys(parsed.data).filter((dayKey) => dayKey !== targetDay).length
-    if (!Object.keys(selectedDayMap).length) {
-      const warningMessages = [...issueMessages]
-      warningMessages.push(
-        `Seçili gün (${targetDay}) için satır bulunamadı. Bu gün dışındaki satırlar taslağa eklenmedi.`,
-      )
-      setSpecialistWorkIssues(warningMessages)
-      showWarning(`${targetDay} için uzman satırı yok. Taslak güncellenmedi.`)
+    if (issueMessages.length) {
+      setSpecialistWorkIssues([
+        ...issueMessages,
+        'Format uyarısı olduğu için günlük çalışma kayıtları uygulanmadı.',
+      ])
+      showWarning('Format uyarısı var. Güvenlik için günlük çalışma uzman listesi uygulanmadı.')
       return
     }
 
-    let mergedCount = 0
-    setSpecialistWorkDraft((previous) => {
-      const next = cloneSpecialistWorkDayAssignments(previous)
-      Object.entries(selectedDayMap).forEach(([locationId, specialistNames]) => {
-        const before = next[locationId] ?? []
-        const merged = uniqueSortedNames([...before, ...specialistNames])
-        mergedCount += Math.max(0, merged.length - before.length)
-        next[locationId] = merged
+    const approved = window.confirm(
+      `${parsedDayKeys.length} güne ait ${parsed.totalNames} günlük çalışma uzman kaydı mevcut kayıtlarla birleştirilecek. Onaylıyor musun?`,
+    )
+    if (!approved) {
+      setSpecialistWorkIssues(['Günlük çalışma aktarımı onaylanmadı. Kayıt yapılmadı.'])
+      showWarning('Günlük çalışma uzman aktarımı iptal edildi.')
+      return
+    }
+
+    if (!(await createPreChangeBackup('before-specialist-work-import', 'specialist-work-import', true))) {
+      return
+    }
+
+    setData((previous) => {
+      const nextWorkAssignments = { ...previous.specialistWorkAssignments }
+      parsedDayKeys.forEach((dayKey) => {
+        const currentDayMap = cloneSpecialistWorkDayAssignments(nextWorkAssignments[dayKey])
+        Object.entries(parsed.data[dayKey] ?? {}).forEach(([locationId, specialistNames]) => {
+          currentDayMap[locationId] = uniqueSortedNames([
+            ...(currentDayMap[locationId] ?? []),
+            ...specialistNames,
+          ])
+        })
+
+        if (Object.keys(currentDayMap).length) {
+          nextWorkAssignments[dayKey] = currentDayMap
+        } else {
+          delete nextWorkAssignments[dayKey]
+        }
       })
-      return next
+
+      return {
+        ...previous,
+        specialistWorkAssignments: nextWorkAssignments,
+      }
     })
 
-    const nextIssues = [...issueMessages]
-    if (skippedDayCount > 0) {
-      nextIssues.push(
-        `${skippedDayCount} farklı güne ait satır seçili gün (${targetDay}) dışında kaldığı için atlandı.`,
-      )
-    }
-
-    if (nextIssues.length) {
-      showWarning(`${mergedCount} uzman taslağa eklendi. ${nextIssues.length} uyarı var.`)
-    } else {
-      showSuccess(`${mergedCount} uzman ${targetDay} taslağına eklendi.`)
-    }
-
-    setSpecialistWorkIssues(nextIssues)
+    setSpecialistWorkIssues([])
     setSpecialistWorkText('')
+    showSuccess(`${parsedDayKeys.length} güne ait ${parsed.totalNames} günlük çalışma uzman kaydı uygulandı.`)
   }
 
   const importSpecialistDutyLines = async () => {
-    if (!specialistDateEditMode) {
-      showWarning('Nöbetçi uzman verisi düzenlemek için önce "Değiştir" butonuna bas.')
-      return
-    }
-
-    const yearFromMonth = Number(specialistMonth.slice(0, 4))
-    const fallbackYear = Number.isNaN(yearFromMonth) ? new Date().getFullYear() : yearFromMonth
+    const fallbackYear = today.getFullYear()
     const parsed = parseSpecialistDutyQuickLines(specialistDutyText, fallbackYear)
     const issueMessages = parsed.issues.map(
       (issue) => `${issue.lineNumber}. satır: ${issue.message} (${issue.rawLine})`,
     )
-    const targetDay = specialistEditDay
     const parsedDayKeys = Object.keys(parsed.data).sort()
 
     if (!parsed.totalNames) {
@@ -5437,139 +5231,48 @@ function App() {
       return
     }
 
-    const hasMultipleDays = parsedDayKeys.some((dayKey) => dayKey !== targetDay)
-    if (hasMultipleDays) {
-      if (issueMessages.length) {
-        setSpecialistDutyIssues([
-          ...issueMessages,
-          'Çok günlük nöbetçi uzman aktarımında uyarı olduğu için hiçbir kayıt eklenmedi.',
-        ])
-        showWarning('Format uyarısı var. Güvenlik için çok günlük nöbetçi uzman listesi uygulanmadı.')
-        return
-      }
+    if (issueMessages.length) {
+      setSpecialistDutyIssues([
+        ...issueMessages,
+        'Format uyarısı olduğu için nöbetçi uzman kayıtları uygulanmadı.',
+      ])
+      showWarning('Format uyarısı var. Güvenlik için nöbetçi uzman listesi uygulanmadı.')
+      return
+    }
 
-      const approved = window.confirm(
-        `${parsedDayKeys.length} güne ait ${parsed.totalNames} nöbetçi uzman kaydı uygulanacak. Bu günlerdeki eski nöbetçi uzman kayıtları yeni listeyle değiştirilsin mi?`,
-      )
-      if (!approved) {
-        setSpecialistDutyIssues(['Çok günlük aktarım onaylanmadı. Kayıt yapılmadı.'])
-        showWarning('Çok günlük nöbetçi uzman aktarımı iptal edildi.')
-        return
-      }
-      if (!(await createPreChangeBackup(`before-specialist-duty-import-${specialistMonth}`, 'specialist-duty-import', true))) {
-        return
-      }
+    const approved = window.confirm(
+      `${parsedDayKeys.length} güne ait ${parsed.totalNames} nöbetçi uzman kaydı uygulanacak. Bu günlerdeki eski nöbetçi uzman kayıtları yeni listeyle değiştirilsin mi?`,
+    )
+    if (!approved) {
+      setSpecialistDutyIssues(['Nöbetçi uzman aktarımı onaylanmadı. Kayıt yapılmadı.'])
+      showWarning('Nöbetçi uzman aktarımı iptal edildi.')
+      return
+    }
 
-      setData((previous) => {
-        const nextDutyRoster = { ...previous.specialistDutyRoster }
-        parsedDayKeys.forEach((dayKey) => {
-          const normalizedEntries = cloneSpecialistDutyDayAssignments(parsed.data[dayKey])
-          if (normalizedEntries.length) {
-            nextDutyRoster[dayKey] = normalizedEntries
-          } else {
-            delete nextDutyRoster[dayKey]
-          }
-        })
+    if (!(await createPreChangeBackup('before-specialist-duty-import', 'specialist-duty-import', true))) {
+      return
+    }
 
-        return {
-          ...previous,
-          specialistDutyRoster: nextDutyRoster,
+    setData((previous) => {
+      const nextDutyRoster = { ...previous.specialistDutyRoster }
+      parsedDayKeys.forEach((dayKey) => {
+        const normalizedEntries = cloneSpecialistDutyDayAssignments(parsed.data[dayKey])
+        if (normalizedEntries.length) {
+          nextDutyRoster[dayKey] = normalizedEntries
+        } else {
+          delete nextDutyRoster[dayKey]
         }
       })
 
-      setSpecialistWorkDraft({})
-      setSpecialistDutyDraft([])
-      setSpecialistWorkText('')
-      setSpecialistDutyText('')
-      setSpecialistWorkIssues([])
-      setSpecialistDutyIssues([])
-      setSpecialistDateEditMode(false)
-      showSuccess(`${parsedDayKeys.length} güne ait ${parsed.totalNames} nöbetçi uzman kaydı uygulandı.`)
-      return
-    }
-
-    const selectedDayEntries = parsed.data[targetDay] ?? []
-    const skippedDayCount = Object.keys(parsed.data).filter((dayKey) => dayKey !== targetDay).length
-    if (!selectedDayEntries.length) {
-      const warningMessages = [...issueMessages]
-      warningMessages.push(
-        `Seçili gün (${targetDay}) için satır bulunamadı. Bu gün dışındaki satırlar taslağa eklenmedi.`,
-      )
-      setSpecialistDutyIssues(warningMessages)
-      showWarning(`${targetDay} için nöbetçi uzman satırı yok. Taslak güncellenmedi.`)
-      return
-    }
-
-    let mergedCount = 0
-    setSpecialistDutyDraft((previous) => {
-      const beforeCount = previous.length
-      const merged = uniqueSpecialistDutyAssignments([...previous, ...selectedDayEntries])
-      mergedCount = Math.max(0, merged.length - beforeCount)
-      return merged
+      return {
+        ...previous,
+        specialistDutyRoster: nextDutyRoster,
+      }
     })
 
-    const nextIssues = [...issueMessages]
-    if (skippedDayCount > 0) {
-      nextIssues.push(
-        `${skippedDayCount} farklı güne ait satır seçili gün (${targetDay}) dışında kaldığı için atlandı.`,
-      )
-    }
-
-    if (nextIssues.length) {
-      showWarning(`${mergedCount} nöbetçi uzman taslağa eklendi. ${nextIssues.length} uyarı var.`)
-    } else {
-      showSuccess(`${mergedCount} nöbetçi uzman ${targetDay} taslağına eklendi.`)
-    }
-
-    setSpecialistDutyIssues(nextIssues)
+    setSpecialistDutyIssues([])
     setSpecialistDutyText('')
-  }
-
-  const removeSpecialistWorkAssignment = (
-    dayKey: string,
-    locationId: string,
-    specialistName: string,
-  ) => {
-    if (!specialistDateEditMode || dayKey !== specialistEditDay) {
-      showWarning('Silmek için önce Değiştir ile bu günü düzenlemeye aç.')
-      return
-    }
-
-    setSpecialistWorkDraft((previous) => {
-      const currentNames = previous[locationId] ?? []
-      if (!currentNames.includes(specialistName)) {
-        return previous
-      }
-
-      const nextNames = currentNames.filter((name) => name !== specialistName)
-      const next = { ...previous }
-      if (nextNames.length) {
-        next[locationId] = nextNames
-      } else {
-        delete next[locationId]
-      }
-      return next
-    })
-    showSuccess(`${specialistName} uzman taslaktan çıkarıldı.`)
-  }
-
-  const removeSpecialistDutyAssignment = (
-    dayKey: string,
-    site: SpecialistDutySite,
-    specialistName: string,
-  ) => {
-    if (!specialistDateEditMode || dayKey !== specialistEditDay) {
-      showWarning('Silmek için önce Değiştir ile bu günü düzenlemeye aç.')
-      return
-    }
-
-    setSpecialistDutyDraft((previous) => {
-      const next = previous.filter(
-        (entry) => !(entry.site === site && entry.name === specialistName),
-      )
-      return next.length === previous.length ? previous : next
-    })
-    showSuccess(`${specialistName} nöbetçi uzman taslaktan çıkarıldı.`)
+    showSuccess(`${parsedDayKeys.length} güne ait ${parsed.totalNames} nöbetçi uzman kaydı uygulandı.`)
   }
 
   const startPlannerDayEdit = (dayKey: string) => {
@@ -6314,64 +6017,6 @@ function App() {
       roomAssignmentBlocked: !isRoomAssignableDay(date),
     }
   }, [activePlannerDay])
-  const specialistPreviewGroups = useMemo(() => {
-    if (!specialistDay) {
-      return [] as Array<[string, WorkLocation[]]>
-    }
-    const dayLocations = getLocationsForDay(data, specialistDay).filter(
-      (location) => location.kind === 'normal',
-    )
-    return groupBySite(dayLocations, specialistDay)
-  }, [data, groupBySite, specialistDay])
-  const specialistWorkPreviewMap = useMemo<SpecialistWorkDayAssignments>(() => {
-    if (specialistDateEditMode && specialistDay === specialistEditDay) {
-      return specialistWorkDraft
-    }
-    return cloneSpecialistWorkDayAssignments(data.specialistWorkAssignments[specialistDay])
-  }, [
-    data.specialistWorkAssignments,
-    specialistDateEditMode,
-    specialistDay,
-    specialistEditDay,
-    specialistWorkDraft,
-  ])
-  const specialistDutyPreviewEntries = useMemo<SpecialistDutyAssignment[]>(() => {
-    if (specialistDateEditMode && specialistDay === specialistEditDay) {
-      return specialistDutyDraft
-    }
-    return cloneSpecialistDutyDayAssignments(data.specialistDutyRoster[specialistDay])
-  }, [
-    data.specialistDutyRoster,
-    specialistDateEditMode,
-    specialistDay,
-    specialistEditDay,
-    specialistDutyDraft,
-  ])
-  const specialistDutyPreviewBySite = useMemo(() => {
-    const bySite: Record<SpecialistDutySite, string[]> = {
-      Sancaktepe: [],
-      Çekmeköy: [],
-      'Feriha C123': [],
-      'Feriha C456': [],
-      'Feriha G123': [],
-    }
-
-    sortSpecialistDutyAssignments(specialistDutyPreviewEntries).forEach((entry) => {
-      bySite[entry.site].push(entry.name)
-    })
-    return bySite
-  }, [specialistDutyPreviewEntries])
-  const specialistPreviewDayLabel = useMemo(() => {
-    if (!specialistDay) {
-      return 'Tarih seçilmedi'
-    }
-    return fromISODate(specialistDay).toLocaleDateString('tr-TR', {
-      day: '2-digit',
-      month: '2-digit',
-      weekday: 'long',
-    })
-  }, [specialistDay])
-
   const plannerWeeklyExportDays = useMemo<WeeklyRotaExportDay[]>(() => {
     const fullWeek = buildWeek(plannerWeeklyExportWeekStartISO)
     const workingDays = fullWeek.filter((day) => isRoomAssignableDay(fromISODate(day.key)))
@@ -8031,111 +7676,18 @@ function App() {
               <p className="subtext">
                 Uzmanları kullanıcıya çevirmeden metinsel planlama verisi olarak kaydedebilirsin.
                 1. kutu oda uzmanları (günlük çalışma), 2. kutu nöbetçi uzmanlar içindir.
+                Tarih seçimi gerekmez; her satırda yazan tarih esas alınır.
               </p>
-
-              <div className="form-row specialist-date-edit-row">
-                <select
-                  className="my-calendar-month-select"
-                  value={specialistMonth}
-                  onChange={(event) => {
-                    if (specialistDateEditMode) {
-                      showWarning('Tarihi değiştirmek için önce uzman düzenlemesini Kaydet veya İptal et.')
-                      return
-                    }
-                    const nextMonth = event.target.value
-                    if (!isValidMonthISO(nextMonth)) {
-                      return
-                    }
-                    setSpecialistMonth(nextMonth)
-                    const monthDays = listMonthDays(nextMonth)
-                    if (!monthDays.includes(specialistDay)) {
-                      setSpecialistDay(monthDays[0] ?? '')
-                    }
-                  }}
-                >
-                  {specialistMonthOptions.map((option) => (
-                    <option key={`specialist-month-${option.value}`} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-                {!specialistDateEditMode ? (
-                  <button type="button" className="secondary" onClick={startSpecialistDateEdit}>
-                    Değiştir
-                  </button>
-                ) : null}
-                {specialistDateEditMode ? (
-                  <button type="button" className="secondary" onClick={saveSpecialistDateEdit}>
-                    Kaydet
-                  </button>
-                ) : null}
-                {specialistDateEditMode ? (
-                  <button type="button" className="ghost-button" onClick={cancelSpecialistDateEdit}>
-                    İptal
-                  </button>
-                ) : null}
-              </div>
-              {specialistDateEditMode ? (
-                <p className="hint-text planner-hint">
-                  Düzenleme açık: <strong>{specialistEditDay}</strong> günü için yapılan değişiklikler taslaktadır.
-                  Kaydet dediğinde onay sorulur; Hayır dersen taslak korunur, İptal dersen taslak silinir.
-                </p>
-              ) : null}
-
-              <div className="planner-day-tabs specialist-week-tabs">
-                {specialistWeekGroups.map((group) => (
-                  <button
-                    key={`specialist-week-${group.weekStartISO}`}
-                    type="button"
-                    className={activeSpecialistWeek === group.weekStartISO ? 'active' : ''}
-                    disabled={specialistDateEditMode}
-                    onClick={() => {
-                      if (specialistDateEditMode) {
-                        return
-                      }
-                      setActiveSpecialistWeek(group.weekStartISO)
-                      const firstDay = group.days[0]?.key
-                      if (firstDay) {
-                        setSpecialistDay(firstDay)
-                      }
-                    }}
-                  >
-                    {group.label}
-                  </button>
-                ))}
-              </div>
-
-              <div className="planner-day-tabs specialist-day-tabs">
-                {specialistActiveWeekDays.map((day) => (
-                  <button
-                    key={`specialist-day-tab-${day.key}`}
-                    type="button"
-                    className={specialistDay === day.key ? 'active' : ''}
-                    disabled={specialistDateEditMode}
-                    onClick={() => {
-                      if (specialistDateEditMode) {
-                        return
-                      }
-                      setSpecialistDay(day.key)
-                    }}
-                  >
-                    <span className="planner-month-tab-date">{day.shortLabel}</span>
-                    <span className="planner-month-tab-weekday">
-                      {fromISODate(day.key).toLocaleDateString('tr-TR', { weekday: 'short' }).replace('.', '')}
-                    </span>
-                  </button>
-                ))}
-              </div>
 
               <article className="specialist-input-card">
                 <h3>Günlük Çalışma</h3>
                 <p className="subtext">
                   Yapıştırma formatı: <code>Tarih - Uzman Adı - Alan</code>. Aynı uzman aynı gün farklı
-                  odalara yazılabilir; aynı odada birden fazla uzman da olabilir.
+                  odalara yazılabilir; aynı odada birden fazla uzman da olabilir. Farklı haftaların veya
+                  ayların satırlarını aynı kutuya ekleyebilirsin.
                 </p>
                 <textarea
                   value={specialistWorkText}
-                  disabled={!specialistDateEditMode}
                   onChange={(event) => setSpecialistWorkText(event.target.value)}
                   placeholder={
                     '27 Nisan 2026 - Sami Yarkın Sözüer - Sancaktepe Ameliyathane 1\n' +
@@ -8147,7 +7699,7 @@ function App() {
                   <button
                     type="button"
                     className="secondary"
-                    disabled={!specialistDateEditMode}
+                    disabled={!specialistWorkText.trim()}
                     onClick={importSpecialistWorkLines}
                   >
                     Günlük Çalışmayı Kaydet
@@ -8166,49 +7718,6 @@ function App() {
                 ) : null}
               </article>
 
-              <section className="specialist-preview-board">
-                <h3>{specialistPreviewDayLabel} Uzman Önizlemesi</h3>
-                <div className="specialist-preview-grid">
-                  {specialistPreviewGroups.map(([siteName, locations]) => (
-                    <article key={`specialist-preview-${siteName}`} className="site-block specialist-preview-site">
-                      <h4>{siteName}</h4>
-                      {locations.map((location) => {
-                        const specialists = uniqueSortedNames(specialistWorkPreviewMap[location.id] ?? [])
-                        return (
-                          <div key={`specialist-preview-row-${location.id}`} className="specialist-preview-row">
-                            <strong>{location.name}</strong>
-                            <div className="chip-wrap">
-                              {specialists.length ? (
-                                specialists.map((specialistName) => (
-                                  <button
-                                    key={`specialist-preview-chip-${location.id}-${specialistName}`}
-                                    type="button"
-                                    className="chip removable"
-                                    title="Uzmanı kaldır"
-                                    disabled={!specialistDateEditMode || specialistDay !== specialistEditDay}
-                                    onClick={() =>
-                                      removeSpecialistWorkAssignment(
-                                        specialistDay,
-                                        location.id,
-                                        specialistName,
-                                      )
-                                    }
-                                  >
-                                    {specialistName}
-                                  </button>
-                                ))
-                              ) : (
-                                <span className="empty">Uzman yok</span>
-                              )}
-                            </div>
-                          </div>
-                        )
-                      })}
-                    </article>
-                  ))}
-                </div>
-              </section>
-
               <article className="specialist-input-card">
                 <h3>Nöbetçi Uzmanlar</h3>
                 <p className="subtext">
@@ -8218,7 +7727,6 @@ function App() {
                 </p>
                 <textarea
                   value={specialistDutyText}
-                  disabled={!specialistDateEditMode}
                   onChange={(event) => setSpecialistDutyText(event.target.value)}
                   placeholder={
                     '1 Nisan 2026 - Sami Yarkın Sözüer - Sancaktepe\n' +
@@ -8232,7 +7740,7 @@ function App() {
                   <button
                     type="button"
                     className="secondary"
-                    disabled={!specialistDateEditMode}
+                    disabled={!specialistDutyText.trim()}
                     onClick={importSpecialistDutyLines}
                   >
                     Nöbetçi Uzmanları Kaydet
@@ -8249,38 +7757,6 @@ function App() {
                     </ul>
                   </article>
                 ) : null}
-
-                <div className="specialist-duty-preview">
-                  {SPECIALIST_DUTY_SITES.map((site) => (
-                    <article key={`specialist-duty-preview-${site}`} className="specialist-duty-preview-item">
-                      <h4>{SPECIALIST_DUTY_SITE_LABELS[site]}</h4>
-                      <div className="chip-wrap">
-                        {specialistDutyPreviewBySite[site].length ? (
-                          specialistDutyPreviewBySite[site].map((specialistName) => (
-                            <button
-                              key={`specialist-duty-preview-name-${site}-${specialistName}`}
-                              type="button"
-                              className="chip removable"
-                              title="Nöbetçi uzmanı kaldır"
-                              disabled={!specialistDateEditMode || specialistDay !== specialistEditDay}
-                              onClick={() =>
-                                removeSpecialistDutyAssignment(
-                                  specialistDay,
-                                  site,
-                                  specialistName,
-                                )
-                              }
-                            >
-                              {specialistName}
-                            </button>
-                          ))
-                        ) : (
-                          <span className="empty">Kayıt yok</span>
-                        )}
-                      </div>
-                    </article>
-                  ))}
-                </div>
               </article>
             </section>
           ) : null}
