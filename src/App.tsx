@@ -659,39 +659,6 @@ function isRoomAssignableDay(date: Date): boolean {
   return !isFullNonWorkingDay(date)
 }
 
-function getScheduledWorkHoursForDay(date: Date): number {
-  if (isWeekend(date)) {
-    return 0
-  }
-  if (isHalfDayOfficialHoliday(date)) {
-    return 4
-  }
-  if (isFullOfficialHoliday(date)) {
-    return 0
-  }
-  return 8
-}
-
-function calculateDutyOvertimeHoursForDay(dutyDate: Date): number {
-  const dutyHours = 24
-  const dutyDayWorkHours = getScheduledWorkHoursForDay(dutyDate)
-  const nextDayWorkHours = getScheduledWorkHoursForDay(addDays(dutyDate, 1))
-  const hasDutyDayWork = dutyDayWorkHours > 0
-  const hasNextDayWork = nextDayWorkHours > 0
-
-  if (!hasDutyDayWork && !hasNextDayWork) {
-    return dutyHours
-  }
-  if (!hasDutyDayWork) {
-    return Math.max(0, dutyHours - nextDayWorkHours)
-  }
-  if (!hasNextDayWork) {
-    return Math.max(0, dutyHours - dutyDayWorkHours)
-  }
-
-  return Math.max(0, dutyHours - dutyDayWorkHours - nextDayWorkHours)
-}
-
 function startOfISOWeek(date: Date): Date {
   const current = new Date(date.getFullYear(), date.getMonth(), date.getDate())
   const day = current.getDay() === 0 ? 7 : current.getDay()
@@ -5910,20 +5877,6 @@ function App() {
   }, [data.assistantRanks, data.dutyRoster, data.specialistDutyRoster, observerWeekDutySite, observerWeeklyDays])
 
   const loggedAssistantName = session?.role === 'assistant' ? session.assistantName ?? '' : ''
-  const myWeekAssignments = useMemo(() => {
-    if (!loggedAssistantName) {
-      return []
-    }
-
-    return weekDays.map((day) => {
-      const locations = sortedLocations.filter((location) =>
-        getAssignmentsForLocation(data, day.key, location).includes(loggedAssistantName),
-      )
-      const dayTypeLabel = getDayTypeLabel(day.key)
-      return { day, locations, dayTypeLabel }
-    })
-  }, [data, loggedAssistantName, sortedLocations, weekDays])
-
   const myWeeklyBriefDays = useMemo<MyWeeklyBriefDay[]>(() => {
     if (!loggedAssistantName) {
       return []
@@ -5992,48 +5945,6 @@ function App() {
     }
     return `${formatDayMonthLabel(firstDay)} - ${formatDayMonthLabel(lastDay)}`
   }, [weekDays])
-
-  const myMonthlyDuties = useMemo(() => {
-    if (!loggedAssistantName) {
-      return []
-    }
-
-    return listMonthDays(observerMonth)
-      .map((dayKey) => {
-        const duty = (data.dutyRoster[dayKey] ?? []).find((entry) => entry.name === loggedAssistantName)
-        return duty ? { dayKey, site: duty.site } : null
-      })
-      .filter((item): item is { dayKey: string; site: DutySite } => Boolean(item))
-  }, [data.dutyRoster, loggedAssistantName, observerMonth])
-
-  const myWeeklyActiveDayCount = useMemo(
-    () =>
-      myWeekAssignments.filter((day) =>
-        day.locations.some((location) => location.kind === 'normal' || location.kind === 'duty'),
-      ).length,
-    [myWeekAssignments],
-  )
-
-  const myMonthlyDutyCount = myMonthlyDuties.length
-  const myMonthlyDutyBySite = useMemo(() => {
-    const counts: Record<DutySite, number> = {
-      Sancaktepe: 0,
-      'Feriha Öz': 0,
-      Çekmeköy: 0,
-    }
-    myMonthlyDuties.forEach((duty) => {
-      counts[duty.site] += 1
-    })
-    return counts
-  }, [myMonthlyDuties])
-  const myMonthlyOvertimeHours = useMemo(
-    () =>
-      myMonthlyDuties.reduce(
-        (total, duty) => total + calculateDutyOvertimeHoursForDay(fromISODate(duty.dayKey)),
-        0,
-      ),
-    [myMonthlyDuties],
-  )
 
   const assistantTableMonthTitle = useMemo(() => {
     const [yearRaw, monthRaw] = assistantTableMonthActive.split('-')
@@ -8200,24 +8111,6 @@ function App() {
                 tablolarını ayrı sayfada hızlıca açmasını sağlar.
               </p>
 
-              <div className="my-summary-grid">
-                <article className="my-summary-card">
-                  <span>Bu Hafta Aktif Gün</span>
-                  <strong>{myWeeklyActiveDayCount}</strong>
-                </article>
-                <article className="my-summary-card">
-                  <span>Bu Ay Toplam Nöbet</span>
-                  <strong>{myMonthlyDutyCount}</strong>
-                </article>
-                <article className="my-summary-card">
-                  <span>Nöbet Dağılımı</span>
-                  <strong>
-                    S:{myMonthlyDutyBySite.Sancaktepe} F:{myMonthlyDutyBySite['Feriha Öz']} Ç:
-                    {myMonthlyDutyBySite['Çekmeköy']} | FM: {myMonthlyOvertimeHours} saat
-                  </strong>
-                </article>
-              </div>
-
               <article className="weekly-brief-card">
                 <header>
                   <div>
@@ -8263,7 +8156,9 @@ function App() {
                           {briefDay.dutyInfo ? (
                             <div className="weekly-brief-duty-block">
                               <div className="weekly-brief-line">
-                                <span className="brief-label">Aynı gün</span>
+                                <span className="brief-label">
+                                  {briefDay.normalAssignments.length ? 'Aynı gün' : 'O gün'}
+                                </span>
                                 <span className="brief-chip duty-chip">
                                   {briefDay.dutyInfo.site} nöbetçisin
                                 </span>
