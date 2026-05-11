@@ -2587,6 +2587,11 @@ body.table-pan-unlocked .assistant-monthly-calendar-scroll {
   color: #213f35;
 }
 
+.fallback-location-chip {
+  border-color: rgba(47, 143, 115, 0.46);
+  background: linear-gradient(135deg, rgba(220, 246, 234, 0.98), rgba(255, 252, 241, 0.98));
+}
+
 .specialist-chip {
   border: 1px solid rgba(177, 122, 67, 0.42);
   background: linear-gradient(135deg, rgba(255, 239, 211, 0.96), rgba(255, 252, 246, 0.96));

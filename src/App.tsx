@@ -134,6 +134,7 @@ interface MyWeeklyBriefNormalAssignment {
   id: string
   label: string
   specialists: string[]
+  source?: 'assigned' | 'own-room-fallback'
 }
 
 interface MyWeeklyBriefDutyInfo {
@@ -2692,7 +2693,17 @@ function App() {
   const [plannerDraftAssignments, setPlannerDraftAssignments] = useState<ManualAssignments>({})
   const [plannerEditModes, setPlannerEditModes] = useState<Record<string, boolean>>({})
 
-  const weekDays = useMemo(() => buildWeek(currentWeekStartISO), [currentWeekStartISO])
+  const myWeeklyBriefWeekStartISO = useMemo(() => {
+    const currentDayIndex = today.getDay()
+    const shouldPreviewNextWeek = currentDayIndex === 0 || currentDayIndex === 6
+    return shouldPreviewNextWeek
+      ? toISODate(addDays(fromISODate(currentWeekStartISO), 7))
+      : currentWeekStartISO
+  }, [currentWeekStartISO, today])
+  const myWeeklyBriefWeekDays = useMemo(
+    () => buildWeek(myWeeklyBriefWeekStartISO),
+    [myWeeklyBriefWeekStartISO],
+  )
   const plannerMonthDays = useMemo(() => listMonthDays(plannerMonth), [plannerMonth])
   const dutyMonthDays = useMemo(() => listMonthDays(dutyMonth), [dutyMonth])
   const observerRollingWeekOptions = useMemo(
@@ -5882,7 +5893,7 @@ function App() {
       return []
     }
 
-    return weekDays.map((day) => {
+    return myWeeklyBriefWeekDays.map((day) => {
       const assignedLocations = sortedLocations.filter((location) =>
         getAssignmentsForLocation(data, day.key, location).includes(loggedAssistantName),
       )
@@ -5892,6 +5903,7 @@ function App() {
           id: location.id,
           label: `${location.site} / ${location.name}`,
           specialists: getSpecialistNamesForLocation(data, day.key, location),
+          source: 'assigned' as const,
         }))
       const leaveLabels = assignedLocations
         .filter((location) => location.kind === 'leave')
@@ -5918,11 +5930,49 @@ function App() {
       const postDutySite =
         (data.dutyRoster[previousDayKey] ?? []).find((entry) => entry.name === loggedAssistantName)?.site ??
         null
+      const ownersForDay = getLocationOwnersForDay(data, day.key)
+      const canUseOwnRoomFallback =
+        !normalAssignments.length &&
+        !leaveLabels.length &&
+        !postDutySite &&
+        isRoomAssignableDay(fromISODate(day.key))
+      const ownRoomFallbackAssignments = canUseOwnRoomFallback
+        ? sortedLocations
+            .filter((location) => {
+              if (location.kind !== 'normal') {
+                return false
+              }
+              if (!isLocationActiveOnDay(location, day.key)) {
+                return false
+              }
+              if (!(ownersForDay[location.id] ?? []).includes(loggedAssistantName)) {
+                return false
+              }
+
+              const ownRoomAssignments = getAssignmentsForLocation(data, day.key, location)
+              if (ownRoomAssignments.length) {
+                return false
+              }
+
+              return sortedLocations.some(
+                (siteLocation) =>
+                  siteLocation.kind === 'normal' &&
+                  siteLocation.site === location.site &&
+                  getAssignmentsForLocation(data, day.key, siteLocation).length > 0,
+              )
+            })
+            .map((location) => ({
+              id: location.id,
+              label: `${location.site} / ${location.name}`,
+              specialists: getSpecialistNamesForLocation(data, day.key, location),
+              source: 'own-room-fallback' as const,
+            }))
+        : []
 
       return {
         day,
         weekdayLabel: fromISODate(day.key).toLocaleDateString('tr-TR', { weekday: 'long' }),
-        normalAssignments,
+        normalAssignments: normalAssignments.length ? normalAssignments : ownRoomFallbackAssignments,
         leaveLabels,
         postDutySite,
         dutyInfo,
@@ -5933,18 +5983,21 @@ function App() {
     data,
     getSpecialistNamesForLocation,
     loggedAssistantName,
+    myWeeklyBriefWeekDays,
     sortedLocations,
-    weekDays,
   ])
 
   const myWeeklyBriefRangeLabel = useMemo(() => {
-    const firstDay = weekDays[0]?.key
-    const lastDay = weekDays[6]?.key
+    const firstDay = myWeeklyBriefWeekDays[0]?.key
+    const lastDay = myWeeklyBriefWeekDays[6]?.key
     if (!firstDay || !lastDay) {
       return 'Bu hafta'
     }
     return `${formatDayMonthLabel(firstDay)} - ${formatDayMonthLabel(lastDay)}`
-  }, [weekDays])
+  }, [myWeeklyBriefWeekDays])
+
+  const myWeeklyBriefPeriodLabel =
+    myWeeklyBriefWeekStartISO === currentWeekStartISO ? 'bu hafta' : 'gelecek hafta'
 
   const assistantTableMonthTitle = useMemo(() => {
     const [yearRaw, monthRaw] = assistantTableMonthActive.split('-')
@@ -8115,7 +8168,7 @@ function App() {
                 <header>
                   <div>
                     <span>Bu Haftanın Özeti</span>
-                    <h3>Sayın {loggedAssistantName || 'Asistan'}, bu hafta planın</h3>
+                    <h3>Sayın {loggedAssistantName || 'Asistan'}, {myWeeklyBriefPeriodLabel} planın</h3>
                   </div>
                   <small>{myWeeklyBriefRangeLabel}</small>
                 </header>
@@ -8139,7 +8192,13 @@ function App() {
                           {briefDay.normalAssignments.map((assignment) => (
                             <div key={`${briefDay.day.key}-${assignment.id}`} className="weekly-brief-line">
                               <span className="brief-label">Çalışma yerin</span>
-                              <span className="brief-chip location-chip">{assignment.label}</span>
+                              <span
+                                className={`brief-chip location-chip${
+                                  assignment.source === 'own-room-fallback' ? ' fallback-location-chip' : ''
+                                }`}
+                              >
+                                {assignment.label}
+                              </span>
                               {assignment.specialists.length ? (
                                 <>
                                   <span className="brief-label">Uzmanın</span>
