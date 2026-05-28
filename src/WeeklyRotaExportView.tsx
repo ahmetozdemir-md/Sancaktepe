@@ -29,6 +29,7 @@ interface WeeklyRotaExportViewProps {
   weekRangeLabel: string
   days: WeeklyRotaExportDay[]
   groups: WeeklyRotaExportGroup[]
+  closeLabel?: string
   onClose: () => void
   onPrevWeek: () => void
   onNextWeek: () => void
@@ -40,6 +41,7 @@ function WeeklyRotaExportView({
   weekRangeLabel,
   days,
   groups,
+  closeLabel = 'Planlamaya Dön',
   onClose,
   onPrevWeek,
   onNextWeek,
@@ -50,7 +52,7 @@ function WeeklyRotaExportView({
       <div className="weekly-export-toolbar no-print">
         <div className="weekly-export-toolbar-group">
           <button type="button" className="ghost-button" onClick={onClose}>
-            Planlamaya Dön
+            {closeLabel}
           </button>
           <button type="button" className="ghost-button" onClick={onPrevWeek}>
             Önceki Hafta

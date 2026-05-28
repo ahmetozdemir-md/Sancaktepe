@@ -2674,6 +2674,8 @@ function App() {
   const [assistantTableMonthDraft, setAssistantTableMonthDraft] = useState(currentMonthISO)
   const [assistantTableMonthActive, setAssistantTableMonthActive] = useState(currentMonthISO)
   const [assistantMonthlyTableOpen, setAssistantMonthlyTableOpen] = useState(false)
+  const [assistantWeeklyExportOpen, setAssistantWeeklyExportOpen] = useState(false)
+  const [assistantWeeklyExportWeekDraft, setAssistantWeeklyExportWeekDraft] = useState(currentWeekStartISO)
   const [observerDutyMonthDraft, setObserverDutyMonthDraft] = useState(currentMonthISO)
   const [observerDutyMonthActive, setObserverDutyMonthActive] = useState(currentMonthISO)
   const [observerDutyListOpen, setObserverDutyListOpen] = useState(false)
@@ -2927,7 +2929,8 @@ function App() {
   )
   const isTableLikeFullscreenOpen =
     (session?.role === 'admin' && plannerWeeklyExportOpen) ||
-    (session?.role === 'assistant' && (assistantMonthlyTableOpen || observerDutyListOpen))
+    (session?.role === 'assistant' &&
+      (assistantMonthlyTableOpen || assistantWeeklyExportOpen || observerDutyListOpen))
   const adminBlockRemainingMs = Math.max(0, adminLoginGuard.blockedUntil - blockClockMs)
   const isSecureCloudWriteUnlocked = !isSupabaseAdminAuthRequired || isAdminCloudAuthVerified
 
@@ -4113,6 +4116,59 @@ function App() {
     setOwnersMonth(shiftMonthISO(ownersMonth, delta))
   }
 
+  const copyPreviousOwnersMonth = async () => {
+    if (ownersEditMode) {
+      showWarning('Geçen ayı kopyalamak için önce Kaydet veya İptal etmelisin.')
+      return
+    }
+    if (!isValidMonthISO(ownersMonth)) {
+      showWarning('Kopyalama için geçerli bir ay seçmelisin.')
+      return
+    }
+
+    const sourceMonth = shiftMonthISO(ownersMonth, -1)
+    const hasSourceOwners = Object.prototype.hasOwnProperty.call(data.locationOwnersByMonth, sourceMonth)
+    const hasSourcePostDutyPool = Object.prototype.hasOwnProperty.call(data.postDutyPoolByMonth, sourceMonth)
+    if (!hasSourceOwners && !hasSourcePostDutyPool) {
+      showWarning(`${sourceMonth} ayına ait kopyalanacak oda asistanı veya nöbet ertesici kaydı yok.`)
+      return
+    }
+
+    if (!(await createPreChangeBackup(`before-owners-copy-${ownersMonth}`, 'owners-copy'))) {
+      return
+    }
+
+    setData((previous) => {
+      const copiedOwners = cloneOwnersForNormalLocations(
+        getLocationOwnersForMonth(previous, sourceMonth),
+        previous.locations,
+        previous.assistants,
+      )
+      const copiedPostDutyPool = uniqueSortedNames(
+        getPostDutyPoolForMonth(previous, sourceMonth).filter((name) => previous.assistants.includes(name)),
+      )
+
+      showSuccess(`${sourceMonth} ayındaki oda asistanları ${ownersMonth} ayına kopyalandı.`)
+      return {
+        ...previous,
+        locationOwners: copiedOwners,
+        locationOwnersByMonth: {
+          ...previous.locationOwnersByMonth,
+          [ownersMonth]: copiedOwners,
+        },
+        postDutyPoolByMonth: {
+          ...previous.postDutyPoolByMonth,
+          [ownersMonth]: copiedPostDutyPool,
+        },
+      }
+    })
+
+    setOwnersWorking({})
+    setPostDutyPoolWorking([])
+    setPostDutyPoolDraft('')
+    setOwnerDrafts({})
+  }
+
   const openPlannerWeeklyExport = () => {
     const anchorDay = hasIsoShape(activePlannerDay) ? activePlannerDay : todayISO
     const weekStart = toISODate(startOfISOWeek(fromISODate(anchorDay)))
@@ -4149,6 +4205,19 @@ function App() {
 
   const closeAssistantMonthlyTable = () => {
     setAssistantMonthlyTableOpen(false)
+  }
+
+  const openAssistantWeeklyExport = () => {
+    const weekStart = hasIsoShape(assistantWeeklyExportWeekDraft)
+      ? toISODate(startOfISOWeek(fromISODate(assistantWeeklyExportWeekDraft)))
+      : currentWeekStartISO
+    setPlannerWeeklyExportWeekStartISO(weekStart)
+    setAssistantWeeklyExportOpen(true)
+  }
+
+  const closeAssistantWeeklyExport = () => {
+    setAssistantWeeklyExportWeekDraft(plannerWeeklyExportWeekStartISO)
+    setAssistantWeeklyExportOpen(false)
   }
 
   const openObserverDutyList = () => {
@@ -7044,6 +7113,25 @@ function App() {
     )
   }
 
+  if (session.role === 'assistant' && assistantWeeklyExportOpen) {
+    return (
+      <div className="page-shell weekly-export-shell">
+        <WeeklyRotaExportView
+          title="HAFTALIK ASİSTAN ÇALIŞMA LİSTESİ"
+          weekRangeLabel={plannerWeeklyExportWeekLabel}
+          days={plannerWeeklyExportDays}
+          groups={plannerWeeklyExportGroups}
+          closeLabel="Geri Dön"
+          onClose={closeAssistantWeeklyExport}
+          onPrevWeek={() => shiftPlannerWeeklyExportWeek(-1)}
+          onNextWeek={() => shiftPlannerWeeklyExportWeek(1)}
+          onPrint={() => window.print()}
+        />
+        {appFooter}
+      </div>
+    )
+  }
+
   if (session.role === 'assistant' && observerDutyListOpen) {
     return (
       <div className="page-shell weekly-export-shell">
@@ -7356,6 +7444,11 @@ function App() {
               {ownersEditMode ? (
                 <button type="button" className="ghost-button" onClick={cancelOwnersEdit}>
                   İptal
+                </button>
+              ) : null}
+              {!ownersEditMode ? (
+                <button type="button" className="ghost-button" onClick={copyPreviousOwnersMonth}>
+                  Geçen Ayı Kopyala
                 </button>
               ) : null}
             </div>
@@ -8328,6 +8421,32 @@ function App() {
                   </button>
                 </div>
               </article>
+
+              <article className="focus-location my-calendar-export-launch">
+                <h3>Haftalık Herkes</h3>
+                <p className="subtext">
+                  Haftayı seçip Görüntüle dediğinde herkesin haftalık çalışma listesi ayrı sayfada açılır.
+                </p>
+                <div className="form-row weekly-everyone-launch-row">
+                  <select
+                    className="my-calendar-month-select"
+                    value={assistantWeeklyExportWeekDraft}
+                    onChange={(event) => setAssistantWeeklyExportWeekDraft(event.target.value)}
+                  >
+                    {observerRollingWeekOptions.map((week) => (
+                      <option
+                        key={`assistant-weekly-everyone-${week.weekStartISO}`}
+                        value={week.weekStartISO}
+                      >
+                        {week.label} ({week.rangeLabel})
+                      </option>
+                    ))}
+                  </select>
+                  <button type="button" className="secondary" onClick={openAssistantWeeklyExport}>
+                    Görüntüle
+                  </button>
+                </div>
+              </article>
             </section>
           ) : null}
 
@@ -8621,6 +8740,12 @@ function App() {
                     const specialistLabel = observerDay
                       ? getSpecialistLabelForLocation(data, observerDay, location)
                       : null
+                    const dutySpecialistNames =
+                      observerDay && location.kind === 'duty'
+                        ? sortSpecialistDutyAssignments(data.specialistDutyRoster[observerDay] ?? []).map(
+                            formatSpecialistDutyLabel,
+                          )
+                        : []
 
                     return (
                       <article key={`observer-${location.id}`} className={`tile tone-${location.tone}`}>
@@ -8631,6 +8756,21 @@ function App() {
                         {specialistLabel ? (
                           <p className="tile-specialist-inline specialist-work-meta">{specialistLabel}</p>
                         ) : null}
+                        {dutySpecialistNames.length ? (
+                          <div className="daily-map-duty-specialists">
+                            <span>Nöbetçi uzmanlar</span>
+                            <div className="duty-specialist-row">
+                              {dutySpecialistNames.map((name) => (
+                                <span
+                                  key={`observer-duty-specialist-${observerDay}-${name}`}
+                                  className="duty-name-line specialist-duty-name-line"
+                                >
+                                  {name}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        ) : null}
                         <div className="chip-wrap">
                           {names.length ? (
                             names.map((name) => (
@@ -8638,6 +8778,8 @@ function App() {
                                 {name}
                               </span>
                             ))
+                          ) : dutySpecialistNames.length ? (
+                            <span className="empty">Nöbetçi asistan görünmüyor</span>
                           ) : (
                             <span className="empty">Atama yok</span>
                           )}
