@@ -2010,6 +2010,7 @@ body.table-pan-unlocked .weekly-export-table-wrap {
 .weekly-export-assistant-chip {
   display: inline-flex;
   align-items: center;
+  order: 1;
   font-size: 1.11rem;
   font-weight: 800;
   line-height: 1.15;
@@ -2028,6 +2029,7 @@ body.table-pan-unlocked .weekly-export-table-wrap {
 .weekly-export-specialist-line {
   display: block !important;
   width: 100%;
+  order: 0;
   font-size: 0.64rem !important;
   letter-spacing: 0.02em;
   color: #235544;
@@ -2041,6 +2043,7 @@ body.table-pan-unlocked .weekly-export-table-wrap {
 .weekly-export-rotator-chip {
   display: inline-flex;
   align-items: center;
+  order: 2;
   font-size: 0.88rem;
   font-weight: 900;
   line-height: 1.15;
