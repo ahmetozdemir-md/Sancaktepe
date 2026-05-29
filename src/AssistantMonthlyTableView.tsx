@@ -13,6 +13,7 @@ interface AssistantMonthlyCalendarCell {
 interface AssistantMonthlyCalendarLocationItem {
   label: string
   specialistLabel?: string | null
+  rotators?: string[]
 }
 
 interface AssistantMonthlyCalendarDayData {
@@ -149,6 +150,20 @@ function AssistantMonthlyTableView({
                             <strong className="my-calendar-specialist-label">
                               {locationItem.specialistLabel}
                             </strong>
+                          ) : null}
+                          {locationItem.rotators?.length ? (
+                            <span className="my-calendar-rotator-row">
+                              {locationItem.rotators.map((rotatorName) => (
+                                <strong
+                                  key={`assistant-table-location-${cell.key}-${locationItem.label}-rotator-${rotatorName}`}
+                                  className="my-calendar-rotator-label"
+                                >
+                                  {rotatorName === 'Gündüz rotasyoneri'
+                                    ? rotatorName
+                                    : `Rot: ${rotatorName}`}
+                                </strong>
+                              ))}
+                            </span>
                           ) : null}
                           <span>{locationItem.label}</span>
                         </span>

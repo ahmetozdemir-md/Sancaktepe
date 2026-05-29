@@ -663,6 +663,13 @@ textarea {
   border-style: dashed;
 }
 
+.chip.rotator-chip {
+  border-color: rgba(198, 139, 25, 0.5);
+  background: linear-gradient(135deg, rgba(255, 239, 160, 0.96), rgba(255, 251, 224, 0.98));
+  color: #6f4b05;
+  font-weight: 850;
+}
+
 .chip-with-meta {
   display: grid;
   gap: 0.14rem;
@@ -2031,6 +2038,21 @@ body.table-pan-unlocked .weekly-export-table-wrap {
   background: rgba(239, 250, 244, 0.78);
 }
 
+.weekly-export-rotator-chip {
+  display: inline-flex;
+  align-items: center;
+  font-size: 0.88rem;
+  font-weight: 900;
+  line-height: 1.15;
+  white-space: nowrap;
+  color: #725008;
+  border: 1px solid rgba(198, 139, 25, 0.42);
+  border-radius: 999px;
+  padding: 0.06rem 0.3rem;
+  background: linear-gradient(135deg, rgba(255, 235, 144, 0.96), rgba(255, 252, 224, 0.96));
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.82) inset, 0 4px 10px rgba(125, 83, 8, 0.08);
+}
+
 .weekly-export-empty {
   min-height: 1.1em;
   display: block;
@@ -2235,6 +2257,21 @@ body.table-pan-unlocked .assistant-monthly-calendar-scroll {
   font-size: 0.69rem;
   font-weight: 700;
   color: #366e5a;
+}
+
+.rotator-planner-row {
+  margin-top: 0.45rem;
+  padding-top: 0.48rem;
+  border-top: 1px dashed rgba(198, 139, 25, 0.26);
+}
+
+.rotator-planner-row select {
+  border-color: rgba(198, 139, 25, 0.34);
+  background: linear-gradient(135deg, rgba(255, 251, 229, 0.96), rgba(255, 255, 255, 0.94));
+}
+
+.rotator-add-button {
+  background: linear-gradient(135deg, #b37a26, #d8a23a) !important;
 }
 
 .location-row select optgroup {
@@ -2598,6 +2635,12 @@ body.table-pan-unlocked .assistant-monthly-calendar-scroll {
   color: #6b4622;
 }
 
+.brief-chip.rotator-chip {
+  border: 1px solid rgba(198, 139, 25, 0.46);
+  background: linear-gradient(135deg, rgba(255, 238, 154, 0.98), rgba(255, 252, 225, 0.98));
+  color: #6d4b06;
+}
+
 .duty-chip {
   border: 1px solid rgba(46, 112, 157, 0.42);
   background: linear-gradient(135deg, rgba(219, 241, 255, 0.98), rgba(249, 253, 255, 0.98));
@@ -2842,6 +2885,24 @@ body.table-pan-unlocked .assistant-monthly-calendar-scroll {
   font-weight: 800;
   letter-spacing: 0.01em;
   color: #2b6753;
+}
+
+.my-calendar-rotator-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.08rem;
+}
+
+.my-calendar-rotator-label {
+  display: inline-flex;
+  width: fit-content;
+  border: 1px solid rgba(198, 139, 25, 0.38);
+  border-radius: 999px;
+  padding: 0.05rem 0.3rem;
+  background: linear-gradient(135deg, rgba(255, 238, 154, 0.96), rgba(255, 252, 225, 0.98));
+  color: #6d4b06;
+  font-size: clamp(0.48rem, 0.72vw, 0.62rem);
+  font-weight: 850;
 }
 
 .tiny {
@@ -3607,6 +3668,12 @@ code {
     font-size: 0.52rem;
   }
 
+  .weekly-export-rotator-chip {
+    font-size: 0.5rem;
+    border-radius: 4px;
+    padding: 0.03rem 0.14rem;
+  }
+
   .my-calendar-duty,
   .my-calendar-post-duty {
     font-size: 0.69rem;
@@ -3812,6 +3879,12 @@ code {
     color: #000 !important;
   }
 
+  .weekly-export-rotator-chip {
+    color: #000 !important;
+    border-color: #000 !important;
+    background: #fff7c4 !important;
+  }
+
   .assistant-monthly-table-sheet {
     border: none;
     border-radius: 0;
@@ -3839,11 +3912,16 @@ code {
   .assistant-monthly-table-sheet .my-calendar-weekdays span,
   .assistant-monthly-table-sheet .my-calendar-location,
   .assistant-monthly-table-sheet .my-calendar-specialist-label,
+  .assistant-monthly-table-sheet .my-calendar-rotator-label,
   .assistant-monthly-table-sheet .my-calendar-duty,
   .assistant-monthly-table-sheet .my-calendar-post-duty,
   .assistant-monthly-table-sheet .my-calendar-holiday-reason {
     color: #000 !important;
     border-color: #000 !important;
     background: #fff !important;
+  }
+
+  .assistant-monthly-table-sheet .my-calendar-rotator-label {
+    background: #fff7c4 !important;
   }
 }

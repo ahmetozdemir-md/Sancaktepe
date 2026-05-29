@@ -49,6 +49,9 @@ type DutyRoster = Record<string, DutyAssignment[]>
 type SpecialistWorkAssignments = Record<string, Record<string, string[]>>
 type SpecialistWorkDayAssignments = Record<string, string[]>
 type SpecialistDutyRoster = Record<string, SpecialistDutyAssignment[]>
+type RotatorRoster = Record<string, string[]>
+type RotatorAssignments = Record<string, Record<string, string[]>>
+type RotatorDayAssignments = Record<string, string[]>
 type LocationOwners = Record<string, string[]>
 type LocationOwnersByMonth = Record<string, LocationOwners>
 type PostDutyPoolByMonth = Record<string, string[]>
@@ -98,6 +101,8 @@ interface PlannerState {
   dutyRoster: DutyRoster
   specialistWorkAssignments: SpecialistWorkAssignments
   specialistDutyRoster: SpecialistDutyRoster
+  rotatorRoster: RotatorRoster
+  rotatorAssignments: RotatorAssignments
   weekStartISO: string
 }
 
@@ -134,6 +139,7 @@ interface MyWeeklyBriefNormalAssignment {
   id: string
   label: string
   specialists: string[]
+  rotators: string[]
   source?: 'assigned' | 'own-room-fallback'
 }
 
@@ -298,6 +304,20 @@ const LEAVE_LOCATION_IDS = {
 const BASE_SENIORITY_LEVEL_COUNT = 4
 const LEGACY_LEAVE_LOCATION_ID = 'izinli'
 const SITE_DISPLAY_ORDER = ['Sancaktepe', 'Çekmeköy', 'Feriha Öz', 'Diğer']
+const GENERIC_DAY_ROTATOR_LABEL = 'Gündüz rotasyoneri'
+const ROTATOR_LOCATION_IDS = new Set([
+  'sancak-ybu',
+  'cekmekoy-ybu',
+  'feriha-oz-c1',
+  'feriha-oz-c2',
+  'feriha-oz-c3',
+  'feriha-oz-c4',
+  'feriha-oz-c5',
+  'feriha-oz-c6',
+  'feriha-oz-g1',
+  'feriha-oz-g2',
+  'feriha-oz-g3',
+])
 
 const LOCATION_KIND_LABELS: Record<LocationKind, string> = {
   normal: 'Normal Alan',
@@ -1164,6 +1184,37 @@ function formatSpecialistWorkLabel(names: string[]): string | null {
   return names.length ? `Uzm: ${names.join(', ')}` : null
 }
 
+function isRotatorEligibleLocation(location: WorkLocation): boolean {
+  return location.kind === 'normal' && ROTATOR_LOCATION_IDS.has(location.id)
+}
+
+function sortRotatorNames(names: string[]): string[] {
+  return uniqueSortedNames(names).sort((left, right) => {
+    if (left === GENERIC_DAY_ROTATOR_LABEL && right !== GENERIC_DAY_ROTATOR_LABEL) {
+      return 1
+    }
+    if (right === GENERIC_DAY_ROTATOR_LABEL && left !== GENERIC_DAY_ROTATOR_LABEL) {
+      return -1
+    }
+    return left.localeCompare(right, 'tr')
+  })
+}
+
+function getRotatorRosterForDay(state: PlannerState, dayKey: string): string[] {
+  return sortRotatorNames(state.rotatorRoster[dayKey] ?? [])
+}
+
+function getRotatorsForLocation(state: PlannerState, dayKey: string, location: WorkLocation): string[] {
+  if (!isRotatorEligibleLocation(location) || !isLocationActiveOnDay(location, dayKey)) {
+    return []
+  }
+  return sortRotatorNames(state.rotatorAssignments[dayKey]?.[location.id] ?? [])
+}
+
+function formatRotatorLabel(name: string): string {
+  return name === GENERIC_DAY_ROTATOR_LABEL ? name : `Rot: ${name}`
+}
+
 function getWeeklyExportUnitLabel(location: WorkLocation): string {
   const name = location.name.trim()
   const normalizedName = normalizeTrToken(name)
@@ -1913,6 +1964,62 @@ function parseSpecialistDutyQuickLines(
   return { data, issues, totalNames }
 }
 
+function parseRotatorQuickLines(
+  text: string,
+  fallbackYear: number,
+): { data: RotatorRoster; issues: SpecialistParseIssue[]; totalNames: number } {
+  const data: RotatorRoster = {}
+  const issues: SpecialistParseIssue[] = []
+
+  text
+    .split(/\r?\n/)
+    .forEach((rawLine, index) => {
+      const line = rawLine.trim()
+      if (!line) {
+        return
+      }
+
+      const strictMatch = line.match(/^(.+?)\s+-\s+(.+)$/u)
+      const looseParts = line.split('-').map((part) => part.trim()).filter(Boolean)
+      const parts =
+        strictMatch?.slice(1, 3) ??
+        (looseParts.length >= 2 ? [looseParts[0], looseParts.slice(1).join('-')] : null)
+      if (!parts) {
+        issues.push({
+          lineNumber: index + 1,
+          rawLine,
+          message: 'Biçim hatası. Örnek: 27 Nisan 2026 - Tahsin',
+        })
+        return
+      }
+
+      const dayKey = normalizeSpecialistDateToken(parts[0], fallbackYear)
+      const rotatorName = normalizeAssistantName(parts[1])
+      if (!dayKey) {
+        issues.push({
+          lineNumber: index + 1,
+          rawLine,
+          message: `Tarih çözümlenemedi (${parts[0]}).`,
+        })
+        return
+      }
+      if (!rotatorName) {
+        issues.push({
+          lineNumber: index + 1,
+          rawLine,
+          message: 'Rotasyoner adı boş veya geçersiz.',
+        })
+        return
+      }
+
+      data[dayKey] = sortRotatorNames([...(data[dayKey] ?? []), rotatorName])
+    })
+
+  const totalNames = Object.values(data).reduce((count, names) => count + names.length, 0)
+
+  return { data, issues, totalNames }
+}
+
 function cloneSpecialistWorkDayAssignments(
   assignments?: SpecialistWorkDayAssignments,
 ): SpecialistWorkDayAssignments {
@@ -1928,6 +2035,15 @@ function cloneSpecialistDutyDayAssignments(
   assignments?: SpecialistDutyAssignment[],
 ): SpecialistDutyAssignment[] {
   return uniqueSpecialistDutyAssignments(assignments ?? []).map((entry) => ({ ...entry }))
+}
+
+function cloneRotatorDayAssignments(assignments?: RotatorDayAssignments): RotatorDayAssignments {
+  if (!assignments) {
+    return {}
+  }
+  return Object.fromEntries(
+    Object.entries(assignments).map(([locationId, names]) => [locationId, sortRotatorNames(names)]),
+  )
 }
 
 function sanitizeManualAssignments(
@@ -2040,6 +2156,63 @@ function sanitizeSpecialistDutyRoster(raw: unknown): SpecialistDutyRoster {
           .filter((entry): entry is SpecialistDutyAssignment => Boolean(entry))
 
         return [dayKey, uniqueSpecialistDutyAssignments(normalizedEntries)]
+      }),
+  )
+}
+
+function sanitizeRotatorRoster(raw: unknown): RotatorRoster {
+  if (!raw || typeof raw !== 'object') {
+    return {}
+  }
+
+  return Object.fromEntries(
+    Object.entries(raw as Record<string, unknown>)
+      .filter(([dayKey, names]) => hasIsoShape(dayKey) && Array.isArray(names))
+      .map(([dayKey, names]) => [
+        dayKey,
+        sortRotatorNames(
+          (names as unknown[])
+            .filter((name): name is string => typeof name === 'string')
+            .map((name) => normalizeAssistantName(name))
+            .filter(Boolean)
+            .filter((name) => name !== GENERIC_DAY_ROTATOR_LABEL),
+        ),
+      ]),
+  )
+}
+
+function sanitizeRotatorAssignments(raw: unknown, locations: WorkLocation[]): RotatorAssignments {
+  if (!raw || typeof raw !== 'object') {
+    return {}
+  }
+
+  const eligibleLocationIds = new Set(
+    locations.filter(isRotatorEligibleLocation).map((location) => location.id),
+  )
+
+  return Object.fromEntries(
+    Object.entries(raw as Record<string, unknown>)
+      .filter(([dayKey, dayMap]) => hasIsoShape(dayKey) && dayMap && typeof dayMap === 'object')
+      .map(([dayKey, dayMap]) => {
+        const normalizedDayMap = Object.fromEntries(
+          Object.entries(dayMap as Record<string, unknown>)
+            .filter(([locationId, names]) => eligibleLocationIds.has(locationId) && Array.isArray(names))
+            .map(([locationId, names]) => [
+              locationId,
+              sortRotatorNames(
+                (names as unknown[])
+                  .filter((name): name is string => typeof name === 'string')
+                  .map((name) =>
+                    name.trim() === GENERIC_DAY_ROTATOR_LABEL
+                      ? GENERIC_DAY_ROTATOR_LABEL
+                      : normalizeAssistantName(name),
+                  )
+                  .filter(Boolean),
+              ),
+            ]),
+        )
+
+        return [dayKey, normalizedDayMap]
       }),
   )
 }
@@ -2206,6 +2379,8 @@ function buildFallbackState(): PlannerState {
     dutyRoster: createSampleDuty(weekStartISO),
     specialistWorkAssignments: {},
     specialistDutyRoster: {},
+    rotatorRoster: {},
+    rotatorAssignments: {},
     weekStartISO,
   }
 }
@@ -2372,6 +2547,13 @@ function sanitizePlannerState(parsed: Partial<PlannerState>, fallback: PlannerSt
   const specialistDutyRoster = sanitizeSpecialistDutyRoster(
     (parsed as { specialistDutyRoster?: unknown }).specialistDutyRoster,
   )
+  const rotatorRoster = sanitizeRotatorRoster(
+    (parsed as { rotatorRoster?: unknown }).rotatorRoster,
+  )
+  const rotatorAssignments = sanitizeRotatorAssignments(
+    (parsed as { rotatorAssignments?: unknown }).rotatorAssignments,
+    locations,
+  )
 
   const candidateWeekStart = typeof parsed.weekStartISO === 'string' ? parsed.weekStartISO : ''
   const normalizedWeekStart = normalizeDateToken(candidateWeekStart)
@@ -2389,6 +2571,8 @@ function sanitizePlannerState(parsed: Partial<PlannerState>, fallback: PlannerSt
     dutyRoster,
     specialistWorkAssignments,
     specialistDutyRoster,
+    rotatorRoster,
+    rotatorAssignments,
     weekStartISO: normalizedWeekStart ?? fallback.weekStartISO,
   }
 }
@@ -2668,6 +2852,8 @@ function App() {
   const [specialistWorkIssues, setSpecialistWorkIssues] = useState<string[]>([])
   const [specialistDutyText, setSpecialistDutyText] = useState('')
   const [specialistDutyIssues, setSpecialistDutyIssues] = useState<string[]>([])
+  const [rotatorText, setRotatorText] = useState('')
+  const [rotatorIssues, setRotatorIssues] = useState<string[]>([])
 
   const [observerAssistant, setObserverAssistant] = useState('')
   const [observerMonth, setObserverMonth] = useState(currentMonthISO)
@@ -2693,7 +2879,10 @@ function App() {
     currentWeekStartISO,
   )
   const [plannerDraftAssignments, setPlannerDraftAssignments] = useState<ManualAssignments>({})
+  const [plannerDraftRotatorAssignments, setPlannerDraftRotatorAssignments] =
+    useState<RotatorAssignments>({})
   const [plannerEditModes, setPlannerEditModes] = useState<Record<string, boolean>>({})
+  const [rotatorDrafts, setRotatorDrafts] = useState<Record<string, string>>({})
 
   const myWeeklyBriefWeekStartISO = useMemo(() => {
     const currentDayIndex = today.getDay()
@@ -2880,9 +3069,22 @@ function App() {
       ...Object.keys(data.dutyRoster)
         .filter((dayKey) => /^\d{4}-\d{2}-\d{2}$/.test(dayKey))
         .map((dayKey) => dayKey.slice(0, 7)),
+      ...Object.keys(data.rotatorRoster)
+        .filter((dayKey) => /^\d{4}-\d{2}-\d{2}$/.test(dayKey))
+        .map((dayKey) => dayKey.slice(0, 7)),
+      ...Object.keys(data.rotatorAssignments)
+        .filter((dayKey) => /^\d{4}-\d{2}-\d{2}$/.test(dayKey))
+        .map((dayKey) => dayKey.slice(0, 7)),
     ]
     return buildRelativeMonthOptions(plannerMonth, plannerMonths)
-  }, [buildRelativeMonthOptions, data.dutyRoster, data.manualAssignments, plannerMonth])
+  }, [
+    buildRelativeMonthOptions,
+    data.dutyRoster,
+    data.manualAssignments,
+    data.rotatorAssignments,
+    data.rotatorRoster,
+    plannerMonth,
+  ])
   const roomLeftGroups = useMemo(
     () => groupedPlannerRoomLocations.filter(([siteName]) => siteName === 'Sancaktepe'),
     [groupedPlannerRoomLocations],
@@ -3605,11 +3807,18 @@ function App() {
     const dayDraftAssignments = cloneDayLocationAssignments(
       plannerDraftAssignments[dayKey] ?? data.manualAssignments[dayKey],
     )
+    const dayDraftRotatorAssignments = cloneRotatorDayAssignments(
+      plannerDraftRotatorAssignments[dayKey] ?? data.rotatorAssignments[dayKey],
+    )
     return {
       ...data,
       manualAssignments: {
         ...data.manualAssignments,
         [dayKey]: dayDraftAssignments,
+      },
+      rotatorAssignments: {
+        ...data.rotatorAssignments,
+        [dayKey]: dayDraftRotatorAssignments,
       },
     }
   }
@@ -5446,11 +5655,79 @@ function App() {
     showSuccess(`${parsedDayKeys.length} güne ait ${parsed.totalNames} nöbetçi uzman kaydı online kaydedildi.`)
   }
 
+  const importRotatorLines = async () => {
+    const fallbackYear = today.getFullYear()
+    const parsed = parseRotatorQuickLines(rotatorText, fallbackYear)
+    const issueMessages = parsed.issues.map(
+      (issue) => `${issue.lineNumber}. satır: ${issue.message} (${issue.rawLine})`,
+    )
+    const parsedDayKeys = Object.keys(parsed.data).sort()
+
+    if (!parsed.totalNames) {
+      setRotatorIssues(issueMessages)
+      showWarning('Geçerli rotasyoner satırı bulunamadı. Örnek: 27 Nisan 2026 - Tahsin')
+      return
+    }
+
+    if (issueMessages.length) {
+      setRotatorIssues([
+        ...issueMessages,
+        'Format uyarısı olduğu için rotasyoner kayıtları uygulanmadı.',
+      ])
+      showWarning('Format uyarısı var. Güvenlik için rotasyoner listesi uygulanmadı.')
+      return
+    }
+
+    const approved = window.confirm(
+      `${parsedDayKeys.length} güne ait ${parsed.totalNames} rotasyoner kaydı mevcut listeyle birleştirilecek. Onaylıyor musun?`,
+    )
+    if (!approved) {
+      setRotatorIssues(['Rotasyoner aktarımı onaylanmadı. Kayıt yapılmadı.'])
+      showWarning('Rotasyoner aktarımı iptal edildi.')
+      return
+    }
+
+    if (!(await createPreChangeBackup('before-rotator-import', 'rotator-import', true))) {
+      return
+    }
+
+    const nextRotatorRoster = { ...data.rotatorRoster }
+    parsedDayKeys.forEach((dayKey) => {
+      nextRotatorRoster[dayKey] = sortRotatorNames([
+        ...(nextRotatorRoster[dayKey] ?? []),
+        ...(parsed.data[dayKey] ?? []),
+      ])
+    })
+
+    const nextPlannerState = {
+      ...data,
+      rotatorRoster: nextRotatorRoster,
+    }
+    setData(nextPlannerState)
+    const persisted = await persistPlannerStateNow(nextPlannerState, 'Rotasyoner kaydı')
+    if (!persisted) {
+      setRotatorIssues([
+        'Rotasyoner kaydı bu cihazda işlendi; ancak online kayıt doğrulanamadı. Metin silinmedi, tekrar kaydedebilirsin.',
+      ])
+      return
+    }
+
+    setRotatorIssues([])
+    setRotatorText('')
+    showSuccess(`${parsedDayKeys.length} güne ait ${parsed.totalNames} rotasyoner kaydı online kaydedildi.`)
+  }
+
   const startPlannerDayEdit = (dayKey: string) => {
     setPlannerDraftAssignments((previous) => ({
       ...previous,
       [dayKey]: cloneDayLocationAssignments(
         previous[dayKey] ?? data.manualAssignments[dayKey],
+      ),
+    }))
+    setPlannerDraftRotatorAssignments((previous) => ({
+      ...previous,
+      [dayKey]: cloneRotatorDayAssignments(
+        previous[dayKey] ?? data.rotatorAssignments[dayKey],
       ),
     }))
     setPlannerEditModes((previous) => ({
@@ -5471,7 +5748,17 @@ function App() {
       delete next[dayKey]
       return next
     })
+    setPlannerDraftRotatorAssignments((previous) => {
+      const next = { ...previous }
+      delete next[dayKey]
+      return next
+    })
     setOwnerSelectionDrafts((previous) =>
+      Object.fromEntries(
+        Object.entries(previous).filter(([draftKey]) => !draftKey.startsWith(`${dayKey}-`)),
+      ),
+    )
+    setRotatorDrafts((previous) =>
       Object.fromEntries(
         Object.entries(previous).filter(([draftKey]) => !draftKey.startsWith(`${dayKey}-`)),
       ),
@@ -5488,6 +5775,9 @@ function App() {
     const dayDraftAssignments = cloneDayLocationAssignments(
       plannerDraftAssignments[dayKey] ?? data.manualAssignments[dayKey],
     )
+    const dayDraftRotatorAssignments = cloneRotatorDayAssignments(
+      plannerDraftRotatorAssignments[dayKey] ?? data.rotatorAssignments[dayKey],
+    )
     if (!(await createPreChangeBackup(`before-planner-day-save-${dayKey}`, 'planner-day-save'))) {
       return
     }
@@ -5496,6 +5786,10 @@ function App() {
       const nextManualAssignments = {
         ...previous.manualAssignments,
         [dayKey]: dayDraftAssignments,
+      }
+      const nextRotatorAssignments = {
+        ...previous.rotatorAssignments,
+        [dayKey]: dayDraftRotatorAssignments,
       }
       const sanitized = sanitizeManualAssignments(
         nextManualAssignments,
@@ -5514,6 +5808,7 @@ function App() {
       return {
         ...previous,
         manualAssignments: sanitized.manualAssignments,
+        rotatorAssignments: nextRotatorAssignments,
       }
     })
 
@@ -5527,7 +5822,17 @@ function App() {
       delete next[dayKey]
       return next
     })
+    setPlannerDraftRotatorAssignments((previous) => {
+      const next = { ...previous }
+      delete next[dayKey]
+      return next
+    })
     setOwnerSelectionDrafts((previous) =>
+      Object.fromEntries(
+        Object.entries(previous).filter(([draftKey]) => !draftKey.startsWith(`${dayKey}-`)),
+      ),
+    )
+    setRotatorDrafts((previous) =>
       Object.fromEntries(
         Object.entries(previous).filter(([draftKey]) => !draftKey.startsWith(`${dayKey}-`)),
       ),
@@ -5628,6 +5933,73 @@ function App() {
     )
 
     setCellDrafts((previous) => ({
+      ...previous,
+      [draftKey]: '',
+    }))
+  }
+
+  const addRotatorAssignment = (dayKey: string, locationId: string) => {
+    if (!ensurePlannerDayInEditMode(dayKey)) {
+      return
+    }
+
+    const draftKey = `${dayKey}-${locationId}`
+    const candidate = rotatorDrafts[draftKey]
+    if (!candidate) {
+      showWarning('Rotasyoner eklemek için bir kişi veya Gündüz rotasyoneri seç.')
+      return
+    }
+
+    const plannerState = getPlannerStateForDay(dayKey)
+    const location = plannerState.locations.find((item) => item.id === locationId)
+    if (!location || !isRotatorEligibleLocation(location)) {
+      showWarning('Rotasyoner sadece C1-G3, Sancaktepe YBÜ ve Çekmeköy YBÜ alanlarına eklenebilir.')
+      return
+    }
+    if (!isRoomAssignableDay(fromISODate(dayKey))) {
+      showWarning(`${location.site} / ${location.name} hafta sonu veya tam gün resmi tatilde planlanamaz.`)
+      return
+    }
+
+    const isGenericRotator = candidate === GENERIC_DAY_ROTATOR_LABEL
+    const dayRotatorRoster = getRotatorRosterForDay(plannerState, dayKey)
+    if (!isGenericRotator && !dayRotatorRoster.includes(candidate)) {
+      showWarning(`${candidate} ${dayKey} rotasyoner listesinde yok.`)
+      return
+    }
+
+    const dayAssignments = cloneRotatorDayAssignments(plannerState.rotatorAssignments[dayKey])
+    const currentNames = dayAssignments[locationId] ?? []
+    if (currentNames.includes(candidate)) {
+      showWarning(`${candidate} zaten bu alanda görünüyor.`)
+      return
+    }
+
+    if (!isGenericRotator) {
+      const occupiedEntry = plannerState.locations.find((item) => {
+        if (!isRotatorEligibleLocation(item) || item.id === location.id) {
+          return false
+        }
+        return getRotatorsForLocation(plannerState, dayKey, item).includes(candidate)
+      })
+      if (occupiedEntry) {
+        showWarning(
+          `${candidate} bugün zaten ${occupiedEntry.site} / ${occupiedEntry.name} alanında rotasyoner görünüyor.`,
+        )
+        return
+      }
+    }
+
+    dayAssignments[locationId] = sortRotatorNames([...currentNames, candidate])
+    setPlannerDraftRotatorAssignments((previous) => ({
+      ...previous,
+      [dayKey]: dayAssignments,
+    }))
+    showSuccess(
+      `${candidate} -> ${location.site} / ${location.name} (${dayKey}) rotasyoner taslağına eklendi. Kaydet ile yayınla.`,
+    )
+
+    setRotatorDrafts((previous) => ({
       ...previous,
       [draftKey]: '',
     }))
@@ -5748,6 +6120,21 @@ function App() {
       [dayKey]: dayAssignments,
     }))
     showSuccess(`${name} atamadan çıkarıldı. Kaydet ile yayınla.`)
+  }
+
+  const removeRotatorAssignment = (dayKey: string, locationId: string, name: string) => {
+    if (!ensurePlannerDayInEditMode(dayKey)) {
+      return
+    }
+
+    const plannerState = getPlannerStateForDay(dayKey)
+    const dayAssignments = cloneRotatorDayAssignments(plannerState.rotatorAssignments[dayKey])
+    dayAssignments[locationId] = (dayAssignments[locationId] ?? []).filter((item) => item !== name)
+    setPlannerDraftRotatorAssignments((previous) => ({
+      ...previous,
+      [dayKey]: dayAssignments,
+    }))
+    showSuccess(`${name} rotasyoner atamasından çıkarıldı. Kaydet ile yayınla.`)
   }
 
   const autoFillDay = (dayKey: string) => {
@@ -5873,15 +6260,25 @@ function App() {
 
     const plannerState = getPlannerStateForDay(dayKey)
     const dayAssignments = cloneDayLocationAssignments(plannerState.manualAssignments[dayKey])
+    const dayRotatorAssignments = cloneRotatorDayAssignments(plannerState.rotatorAssignments[dayKey])
     plannerState.locations
       .filter((location) => EDITABLE_KINDS.has(location.kind))
       .forEach((location) => {
         dayAssignments[location.id] = []
       })
+    plannerState.locations
+      .filter(isRotatorEligibleLocation)
+      .forEach((location) => {
+        dayRotatorAssignments[location.id] = []
+      })
 
     setPlannerDraftAssignments((previous) => ({
       ...previous,
       [dayKey]: dayAssignments,
+    }))
+    setPlannerDraftRotatorAssignments((previous) => ({
+      ...previous,
+      [dayKey]: dayRotatorAssignments,
     }))
     showSuccess(`${dayKey} için taslak manuel atamalar temizlendi. Kaydet ile yayınla.`)
   }
@@ -5972,6 +6369,7 @@ function App() {
           id: location.id,
           label: `${location.site} / ${location.name}`,
           specialists: getSpecialistNamesForLocation(data, day.key, location),
+          rotators: getRotatorsForLocation(data, day.key, location),
           source: 'assigned' as const,
         }))
       const leaveLabels = assignedLocations
@@ -6034,6 +6432,7 @@ function App() {
               id: location.id,
               label: `${location.site} / ${location.name}`,
               specialists: getSpecialistNamesForLocation(data, day.key, location),
+              rotators: getRotatorsForLocation(data, day.key, location),
               source: 'own-room-fallback' as const,
             }))
         : []
@@ -6121,6 +6520,16 @@ function App() {
         months.add(dayKey.slice(0, 7))
       }
     })
+    Object.keys(data.rotatorRoster).forEach((dayKey) => {
+      if (/^\d{4}-\d{2}-\d{2}$/.test(dayKey)) {
+        months.add(dayKey.slice(0, 7))
+      }
+    })
+    Object.keys(data.rotatorAssignments).forEach((dayKey) => {
+      if (/^\d{4}-\d{2}-\d{2}$/.test(dayKey)) {
+        months.add(dayKey.slice(0, 7))
+      }
+    })
 
     if (!months.size) {
       months.add(currentMonthISO)
@@ -6137,6 +6546,8 @@ function App() {
     data.dutyRoster,
     data.locationOwnersByMonth,
     data.manualAssignments,
+    data.rotatorAssignments,
+    data.rotatorRoster,
     data.specialistDutyRoster,
     data.specialistWorkAssignments,
     myCalendarSelectedYear,
@@ -6204,6 +6615,7 @@ function App() {
         .map((location) => ({
           label: `${location.site} / ${location.name}`,
           specialistLabel: getSpecialistLabelForLocation(data, dayKey, location),
+          rotators: getRotatorsForLocation(data, dayKey, location),
         }))
       const duty = (data.dutyRoster[dayKey] ?? []).find((entry) => entry.name === loggedAssistantName) ?? null
       const previousDayKey = toISODate(addDays(fromISODate(dayKey), -1))
@@ -6297,6 +6709,7 @@ function App() {
         specialists: getSpecialistNamesForLocation(data, day.key, location).map(
           (specialistName) => `Uzm: ${specialistName}`,
         ),
+        rotators: getRotatorsForLocation(data, day.key, location).map(formatRotatorLabel),
       })),
     })
 
@@ -6466,9 +6879,11 @@ function App() {
         {locations.map((location) => {
           const names = getDisplayAssignmentsForLocation(plannerState, dayKey, location)
           const specialistLabel = getSpecialistLabelForLocation(plannerState, dayKey, location)
+          const rotatorNames = getRotatorsForLocation(plannerState, dayKey, location)
           const draftKey = `${dayKey}-${location.id}`
           const owners = location.kind === 'normal' ? ownersForDay[location.id] ?? [] : []
           const uniqueOwners = [...new Set(owners)]
+          const rotatorEligible = isRotatorEligibleLocation(location)
           const sectionOrder = getPlannerAssistantSectionOrder(location.site)
           const previousDayKeyForOptions = toISODate(addDays(fromISODate(dayKey), -1))
           const blockedPostDutyNames = new Set(
@@ -6577,6 +6992,31 @@ function App() {
             )
           })
           const groupedAssistantOptions = allGroupsForSort.filter((group) => group.items.length)
+          const dayRotatorNames = getRotatorRosterForDay(plannerState, dayKey)
+          const assignedRotatorLocationByName = new Map<string, WorkLocation>()
+          plannerState.locations.filter(isRotatorEligibleLocation).forEach((rotatorLocation) => {
+            getRotatorsForLocation(plannerState, dayKey, rotatorLocation).forEach((rotatorName) => {
+              if (rotatorName !== GENERIC_DAY_ROTATOR_LABEL && !assignedRotatorLocationByName.has(rotatorName)) {
+                assignedRotatorLocationByName.set(rotatorName, rotatorLocation)
+              }
+            })
+          })
+          const availableRotatorOptions = dayRotatorNames.filter((name) => {
+            if (rotatorNames.includes(name)) {
+              return false
+            }
+            const assignedLocation = assignedRotatorLocationByName.get(name)
+            return !assignedLocation || assignedLocation.id === location.id
+          })
+          const placedRotatorOptions = dayRotatorNames
+            .map((name) => ({ name, assignedLocation: assignedRotatorLocationByName.get(name) }))
+            .filter((item): item is { name: string; assignedLocation: WorkLocation } => {
+              const assignedLocation = item.assignedLocation
+              if (!assignedLocation) {
+                return false
+              }
+              return assignedLocation.id !== location.id
+            })
 
           return (
             <div
@@ -6599,8 +7039,9 @@ function App() {
               {specialistLabel ? <p className="planner-specialist-inline">{specialistLabel}</p> : null}
 
               <div className="chip-wrap">
-                {names.length ? (
-                  names.map((name) => (
+                {names.length || rotatorNames.length ? (
+                  <>
+                  {names.map((name) => (
                     <button
                       key={`${dayKey}-${location.id}-${name}`}
                       type="button"
@@ -6610,7 +7051,19 @@ function App() {
                     >
                       {getPlannerAssignedChipLabel(name)}
                     </button>
-                  ))
+                  ))}
+                  {rotatorNames.map((name) => (
+                    <button
+                      key={`${dayKey}-${location.id}-rotator-${name}`}
+                      type="button"
+                      className="chip removable rotator-chip"
+                      disabled={!isEditableDay}
+                      onClick={() => removeRotatorAssignment(dayKey, location.id, name)}
+                    >
+                      {formatRotatorLabel(name)}
+                    </button>
+                  ))}
+                  </>
                 ) : (
                   <span className="empty">Atama yok</span>
                 )}
@@ -6658,6 +7111,54 @@ function App() {
                   Ekle
                 </button>
               </div>
+
+              {rotatorEligible ? (
+                <div className="form-row compact rotator-planner-row">
+                  <select
+                    disabled={!isEditableDay}
+                    value={rotatorDrafts[draftKey] ?? ''}
+                    onChange={(event) =>
+                      setRotatorDrafts((previous) => ({
+                        ...previous,
+                        [draftKey]: event.target.value,
+                      }))
+                    }
+                  >
+                    <option value="">Rotasyoner seç</option>
+                    <option value={GENERIC_DAY_ROTATOR_LABEL}>{GENERIC_DAY_ROTATOR_LABEL}</option>
+                    {availableRotatorOptions.length ? (
+                      <optgroup label="O günkü rotasyonerler">
+                        {availableRotatorOptions.map((name) => (
+                          <option key={`${dayKey}-${location.id}-rotator-available-${name}`} value={name}>
+                            {name}
+                          </option>
+                        ))}
+                      </optgroup>
+                    ) : null}
+                    {placedRotatorOptions.length ? (
+                      <optgroup label="Yerleştirilen rotasyonerler">
+                        {placedRotatorOptions.map(({ name, assignedLocation }) => (
+                          <option
+                            key={`${dayKey}-${location.id}-rotator-placed-${name}`}
+                            value={name}
+                            disabled
+                          >
+                            x {name} - {assignedLocation.site} / {assignedLocation.name}
+                          </option>
+                        ))}
+                      </optgroup>
+                    ) : null}
+                  </select>
+                  <button
+                    type="button"
+                    className="secondary rotator-add-button"
+                    disabled={!isEditableDay}
+                    onClick={() => addRotatorAssignment(dayKey, location.id)}
+                  >
+                    Rot. Ekle
+                  </button>
+                </div>
+              ) : null}
 
               {location.kind === 'normal' &&
               uniqueOwners.length > 1 &&
@@ -7278,7 +7779,7 @@ function App() {
                 className={adminSection === 'specialists' ? 'active' : ''}
                 onClick={() => selectAdminSection('specialists')}
               >
-                Uzman
+                Uzman ve Rotasyoner
               </button>
               <button
                 type="button"
@@ -7935,10 +8436,10 @@ function App() {
 
           {adminSection === 'specialists' ? (
             <section className="card fade-up delay-5 specialist-admin-card">
-              <h2>Uzman Modülü</h2>
+              <h2>Uzman ve Rotasyoner Modülü</h2>
               <p className="subtext">
                 Uzmanları kullanıcıya çevirmeden metinsel planlama verisi olarak kaydedebilirsin.
-                1. kutu oda uzmanları (günlük çalışma), 2. kutu nöbetçi uzmanlar içindir.
+                1. kutu oda uzmanları (günlük çalışma), 2. kutu nöbetçi uzmanlar, 3. kutu rotasyonerler içindir.
                 Tarih seçimi gerekmez; her satırda yazan tarih esas alınır.
               </p>
 
@@ -8016,6 +8517,41 @@ function App() {
                     <ul>
                       {specialistDutyIssues.map((issue, index) => (
                         <li key={`specialist-duty-issue-${index}`}>{issue}</li>
+                      ))}
+                    </ul>
+                  </article>
+                ) : null}
+              </article>
+
+              <article className="specialist-input-card rotator-input-card">
+                <h3>Rotasyonerler</h3>
+                <p className="subtext">
+                  Yapıştırma formatı: <code>Tarih - Rotasyoner Adı</code>. Bu kişiler kullanıcı/asistan
+                  olarak oluşturulmaz; yalnızca o gün C1-G3, Sancaktepe YBÜ ve Çekmeköy YBÜ alanlarında
+                  rotasyoner seçeneği olarak görünür.
+                </p>
+                <textarea
+                  value={rotatorText}
+                  onChange={(event) => setRotatorText(event.target.value)}
+                  placeholder={'27 Nisan 2026 - Tahsin\n27 Nisan 2026 - İlayda'}
+                />
+                <div className="form-row specialist-save-row">
+                  <button
+                    type="button"
+                    className="secondary"
+                    disabled={!rotatorText.trim()}
+                    onClick={importRotatorLines}
+                  >
+                    Rotasyonerleri Kaydet
+                  </button>
+                </div>
+
+                {rotatorIssues.length ? (
+                  <article className="import-issue-card">
+                    <h3>Rotasyoner Uyarıları</h3>
+                    <ul>
+                      {rotatorIssues.map((issue, index) => (
+                        <li key={`rotator-issue-${index}`}>{issue}</li>
                       ))}
                     </ul>
                   </article>
@@ -8302,6 +8838,21 @@ function App() {
                               ) : (
                                 <span className="brief-muted">Uzman kaydı görünmüyor</span>
                               )}
+                              {assignment.rotators.length ? (
+                                <>
+                                  <span className="brief-label">Rotasyoner</span>
+                                  <div className="brief-chip-row">
+                                    {assignment.rotators.map((rotatorName) => (
+                                      <span
+                                        key={`${briefDay.day.key}-${assignment.id}-rotator-${rotatorName}`}
+                                        className="brief-chip rotator-chip"
+                                      >
+                                        {formatRotatorLabel(rotatorName)}
+                                      </span>
+                                    ))}
+                                  </div>
+                                </>
+                              ) : null}
                             </div>
                           ))}
 
