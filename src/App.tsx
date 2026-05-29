@@ -5569,6 +5569,69 @@ function App() {
     setDutyQuickText('')
   }
 
+  const deleteDutyMonth = async () => {
+    if (!isValidMonthISO(dutyMonth)) {
+      showWarning('Sıfırlanacak ay seçimi geçersiz.')
+      return
+    }
+
+    const dayKeys = listMonthDays(dutyMonth)
+    const totalRecords = dayKeys.reduce(
+      (total, dayKey) => total + (data.dutyRoster[dayKey] ?? []).length,
+      0,
+    )
+
+    if (!totalRecords) {
+      showWarning(`${formatMonthSelectLabel(dutyMonth)} için silinecek nöbet kaydı yok.`)
+      return
+    }
+
+    const approved = window.confirm(
+      `${formatMonthSelectLabel(dutyMonth)} ayındaki ${totalRecords} asistan nöbet kaydı silinecek. Onaylıyor musun?`,
+    )
+    if (!approved) {
+      showWarning('Nöbet ayı sıfırlanmadı.')
+      return
+    }
+
+    if (!(await createPreChangeBackup(`before-duty-month-delete-${dutyMonth}`, 'duty-month-delete', true))) {
+      return
+    }
+
+    const nextDutyRoster = { ...data.dutyRoster }
+    dayKeys.forEach((dayKey) => {
+      delete nextDutyRoster[dayKey]
+    })
+
+    const nextPlannerState = {
+      ...data,
+      dutyRoster: nextDutyRoster,
+    }
+    setData(nextPlannerState)
+    setDutyDrafts((previous) =>
+      Object.fromEntries(Object.entries(previous).filter(([dayKey]) => !dayKeys.includes(dayKey))),
+    )
+    setDutySiteDrafts((previous) =>
+      Object.fromEntries(Object.entries(previous).filter(([dayKey]) => !dayKeys.includes(dayKey))),
+    )
+    setCellDrafts((previous) =>
+      Object.fromEntries(
+        Object.entries(previous).filter(([draftKey]) => !dayKeys.some((dayKey) => draftKey === `duty-${dayKey}`)),
+      ),
+    )
+
+    const persisted = await persistPlannerStateNow(nextPlannerState, 'Aylık nöbet sıfırlama')
+    if (!persisted) {
+      setDutyImportIssues([
+        'Aylık nöbet bu cihazda sıfırlandı; ancak online kayıt doğrulanamadı. Bulut senkron durumunu kontrol et.',
+      ])
+      return
+    }
+
+    setDutyImportIssues([])
+    showSuccess(`${formatMonthSelectLabel(dutyMonth)} ayındaki nöbet kayıtları sıfırlandı.`)
+  }
+
   const importSpecialistWorkLines = async () => {
     const fallbackYear = today.getFullYear()
     const parsed = parseSpecialistWorkQuickLines(specialistWorkText, fallbackYear, data.locations)
@@ -8323,8 +8386,9 @@ function App() {
               Ay seçip nöbetleri satırdan veya günlük kartlardan ekle. Nöbetler her gün yazılır;
               hafta sonu ve resmi tatiller dahildir.
             </p>
-            <div className="form-row month-only-row">
+            <div className="specialist-delete-row">
               <select
+                aria-label="Sıfırlanacak nöbet ayı"
                 className="my-calendar-month-select"
                 value={dutyMonth}
                 onChange={(event) => {
@@ -8340,6 +8404,9 @@ function App() {
                   </option>
                 ))}
               </select>
+              <button type="button" className="danger-soft-button" onClick={deleteDutyMonth}>
+                Ayı Sıfırla
+              </button>
             </div>
 
             <p className="subtext">
