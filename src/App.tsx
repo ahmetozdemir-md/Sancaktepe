@@ -1274,11 +1274,25 @@ function buildWeek(weekStartISO: string): DayInfo[] {
     }))
 }
 
+function weekStartFromDayKey(dayKey: string): string {
+  return toISODate(startOfISOWeek(fromISODate(dayKey)))
+}
+
 function formatDayMonthLabel(isoDate: string): string {
   return fromISODate(isoDate).toLocaleDateString('tr-TR', {
     day: 'numeric',
     month: 'long',
   })
+}
+
+function formatWeekSelectLabel(weekStartISO: string): string {
+  const days = buildWeek(weekStartISO)
+  const firstDay = days[0]?.key ?? weekStartISO
+  const lastDay = days[6]?.key ?? weekStartISO
+  const firstYear = fromISODate(firstDay).getFullYear()
+  const lastYear = fromISODate(lastDay).getFullYear()
+  const yearLabel = firstYear === lastYear ? String(firstYear) : `${firstYear}/${lastYear}`
+  return `${formatDayMonthLabel(firstDay)} - ${formatDayMonthLabel(lastDay)} ${yearLabel}`
 }
 
 function getDayTypeLabel(dayKey: string): string | null {
@@ -2854,6 +2868,9 @@ function App() {
   const [specialistDutyIssues, setSpecialistDutyIssues] = useState<string[]>([])
   const [rotatorText, setRotatorText] = useState('')
   const [rotatorIssues, setRotatorIssues] = useState<string[]>([])
+  const [specialistWorkDeleteWeek, setSpecialistWorkDeleteWeek] = useState(currentWeekStartISO)
+  const [specialistDutyDeleteMonth, setSpecialistDutyDeleteMonth] = useState(currentMonthISO)
+  const [rotatorDeleteWeek, setRotatorDeleteWeek] = useState(currentWeekStartISO)
 
   const [observerAssistant, setObserverAssistant] = useState('')
   const [observerMonth, setObserverMonth] = useState(currentMonthISO)
@@ -2983,6 +3000,21 @@ function App() {
         label: formatMonthSelectLabel(monthISO, Number.isNaN(selectedYear) ? undefined : selectedYear),
       }))
   }, [currentMonthISO])
+  const buildWeekDeleteOptions = useCallback((anchorWeek: string, extraDayKeys: string[]) => {
+    const weeks = new Set<string>()
+    const normalizedAnchor = hasIsoShape(anchorWeek) ? weekStartFromDayKey(anchorWeek) : currentWeekStartISO
+    weeks.add(normalizedAnchor)
+    extraDayKeys
+      .filter(hasIsoShape)
+      .forEach((dayKey) => weeks.add(weekStartFromDayKey(dayKey)))
+
+    return [...weeks]
+      .sort()
+      .map((weekStartISO) => ({
+        value: weekStartISO,
+        label: formatWeekSelectLabel(weekStartISO),
+      }))
+  }, [currentWeekStartISO])
 
   const groupedRoomLocations = useMemo(() => groupBySite(roomLocations, todayISO), [groupBySite, roomLocations, todayISO])
   const groupedPlannerRoomLocations = useMemo(
@@ -3085,6 +3117,27 @@ function App() {
     data.rotatorRoster,
     plannerMonth,
   ])
+  const specialistWorkWeekOptions = useMemo(
+    () =>
+      buildWeekDeleteOptions(specialistWorkDeleteWeek, [
+        ...Object.keys(data.specialistWorkAssignments),
+      ]),
+    [buildWeekDeleteOptions, data.specialistWorkAssignments, specialistWorkDeleteWeek],
+  )
+  const specialistDutyMonthOptions = useMemo(() => {
+    const dutyMonths = Object.keys(data.specialistDutyRoster)
+      .filter(hasIsoShape)
+      .map((dayKey) => dayKey.slice(0, 7))
+    return buildRelativeMonthOptions(specialistDutyDeleteMonth, dutyMonths)
+  }, [buildRelativeMonthOptions, data.specialistDutyRoster, specialistDutyDeleteMonth])
+  const rotatorWeekOptions = useMemo(
+    () =>
+      buildWeekDeleteOptions(rotatorDeleteWeek, [
+        ...Object.keys(data.rotatorRoster),
+        ...Object.keys(data.rotatorAssignments),
+      ]),
+    [buildWeekDeleteOptions, data.rotatorAssignments, data.rotatorRoster, rotatorDeleteWeek],
+  )
   const roomLeftGroups = useMemo(
     () => groupedPlannerRoomLocations.filter(([siteName]) => siteName === 'Sancaktepe'),
     [groupedPlannerRoomLocations],
@@ -5715,6 +5768,169 @@ function App() {
     setRotatorIssues([])
     setRotatorText('')
     showSuccess(`${parsedDayKeys.length} güne ait ${parsed.totalNames} rotasyoner kaydı online kaydedildi.`)
+  }
+
+  const deleteSpecialistWorkWeek = async () => {
+    const weekStart = weekStartFromDayKey(specialistWorkDeleteWeek)
+    const dayKeys = buildWeek(weekStart).map((day) => day.key)
+    const totalRecords = dayKeys.reduce((total, dayKey) => {
+      const dayAssignments = data.specialistWorkAssignments[dayKey] ?? {}
+      return total + Object.values(dayAssignments).reduce((dayTotal, names) => dayTotal + names.length, 0)
+    }, 0)
+
+    if (!totalRecords) {
+      showWarning(`${formatWeekSelectLabel(weekStart)} içinde silinecek günlük çalışma uzman kaydı yok.`)
+      return
+    }
+
+    const approved = window.confirm(
+      `${formatWeekSelectLabel(weekStart)} haftasındaki ${totalRecords} günlük çalışma uzman kaydı silinecek. Onaylıyor musun?`,
+    )
+    if (!approved) {
+      showWarning('Günlük çalışma uzman haftası silinmedi.')
+      return
+    }
+
+    if (!(await createPreChangeBackup(`before-specialist-work-week-delete-${weekStart}`, 'specialist-work-delete', true))) {
+      return
+    }
+
+    const nextWorkAssignments = { ...data.specialistWorkAssignments }
+    dayKeys.forEach((dayKey) => {
+      delete nextWorkAssignments[dayKey]
+    })
+
+    const nextPlannerState = {
+      ...data,
+      specialistWorkAssignments: nextWorkAssignments,
+    }
+    setData(nextPlannerState)
+    const persisted = await persistPlannerStateNow(nextPlannerState, 'Günlük çalışma uzman haftası silme')
+    if (!persisted) {
+      setSpecialistWorkIssues([
+        'Günlük çalışma uzman haftası bu cihazda silindi; ancak online kayıt doğrulanamadı. Bulut senkron durumunu kontrol et.',
+      ])
+      return
+    }
+
+    setSpecialistWorkIssues([])
+    showSuccess(`${formatWeekSelectLabel(weekStart)} haftasındaki günlük çalışma uzman kayıtları silindi.`)
+  }
+
+  const deleteSpecialistDutyMonth = async () => {
+    if (!isValidMonthISO(specialistDutyDeleteMonth)) {
+      showWarning('Silinecek ay seçimi geçersiz.')
+      return
+    }
+
+    const dayKeys = listMonthDays(specialistDutyDeleteMonth)
+    const totalRecords = dayKeys.reduce(
+      (total, dayKey) => total + (data.specialistDutyRoster[dayKey] ?? []).length,
+      0,
+    )
+
+    if (!totalRecords) {
+      showWarning(`${formatMonthSelectLabel(specialistDutyDeleteMonth)} için silinecek nöbetçi uzman kaydı yok.`)
+      return
+    }
+
+    const approved = window.confirm(
+      `${formatMonthSelectLabel(specialistDutyDeleteMonth)} ayındaki ${totalRecords} nöbetçi uzman kaydı silinecek. Onaylıyor musun?`,
+    )
+    if (!approved) {
+      showWarning('Nöbetçi uzman ayı silinmedi.')
+      return
+    }
+
+    if (!(await createPreChangeBackup(`before-specialist-duty-month-delete-${specialistDutyDeleteMonth}`, 'specialist-duty-delete', true))) {
+      return
+    }
+
+    const nextDutyRoster = { ...data.specialistDutyRoster }
+    dayKeys.forEach((dayKey) => {
+      delete nextDutyRoster[dayKey]
+    })
+
+    const nextPlannerState = {
+      ...data,
+      specialistDutyRoster: nextDutyRoster,
+    }
+    setData(nextPlannerState)
+    const persisted = await persistPlannerStateNow(nextPlannerState, 'Nöbetçi uzman ayı silme')
+    if (!persisted) {
+      setSpecialistDutyIssues([
+        'Nöbetçi uzman ayı bu cihazda silindi; ancak online kayıt doğrulanamadı. Bulut senkron durumunu kontrol et.',
+      ])
+      return
+    }
+
+    setSpecialistDutyIssues([])
+    showSuccess(`${formatMonthSelectLabel(specialistDutyDeleteMonth)} ayındaki nöbetçi uzman kayıtları silindi.`)
+  }
+
+  const deleteRotatorWeek = async () => {
+    const weekStart = weekStartFromDayKey(rotatorDeleteWeek)
+    const dayKeys = buildWeek(weekStart).map((day) => day.key)
+    const rosterCount = dayKeys.reduce((total, dayKey) => total + (data.rotatorRoster[dayKey] ?? []).length, 0)
+    const assignmentCount = dayKeys.reduce((total, dayKey) => {
+      const dayAssignments = data.rotatorAssignments[dayKey] ?? {}
+      return total + Object.values(dayAssignments).reduce((dayTotal, names) => dayTotal + names.length, 0)
+    }, 0)
+    const totalRecords = rosterCount + assignmentCount
+
+    if (!totalRecords) {
+      showWarning(`${formatWeekSelectLabel(weekStart)} içinde silinecek rotasyoner kaydı yok.`)
+      return
+    }
+
+    const approved = window.confirm(
+      `${formatWeekSelectLabel(weekStart)} haftasındaki ${rosterCount} rotasyoner liste kaydı ve ${assignmentCount} rotasyoner oda ataması silinecek. Onaylıyor musun?`,
+    )
+    if (!approved) {
+      showWarning('Rotasyoner haftası silinmedi.')
+      return
+    }
+
+    if (!(await createPreChangeBackup(`before-rotator-week-delete-${weekStart}`, 'rotator-delete', true))) {
+      return
+    }
+
+    const nextRotatorRoster = { ...data.rotatorRoster }
+    const nextRotatorAssignments = { ...data.rotatorAssignments }
+    dayKeys.forEach((dayKey) => {
+      delete nextRotatorRoster[dayKey]
+      delete nextRotatorAssignments[dayKey]
+    })
+
+    const nextPlannerState = {
+      ...data,
+      rotatorRoster: nextRotatorRoster,
+      rotatorAssignments: nextRotatorAssignments,
+    }
+    setData(nextPlannerState)
+    setPlannerDraftRotatorAssignments((previous) => {
+      const next = { ...previous }
+      dayKeys.forEach((dayKey) => {
+        delete next[dayKey]
+      })
+      return next
+    })
+    setRotatorDrafts((previous) =>
+      Object.fromEntries(
+        Object.entries(previous).filter(([draftKey]) => !dayKeys.some((dayKey) => draftKey.startsWith(`${dayKey}-`))),
+      ),
+    )
+
+    const persisted = await persistPlannerStateNow(nextPlannerState, 'Rotasyoner haftası silme')
+    if (!persisted) {
+      setRotatorIssues([
+        'Rotasyoner haftası bu cihazda silindi; ancak online kayıt doğrulanamadı. Bulut senkron durumunu kontrol et.',
+      ])
+      return
+    }
+
+    setRotatorIssues([])
+    showSuccess(`${formatWeekSelectLabel(weekStart)} haftasındaki rotasyoner kayıtları silindi.`)
   }
 
   const startPlannerDayEdit = (dayKey: string) => {
@@ -8450,6 +8666,22 @@ function App() {
                   odalara yazılabilir; aynı odada birden fazla uzman da olabilir. Farklı haftaların veya
                   ayların satırlarını aynı kutuya ekleyebilirsin.
                 </p>
+                <div className="specialist-delete-row">
+                  <select
+                    aria-label="Silinecek günlük çalışma uzman haftası"
+                    value={specialistWorkDeleteWeek}
+                    onChange={(event) => setSpecialistWorkDeleteWeek(event.target.value)}
+                  >
+                    {specialistWorkWeekOptions.map((option) => (
+                      <option key={`specialist-work-delete-week-${option.value}`} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                  <button type="button" className="danger-soft-button" onClick={deleteSpecialistWorkWeek}>
+                    Haftayı Sil
+                  </button>
+                </div>
                 <textarea
                   value={specialistWorkText}
                   onChange={(event) => setSpecialistWorkText(event.target.value)}
@@ -8489,6 +8721,22 @@ function App() {
                   Sancaktepe, Çekmeköy, Feriha C123, Feriha C456, Feriha G123. Aynı kutuya
                   aylık/çok günlük liste yapıştırılabilir.
                 </p>
+                <div className="specialist-delete-row">
+                  <select
+                    aria-label="Silinecek nöbetçi uzman ayı"
+                    value={specialistDutyDeleteMonth}
+                    onChange={(event) => setSpecialistDutyDeleteMonth(event.target.value)}
+                  >
+                    {specialistDutyMonthOptions.map((option) => (
+                      <option key={`specialist-duty-delete-month-${option.value}`} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                  <button type="button" className="danger-soft-button" onClick={deleteSpecialistDutyMonth}>
+                    Ayı Sil
+                  </button>
+                </div>
                 <textarea
                   value={specialistDutyText}
                   onChange={(event) => setSpecialistDutyText(event.target.value)}
@@ -8530,6 +8778,22 @@ function App() {
                   olarak oluşturulmaz; yalnızca o gün C1-G3, Sancaktepe YBÜ ve Çekmeköy YBÜ alanlarında
                   rotasyoner seçeneği olarak görünür.
                 </p>
+                <div className="specialist-delete-row">
+                  <select
+                    aria-label="Silinecek rotasyoner haftası"
+                    value={rotatorDeleteWeek}
+                    onChange={(event) => setRotatorDeleteWeek(event.target.value)}
+                  >
+                    {rotatorWeekOptions.map((option) => (
+                      <option key={`rotator-delete-week-${option.value}`} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                  <button type="button" className="danger-soft-button" onClick={deleteRotatorWeek}>
+                    Haftayı Sil
+                  </button>
+                </div>
                 <textarea
                   value={rotatorText}
                   onChange={(event) => setRotatorText(event.target.value)}

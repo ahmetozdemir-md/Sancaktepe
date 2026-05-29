@@ -2443,6 +2443,22 @@ body.table-pan-unlocked .assistant-monthly-calendar-scroll {
   grid-template-columns: minmax(240px, 360px);
 }
 
+.specialist-delete-row {
+  display: grid;
+  grid-template-columns: minmax(220px, 340px) auto;
+  align-items: center;
+  gap: 0.55rem;
+  margin: 0.62rem 0 0.7rem;
+  padding: 0.52rem;
+  border: 1px dashed rgba(169, 92, 72, 0.26);
+  border-radius: 12px;
+  background: linear-gradient(135deg, rgba(255, 248, 242, 0.86), rgba(255, 255, 255, 0.9));
+}
+
+.danger-soft-button {
+  background: linear-gradient(135deg, rgba(166, 88, 62, 0.92), rgba(195, 121, 82, 0.92));
+}
+
 .specialist-preview-board {
   border: 1px solid rgba(91, 120, 108, 0.24);
   border-radius: 14px;
@@ -3282,6 +3298,10 @@ code {
   .form-row.responsive {
     grid-template-columns: 1fr;
     gap: 0.5rem;
+  }
+
+  .specialist-delete-row {
+    grid-template-columns: 1fr;
   }
 
   .owners-month-row {
