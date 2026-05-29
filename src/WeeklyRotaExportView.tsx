@@ -125,20 +125,20 @@ function WeeklyRotaExportView({
                                 {specialistLabel}
                               </span>
                             ))}
-                            {cell.rotators?.map((rotatorLabel) => (
-                              <span
-                                key={`weekly-export-rotator-${group.id}-${row.id}-${cellIndex}-${rotatorLabel}`}
-                                className="weekly-export-rotator-chip"
-                              >
-                                {rotatorLabel}
-                              </span>
-                            ))}
                             {cell.names.map((name) => (
                               <span
                                 key={`weekly-export-name-${group.id}-${row.id}-${cellIndex}-${name}`}
                                 className="weekly-export-assistant-chip"
                               >
                                 {name}
+                              </span>
+                            ))}
+                            {cell.rotators?.map((rotatorLabel) => (
+                              <span
+                                key={`weekly-export-rotator-${group.id}-${row.id}-${cellIndex}-${rotatorLabel}`}
+                                className="weekly-export-rotator-chip"
+                              >
+                                {rotatorLabel}
                               </span>
                             ))}
                           </div>

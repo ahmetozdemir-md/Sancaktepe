@@ -151,6 +151,7 @@ function AssistantMonthlyTableView({
                               {locationItem.specialistLabel}
                             </strong>
                           ) : null}
+                          <span>{locationItem.label}</span>
                           {locationItem.rotators?.length ? (
                             <span className="my-calendar-rotator-row">
                               {locationItem.rotators.map((rotatorName) => (
@@ -165,7 +166,6 @@ function AssistantMonthlyTableView({
                               ))}
                             </span>
                           ) : null}
-                          <span>{locationItem.label}</span>
                         </span>
                       ))}
 
