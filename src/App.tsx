@@ -2782,7 +2782,7 @@ function formatRemainingBlock(ms: number): string {
 }
 
 function App() {
-  const today = useMemo(() => new Date(), [])
+  const [today, setToday] = useState(() => new Date())
   const todayISO = toISODate(today)
   const currentWeekStartISO = toISODate(startOfISOWeek(today))
   const currentMonthISO = todayISO.slice(0, 7)
@@ -2900,6 +2900,12 @@ function App() {
     useState<RotatorAssignments>({})
   const [plannerEditModes, setPlannerEditModes] = useState<Record<string, boolean>>({})
   const [rotatorDrafts, setRotatorDrafts] = useState<Record<string, string>>({})
+
+  useEffect(() => {
+    const refreshToday = () => setToday(new Date())
+    const intervalId = window.setInterval(refreshToday, 60_000)
+    return () => window.clearInterval(intervalId)
+  }, [])
 
   const myWeeklyBriefWeekStartISO = useMemo(() => {
     const currentDayIndex = today.getDay()
