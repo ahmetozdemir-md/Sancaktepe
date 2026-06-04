@@ -3009,6 +3009,14 @@ function App() {
   const buildWeekDeleteOptions = useCallback((anchorWeek: string, extraDayKeys: string[]) => {
     const weeks = new Set<string>()
     const normalizedAnchor = hasIsoShape(anchorWeek) ? weekStartFromDayKey(anchorWeek) : currentWeekStartISO
+    const addRelativeWeeks = (baseWeekStartISO: string, startOffset: number, endOffset: number) => {
+      for (let offset = startOffset; offset <= endOffset; offset += 1) {
+        weeks.add(toISODate(addDays(fromISODate(baseWeekStartISO), offset * 7)))
+      }
+    }
+
+    addRelativeWeeks(currentWeekStartISO, -4, 12)
+    addRelativeWeeks(normalizedAnchor, -2, 8)
     weeks.add(normalizedAnchor)
     extraDayKeys
       .filter(hasIsoShape)
