@@ -227,6 +227,13 @@ interface SpecialistParseIssue {
   rawLine: string
 }
 
+interface PlannerStatusQuickEntry {
+  dayKey: string
+  assistantName: string
+  locationId: string
+  locationLabel: string
+}
+
 interface AssistantAccount {
   assistantName: string
   username: string
@@ -861,6 +868,31 @@ function normalizeLooseToken(value: string): string {
     .replace(/[^a-z0-9]+/g, ' ')
     .replace(/\s+/g, ' ')
     .trim()
+}
+
+function resolveAssistantNameFromLooseToken(
+  rawName: string,
+  assistants: string[],
+): { name: string | null; reason?: string } {
+  const normalizedName = normalizeAssistantName(rawName)
+  if (assistants.includes(normalizedName)) {
+    return { name: normalizedName }
+  }
+
+  const looseName = normalizeLooseToken(rawName)
+  if (!looseName) {
+    return { name: null, reason: 'Asistan adı boş.' }
+  }
+
+  const matches = assistants.filter((assistant) => normalizeLooseToken(assistant) === looseName)
+  if (matches.length === 1) {
+    return { name: matches[0] }
+  }
+  if (matches.length > 1) {
+    return { name: null, reason: `Asistan adı birden fazla kişiyle eşleşti (${matches.join(', ')}).` }
+  }
+
+  return { name: null, reason: `Asistan listesinde "${rawName}" bulunamadı.` }
 }
 
 function normalizeSpecialistDutySite(rawSite: string): SpecialistDutySite | null {
@@ -1707,6 +1739,119 @@ function normalizeDutyLineDateToken(raw: string, fallbackYear: number): string |
   }
 
   return toISODate(parsed)
+}
+
+function normalizePlannerStatusDateToken(raw: string, fallbackYear: number): string | null {
+  return normalizeDutyLineDateToken(raw, fallbackYear) ?? normalizeSpecialistDateToken(raw, fallbackYear)
+}
+
+function resolvePlannerStatusSuffix(
+  rawRest: string,
+): { locationId: string; locationLabel: string; rawName: string } | null {
+  const normalizedRest = normalizeLooseToken(rawRest)
+  const suffixes = [
+    { token: 'mazeret izni', locationId: LEAVE_LOCATION_IDS.excuse, locationLabel: 'Mazeret İzni' },
+    { token: 'mazeret', locationId: LEAVE_LOCATION_IDS.excuse, locationLabel: 'Mazeret İzni' },
+    { token: 'yillik izin', locationId: LEAVE_LOCATION_IDS.annual, locationLabel: 'Yıllık İzin' },
+    { token: 'yillik', locationId: LEAVE_LOCATION_IDS.annual, locationLabel: 'Yıllık İzin' },
+    { token: 'rotasyon', locationId: LEAVE_LOCATION_IDS.rotation, locationLabel: 'Rotasyon' },
+    { token: 'rot', locationId: LEAVE_LOCATION_IDS.rotation, locationLabel: 'Rotasyon' },
+  ]
+
+  const suffix = suffixes.find(
+    (item) => normalizedRest === item.token || normalizedRest.endsWith(` ${item.token}`),
+  )
+  if (!suffix) {
+    return null
+  }
+
+  const rawNameToken = normalizedRest.slice(0, normalizedRest.length - suffix.token.length).trim()
+  return {
+    locationId: suffix.locationId,
+    locationLabel: suffix.locationLabel,
+    rawName: rawNameToken,
+  }
+}
+
+function parsePlannerStatusQuickLines(
+  text: string,
+  fallbackYear: number,
+  assistants: string[],
+): { entries: PlannerStatusQuickEntry[]; issues: SpecialistParseIssue[]; totalEntries: number } {
+  const entries: PlannerStatusQuickEntry[] = []
+  const issues: SpecialistParseIssue[] = []
+  const seen = new Set<string>()
+
+  text
+    .split(/\r?\n/)
+    .forEach((rawLine, index) => {
+      const line = rawLine.trim()
+      if (!line) {
+        return
+      }
+
+      const match = line.match(
+        /^(\d{4}-\d{2}-\d{2}|\d{1,2}[./-]\d{1,2}(?:[./-]\d{2,4})?|\d{1,2}\s+[A-Za-zÇĞİÖŞÜçğıöşü]+(?:\s+\d{4})?)\s*(?:[-:])?\s*(.+)$/u,
+      )
+      if (!match) {
+        issues.push({
+          lineNumber: index + 1,
+          rawLine,
+          message: 'Biçim hatası. Örnek: 15.06.2026 Azmi yıllık izin',
+        })
+        return
+      }
+
+      const dayKey = normalizePlannerStatusDateToken(match[1], fallbackYear)
+      if (!dayKey) {
+        issues.push({
+          lineNumber: index + 1,
+          rawLine,
+          message: `Tarih çözümlenemedi (${match[1]}).`,
+        })
+        return
+      }
+
+      const resolvedStatus = resolvePlannerStatusSuffix(match[2])
+      if (!resolvedStatus) {
+        issues.push({
+          lineNumber: index + 1,
+          rawLine,
+          message: 'İzin türü bulunamadı. Desteklenenler: mazeret izni, yıllık izin, rotasyon.',
+        })
+        return
+      }
+
+      const assistantMatch = resolveAssistantNameFromLooseToken(resolvedStatus.rawName, assistants)
+      if (!assistantMatch.name) {
+        issues.push({
+          lineNumber: index + 1,
+          rawLine,
+          message: assistantMatch.reason ?? 'Asistan eşleşmedi.',
+        })
+        return
+      }
+
+      const duplicateKey = `${dayKey}::${assistantMatch.name}`
+      if (seen.has(duplicateKey)) {
+        issues.push({
+          lineNumber: index + 1,
+          rawLine,
+          message: `${assistantMatch.name} aynı gün için birden fazla satırda yazılmış.`,
+        })
+        return
+      }
+      seen.add(duplicateKey)
+
+      entries.push({
+        dayKey,
+        assistantName: assistantMatch.name,
+        locationId: resolvedStatus.locationId,
+        locationLabel: resolvedStatus.locationLabel,
+      })
+    })
+
+  return { entries, issues, totalEntries: entries.length }
 }
 
 function parseDutyQuickLines(
@@ -2900,6 +3045,8 @@ function App() {
     useState<RotatorAssignments>({})
   const [plannerEditModes, setPlannerEditModes] = useState<Record<string, boolean>>({})
   const [rotatorDrafts, setRotatorDrafts] = useState<Record<string, string>>({})
+  const [plannerStatusQuickText, setPlannerStatusQuickText] = useState('')
+  const [plannerStatusQuickIssues, setPlannerStatusQuickIssues] = useState<string[]>([])
 
   useEffect(() => {
     const refreshToday = () => setToday(new Date())
@@ -6132,6 +6279,153 @@ function App() {
     )
   }
 
+  const importPlannerStatusQuickLines = async () => {
+    const yearFromMonth = Number(plannerMonth.slice(0, 4))
+    const fallbackYear = Number.isNaN(yearFromMonth) ? today.getFullYear() : yearFromMonth
+    const parsed = parsePlannerStatusQuickLines(plannerStatusQuickText, fallbackYear, data.assistants)
+    const issueMessages = parsed.issues.map(
+      (issue) => `${issue.lineNumber}. satır: ${issue.message} (${issue.rawLine})`,
+    )
+
+    if (!parsed.totalEntries) {
+      setPlannerStatusQuickIssues(issueMessages)
+      showWarning('Geçerli izin/rotasyon satırı bulunamadı. Örnek: 15.06.2026 Azmi yıllık izin')
+      return
+    }
+
+    const locationMap = new Map(data.locations.map((location) => [location.id, location]))
+    parsed.entries.forEach((entry) => {
+      const targetLocation = locationMap.get(entry.locationId)
+      if (!targetLocation || targetLocation.kind !== 'leave') {
+        issueMessages.push(`${entry.dayKey}: ${entry.locationLabel} alanı sistemde bulunamadı.`)
+        return
+      }
+      if (!isLocationActiveOnDay(targetLocation, entry.dayKey)) {
+        issueMessages.push(`${entry.dayKey}: ${entry.locationLabel} alanı bu tarihte aktif değil.`)
+        return
+      }
+      if (!isRoomAssignableDay(fromISODate(entry.dayKey))) {
+        issueMessages.push(
+          `${entry.dayKey}: hafta sonu veya tam gün resmi tatilde mazeret/yıllık izin/rotasyon eklenemez.`,
+        )
+        return
+      }
+
+      const previousDayKey = toISODate(addDays(fromISODate(entry.dayKey), -1))
+      const sameDayDuty = data.dutyRoster[entry.dayKey]?.find(
+        (dutyEntry) => dutyEntry.name === entry.assistantName,
+      )
+      const postDuty = data.dutyRoster[previousDayKey]?.find(
+        (dutyEntry) => dutyEntry.name === entry.assistantName,
+      )
+      if (sameDayDuty) {
+        issueMessages.push(
+          `${entry.dayKey}: ${entry.assistantName} aynı gün ${sameDayDuty.site} nöbetçisi olduğu için izin/rotasyona eklenmedi.`,
+        )
+      }
+      if (postDuty) {
+        issueMessages.push(
+          `${entry.dayKey}: ${entry.assistantName} ${postDuty.site} nöbet ertesi olduğu için izin/rotasyona eklenmedi.`,
+        )
+      }
+    })
+
+    if (issueMessages.length) {
+      setPlannerStatusQuickIssues([
+        ...issueMessages,
+        'Uyarı olduğu için hiçbir izin/rotasyon kaydı uygulanmadı.',
+      ])
+      showWarning('İzin/rotasyon hızlı girişinde uyarı var. Güvenlik için kayıt yapılmadı.')
+      return
+    }
+
+    const countsByType = parsed.entries.reduce<Record<string, number>>((counts, entry) => {
+      counts[entry.locationLabel] = (counts[entry.locationLabel] ?? 0) + 1
+      return counts
+    }, {})
+    const summary = Object.entries(countsByType)
+      .map(([label, count]) => `${label}: ${count}`)
+      .join(', ')
+    const approved = window.confirm(
+      `${parsed.totalEntries} izin/rotasyon kaydı uygulanacak (${summary}). Bu kişiler aynı gün varsa oda/diğer izin kayıtlarından çıkarılacak. Onaylıyor musun?`,
+    )
+    if (!approved) {
+      setPlannerStatusQuickIssues(['İzin/rotasyon hızlı girişi onaylanmadı. Kayıt yapılmadı.'])
+      showWarning('İzin/rotasyon hızlı girişi iptal edildi.')
+      return
+    }
+
+    if (!(await createPreChangeBackup('before-planner-status-import', 'planner-status-import', true))) {
+      return
+    }
+
+    const applyEntryToDayAssignments = (
+      dayAssignments: Record<string, string[]> | undefined,
+      entry: PlannerStatusQuickEntry,
+    ): Record<string, string[]> => {
+      const nextDayAssignments = cloneDayLocationAssignments(dayAssignments)
+      Object.keys(nextDayAssignments).forEach((locationId) => {
+        const filtered = (nextDayAssignments[locationId] ?? []).filter(
+          (name) => name !== entry.assistantName,
+        )
+        if (filtered.length) {
+          nextDayAssignments[locationId] = filtered
+        } else {
+          delete nextDayAssignments[locationId]
+        }
+      })
+
+      nextDayAssignments[entry.locationId] = uniqueSortedNames([
+        ...(nextDayAssignments[entry.locationId] ?? []),
+        entry.assistantName,
+      ])
+      return nextDayAssignments
+    }
+
+    const nextManualAssignments = { ...data.manualAssignments }
+    parsed.entries.forEach((entry) => {
+      nextManualAssignments[entry.dayKey] = applyEntryToDayAssignments(
+        nextManualAssignments[entry.dayKey],
+        entry,
+      )
+    })
+
+    const sanitized = sanitizeManualAssignments(nextManualAssignments, data.dutyRoster, data.locations)
+    const nextPlannerState = {
+      ...data,
+      manualAssignments: sanitized.manualAssignments,
+    }
+
+    setData(nextPlannerState)
+    setPlannerDraftAssignments((previous) => {
+      let changed = false
+      const nextDrafts = { ...previous }
+      parsed.entries.forEach((entry) => {
+        if (!plannerEditModes[entry.dayKey]) {
+          return
+        }
+        nextDrafts[entry.dayKey] = applyEntryToDayAssignments(
+          nextDrafts[entry.dayKey] ?? data.manualAssignments[entry.dayKey],
+          entry,
+        )
+        changed = true
+      })
+      return changed ? nextDrafts : previous
+    })
+
+    const persisted = await persistPlannerStateNow(nextPlannerState, 'İzin/rotasyon hızlı girişi')
+    if (!persisted) {
+      setPlannerStatusQuickIssues([
+        'İzin/rotasyon kayıtları bu cihazda işlendi; ancak online kayıt doğrulanamadı. Bulut senkron durumunu kontrol et.',
+      ])
+      return
+    }
+
+    setPlannerStatusQuickIssues([])
+    setPlannerStatusQuickText('')
+    showSuccess(`${parsed.totalEntries} izin/rotasyon kaydı online kaydedildi.`)
+  }
+
   const addAssignment = (dayKey: string, locationId: string) => {
     if (!ensurePlannerDayInEditMode(dayKey)) {
       return
@@ -8728,6 +9022,45 @@ function App() {
                 Seçilen ay için gün bulunamadı.
               </p>
             ) : null}
+
+            <article className="specialist-input-card planner-status-quick-card">
+              <h3>İzin / Rotasyon Hızlı Giriş</h3>
+              <p className="subtext">
+                Çok satırlı giriş: <code>15.06.2026 Azmi yıllık izin</code>,{' '}
+                <code>16.06.2026 İlker mazeret izni</code> veya{' '}
+                <code>17.06.2026 Beyza rotasyon</code>. Kayıtlar doğrudan ilgili günlere eklenir.
+              </p>
+              <textarea
+                value={plannerStatusQuickText}
+                onChange={(event) => setPlannerStatusQuickText(event.target.value)}
+                placeholder={
+                  '15.06.2026 Azmi yıllık izin\n' +
+                  '16.06.2026 İlker mazeret izni\n' +
+                  '17.06.2026 Beyza rotasyon'
+                }
+              />
+              <div className="form-row specialist-save-row">
+                <button
+                  type="button"
+                  className="secondary"
+                  disabled={!plannerStatusQuickText.trim()}
+                  onClick={importPlannerStatusQuickLines}
+                >
+                  İzin / Rotasyonları Ekle
+                </button>
+              </div>
+
+              {plannerStatusQuickIssues.length ? (
+                <article className="import-issue-card">
+                  <h3>İzin / Rotasyon Uyarıları</h3>
+                  <ul>
+                    {plannerStatusQuickIssues.map((issue, index) => (
+                      <li key={`planner-status-quick-issue-${index}`}>{issue}</li>
+                    ))}
+                  </ul>
+                </article>
+              ) : null}
+            </article>
             </section>
           ) : null}
 

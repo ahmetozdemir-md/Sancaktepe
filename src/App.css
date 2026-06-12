@@ -2442,6 +2442,14 @@ body.table-pan-unlocked .assistant-monthly-calendar-scroll {
   margin-bottom: 0.22rem;
 }
 
+.planner-status-quick-card {
+  margin-top: 1rem;
+}
+
+.planner-status-quick-card textarea {
+  min-height: 110px;
+}
+
 .specialist-save-row {
   grid-template-columns: minmax(240px, 360px);
 }
