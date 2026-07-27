@@ -10033,10 +10033,6 @@ function App() {
           {observerSection === 'myPanel' ? (
             <section className="card fade-up delay-2">
               <h2>Toplu Görünüm</h2>
-              <p className="subtext">
-                Bu bölüm sadece giriş yapan asistan hekimin seçili ay için takvim ve nöbet
-                tablolarını ayrı sayfada hızlıca açmasını sağlar.
-              </p>
 
               {loggedAssistantName !== SPECIALIST_LOGIN_NAME ? (
                 <article className="weekly-brief-card">
