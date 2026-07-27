@@ -10284,13 +10284,16 @@ function App() {
                         <div className="chip-wrap">
                           {assignments.length ? (
                             assignments.map(({ location, locationLabel, specialistLabel }) => (
-                              <span key={`${day.key}-${location.id}`} className="chip soft chip-with-meta">
+                              <span
+                                key={`${day.key}-${location.id}`}
+                                className="person-week-assignment"
+                              >
                                 {specialistLabel ? (
-                                  <small className="chip-meta specialist-work-meta">
+                                  <span className="person-week-specialist">
                                     {specialistLabel}
-                                  </small>
+                                  </span>
                                 ) : null}
-                                <span>{locationLabel}</span>
+                                <span className="person-week-location">{locationLabel}</span>
                               </span>
                             ))
                           ) : dayTypeLabel ? (
@@ -10331,15 +10334,16 @@ function App() {
                         <div className="chip-wrap room-week-chip-stack">
                           {specialistLabel ? (
                             <div className="room-week-specialist-row">
-                              <span className="chip soft chip-with-meta room-week-specialist-chip">
-                                <small className="chip-meta specialist-work-meta">{specialistLabel}</small>
-                              </span>
+                              <span className="room-week-specialist-line">{specialistLabel}</span>
                             </div>
                           ) : null}
                           <div className="room-week-assistant-row">
                             {names.length ? (
                               names.map((name) => (
-                                <span key={`${day.key}-${observerWeekRoom}-${name}`} className="chip soft">
+                                <span
+                                  key={`${day.key}-${observerWeekRoom}-${name}`}
+                                  className="chip room-week-assistant-chip"
+                                >
                                   {name}
                                 </span>
                               ))
