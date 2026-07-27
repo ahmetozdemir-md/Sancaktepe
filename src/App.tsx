@@ -36,7 +36,7 @@ type AdminSection =
 type ObserverSection = 'myPanel' | 'personWeek'
 type LoginView = 'choose' | 'admin' | 'assistant-password' | 'assistant'
 type AssistantAccessTarget = 'assistant' | 'specialist'
-type ObserverWeekDetailView = 'person' | 'room' | 'duty'
+type ObserverWeekDetailView = 'specialist' | 'assistant' | 'room' | 'duty'
 type PlannerView = 'rooms' | 'status'
 type LocationKind = 'normal' | 'leave' | 'duty' | 'postDuty'
 type LocationTone = 'sand' | 'sage' | 'amber' | 'sky' | 'rose'
@@ -3108,10 +3108,11 @@ function App() {
   const [observerDutyListOpen, setObserverDutyListOpen] = useState(false)
   const [observerWeeklyWeekStart, setObserverWeeklyWeekStart] = useState(currentWeekStartISO)
   const [observerPersonShuffleSeed, setObserverPersonShuffleSeed] = useState(0)
+  const [observerWeekSpecialist, setObserverWeekSpecialist] = useState('')
   const [observerWeekRoom, setObserverWeekRoom] = useState('')
   const [observerWeekDutySite, setObserverWeekDutySite] = useState<DutySite>('Sancaktepe')
   const [observerWeekDetailView, setObserverWeekDetailView] =
-    useState<ObserverWeekDetailView>('person')
+    useState<ObserverWeekDetailView>('specialist')
   const [plannerMonth, setPlannerMonth] = useState(currentMonthISO)
   const [activePlannerDay, setActivePlannerDay] = useState(todayISO)
   const [plannerWeeklyExportOpen, setPlannerWeeklyExportOpen] = useState(false)
@@ -3174,6 +3175,15 @@ function App() {
     [currentWeekStartISO],
   )
   const observerWeeklyDays = useMemo(() => buildWeek(observerWeeklyWeekStart), [observerWeeklyWeekStart])
+  const observerWeekSpecialistOptions = useMemo(
+    () =>
+      uniqueSortedNames(
+        observerWeeklyDays.flatMap((day) =>
+          Object.values(data.specialistWorkAssignments[day.key] ?? {}).flat(),
+        ),
+      ),
+    [data.specialistWorkAssignments, observerWeeklyDays],
+  )
   const sortedLocations = useMemo(() => sortLocationsForState(data.locations, todayISO), [data.locations, todayISO])
   const roomLocations = useMemo(
     () =>
@@ -3987,6 +3997,12 @@ function App() {
       setObserverWeeklyWeekStart(currentWeekStartISO)
     }
   }, [currentWeekStartISO, observerRollingWeekOptions, observerWeeklyWeekStart])
+
+  useEffect(() => {
+    if (!observerWeekSpecialistOptions.includes(observerWeekSpecialist)) {
+      setObserverWeekSpecialist(observerWeekSpecialistOptions[0] ?? '')
+    }
+  }, [observerWeekSpecialist, observerWeekSpecialistOptions])
 
   useEffect(() => {
     const scrollItemToStart = (container: HTMLDivElement | null, selector: string) => {
@@ -7173,7 +7189,34 @@ function App() {
     showSuccess(`${dayKey} için taslak manuel atamalar temizlendi. Kaydet ile yayınla.`)
   }
 
-  const weekAssignmentsForPerson = useMemo(() => {
+  const weekAssignmentsForSpecialist = useMemo(() => {
+    if (!observerWeekSpecialist) {
+      return []
+    }
+
+    return observerWeeklyDays.map((day) => {
+      const assignments = getLocationsForDay(data, day.key)
+        .filter(
+          (location) =>
+            location.kind === 'normal' &&
+            (data.specialistWorkAssignments[day.key]?.[location.id] ?? []).includes(
+              observerWeekSpecialist,
+            ),
+        )
+        .map((location) => ({
+          location,
+          locationLabel: `${location.site} / ${location.name}`,
+        }))
+
+      return {
+        day,
+        assignments,
+        dayTypeLabel: getDayTypeLabel(day.key),
+      }
+    })
+  }, [data, observerWeekSpecialist, observerWeeklyDays])
+
+  const weekAssignmentsForAssistant = useMemo(() => {
     if (!observerAssistant) {
       return []
     }
@@ -10209,7 +10252,7 @@ function App() {
             <section className="card fade-up delay-2">
               <h2>Haftalık Görünüm</h2>
               <p className="subtext">
-                Bu haftayı kişi bazlı veya oda bazlı olarak tek ekranda takip edebilirsin.
+                Bu haftayı uzman, asistan, oda veya nöbet bazında tek ekranda takip edebilirsin.
               </p>
 
               <div
@@ -10234,13 +10277,20 @@ function App() {
               <div className="subpanel-toggle observer-week-detail-tabs">
                 <button
                   type="button"
-                  className={observerWeekDetailView === 'person' ? 'active' : ''}
+                  className={observerWeekDetailView === 'specialist' ? 'active' : ''}
+                  onClick={() => setObserverWeekDetailView('specialist')}
+                >
+                  Uzman Bazlı
+                </button>
+                <button
+                  type="button"
+                  className={observerWeekDetailView === 'assistant' ? 'active' : ''}
                   onClick={() => {
-                    setObserverWeekDetailView('person')
+                    setObserverWeekDetailView('assistant')
                     randomizeObserverPersonList()
                   }}
                 >
-                  Kişi Bazlı
+                  Asistan Bazlı
                 </button>
                 <button
                   type="button"
@@ -10258,14 +10308,63 @@ function App() {
                 </button>
               </div>
 
-              {observerWeekDetailView === 'person' ? (
+              {observerWeekDetailView === 'specialist' ? (
+                <>
+                  <div className="form-row">
+                    <select
+                      value={observerWeekSpecialist}
+                      onChange={(event) => setObserverWeekSpecialist(event.target.value)}
+                      disabled={!observerWeekSpecialistOptions.length}
+                    >
+                      {observerWeekSpecialistOptions.length ? (
+                        observerWeekSpecialistOptions.map((specialist) => (
+                          <option key={`observer-week-specialist-${specialist}`} value={specialist}>
+                            {specialist}
+                          </option>
+                        ))
+                      ) : (
+                        <option value="">Bu hafta uzman görevi kaydedilmemiş</option>
+                      )}
+                    </select>
+                  </div>
+
+                  <div className="timeline-grid">
+                    {weekAssignmentsForSpecialist.map(({ day, assignments, dayTypeLabel }) => (
+                      <article key={`timeline-specialist-${day.key}`} className="timeline-card">
+                        <header>
+                          <strong>{day.shortLabel}</strong>
+                          <small>{day.key}</small>
+                        </header>
+                        <div className="chip-wrap">
+                          {assignments.length ? (
+                            assignments.map(({ location, locationLabel }) => (
+                              <span
+                                key={`${day.key}-${observerWeekSpecialist}-${location.id}`}
+                                className="person-week-assignment specialist-week-assignment"
+                              >
+                                <span className="person-week-location">{locationLabel}</span>
+                              </span>
+                            ))
+                          ) : dayTypeLabel ? (
+                            <span className="empty offday-text">{dayTypeLabel} günü</span>
+                          ) : (
+                            <span className="empty">Uzman görevi görünmüyor</span>
+                          )}
+                        </div>
+                      </article>
+                    ))}
+                  </div>
+                </>
+              ) : null}
+
+              {observerWeekDetailView === 'assistant' ? (
                 <>
                   <div className="form-row">
                     <select
                       value={observerAssistant}
                       onChange={(event) => setObserverAssistant(event.target.value)}
                     >
-                      <option value="">Kişi seç</option>
+                      <option value="">Asistan seç</option>
                       {observerPersonOptions.map((assistant) => (
                         <option key={assistant} value={assistant}>
                           {assistant}
@@ -10275,7 +10374,7 @@ function App() {
                   </div>
 
                   <div className="timeline-grid">
-                    {weekAssignmentsForPerson.map(({ day, assignments, dayTypeLabel }) => (
+                    {weekAssignmentsForAssistant.map(({ day, assignments, dayTypeLabel }) => (
                       <article key={`timeline-${day.key}`} className="timeline-card">
                         <header>
                           <strong>{day.shortLabel}</strong>

@@ -1859,7 +1859,7 @@ body.table-pan-unlocked .duty-list-table-wrap {
 .observer-week-detail-tabs {
   margin-top: 0.5rem;
   margin-bottom: 0.62rem;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
 .observer-week-detail-tabs button {
@@ -2691,6 +2691,11 @@ body.table-pan-unlocked .assistant-monthly-calendar-scroll {
   font-size: 0.81rem;
   font-weight: 800;
   line-height: 1.25;
+}
+
+.specialist-week-assignment {
+  border-left-color: rgba(13, 109, 92, 0.92);
+  background: linear-gradient(135deg, rgba(235, 249, 243, 0.94), rgba(255, 253, 246, 0.94));
 }
 
 .timeline-card .chip-with-meta {
