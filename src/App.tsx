@@ -35,6 +35,7 @@ type AdminSection =
   | 'password'
 type ObserverSection = 'myPanel' | 'personWeek'
 type LoginView = 'choose' | 'admin' | 'assistant-password' | 'assistant'
+type AssistantAccessTarget = 'assistant' | 'specialist'
 type ObserverWeekDetailView = 'person' | 'room' | 'duty'
 type PlannerView = 'rooms' | 'status'
 type LocationKind = 'normal' | 'leave' | 'duty' | 'postDuty'
@@ -754,7 +755,7 @@ function normalizeAssistantName(rawName: string): string {
 function buildAssistantAccounts(assistants: string[]): AssistantAccount[] {
   const excludedLoginName = EXCLUDED_ASSISTANT_LOGIN_NAME.toLocaleLowerCase('tr')
   const specialistLoginName = SPECIALIST_LOGIN_NAME.toLocaleLowerCase('tr')
-  const assistantAccounts = uniqueSortedNames(assistants)
+  return uniqueSortedNames(assistants)
     .filter((assistantName) => {
       const normalizedName = assistantName.toLocaleLowerCase('tr')
       return normalizedName !== excludedLoginName && normalizedName !== specialistLoginName
@@ -763,14 +764,6 @@ function buildAssistantAccounts(assistants: string[]): AssistantAccount[] {
       assistantName,
       username: assistantName.toLocaleLowerCase('tr'),
     }))
-
-  return [
-    {
-      assistantName: SPECIALIST_LOGIN_NAME,
-      username: SPECIALIST_LOGIN_NAME.toLocaleLowerCase('tr'),
-    },
-    ...assistantAccounts,
-  ]
 }
 
 function shuffledCopy<T>(items: T[]): T[] {
@@ -3016,6 +3009,8 @@ function App() {
   const [plannerView, setPlannerView] = useState<PlannerView>('rooms')
   const [session, setSession] = useState<SessionInfo | null>(null)
   const [loginView, setLoginView] = useState<LoginView>('choose')
+  const [assistantAccessTarget, setAssistantAccessTarget] =
+    useState<AssistantAccessTarget>('assistant')
   const [blockClockMs, setBlockClockMs] = useState(() => Date.now())
   const initialAdminLoginGuard = useMemo(() => safeReadAdminLoginGuard(), [])
   const [adminLoginGuard, setAdminLoginGuard] = useState<AdminLoginGuardState>(initialAdminLoginGuard)
@@ -3288,13 +3283,7 @@ function App() {
   const assistantAccounts = useMemo(() => buildAssistantAccounts(data.assistants), [data.assistants])
   const shuffledAssistantAccounts = useMemo(() => {
     void assistantLoginShuffleSeed
-    const specialistAccount = assistantAccounts.find(
-      (account) => account.assistantName === SPECIALIST_LOGIN_NAME,
-    )
-    const otherAccounts = shuffledCopy(
-      assistantAccounts.filter((account) => account.assistantName !== SPECIALIST_LOGIN_NAME),
-    )
-    return specialistAccount ? [specialistAccount, ...otherAccounts] : otherAccounts
+    return shuffledCopy(assistantAccounts)
   }, [assistantAccounts, assistantLoginShuffleSeed])
   const observerPersonOptions = useMemo(() => {
     void observerPersonShuffleSeed
@@ -4099,8 +4088,9 @@ function App() {
     }
   }
 
-  const openAssistantAccess = async () => {
+  const openAssistantAccess = async (target: AssistantAccessTarget) => {
     setNotice(null)
+    setAssistantAccessTarget(target)
     const rememberedToken = safeReadAssistantAccessToken()
     if (!rememberedToken) {
       setAssistantAccessRemembered(false)
@@ -4135,7 +4125,11 @@ function App() {
 
       if (isValid === true) {
         setAssistantAccessRemembered(true)
-        setLoginView('assistant')
+        if (target === 'specialist') {
+          loginAsSpecialist()
+        } else {
+          setLoginView('assistant')
+        }
         return
       }
 
@@ -4205,8 +4199,12 @@ function App() {
         setAssistantAccessPassword('')
         setAssistantAccessBlockedUntil(0)
         setAssistantAccessRemembered(true)
-        setLoginView('assistant')
-        showSuccess('Bu cihaz, asistan şifresi değişene kadar hatırlandı.')
+        if (assistantAccessTarget === 'specialist') {
+          loginAsSpecialist()
+        } else {
+          setLoginView('assistant')
+          showSuccess('Bu cihaz, asistan şifresi değişene kadar hatırlandı.')
+        }
         return
       }
 
@@ -4471,6 +4469,21 @@ function App() {
     }
   }, [])
 
+  function loginAsSpecialist() {
+    setSession({
+      role: 'assistant',
+      username: SPECIALIST_LOGIN_NAME.toLocaleLowerCase('tr'),
+      assistantName: SPECIALIST_LOGIN_NAME,
+    })
+    void recordAssistantLoginEvent(SPECIALIST_LOGIN_NAME)
+    setNotice(null)
+    setObserverAssistant(observerPersonOptions[0] ?? '')
+    setAssistantTableMonthDraft(observerMonth)
+    setAssistantTableMonthActive(observerMonth)
+    setAssistantMonthlyTableOpen(false)
+    setAssistantUserPickerOpen(false)
+  }
+
   const loginAsAssistant = async () => {
     if (!matchedAssistantAccount) {
       showWarning('Lütfen listede bulunan bir asistan ismi seç.')
@@ -4525,6 +4538,7 @@ function App() {
     setAssistantAccessChecking(false)
     setAssistantAccessRemembered(false)
     setAssistantAccessBlockedUntil(0)
+    setAssistantAccessTarget('assistant')
     setAssistantUsernameInput('')
     setAssistantUserPickerOpen(false)
     if (isSupabaseAdminAuthRequired) {
@@ -8287,7 +8301,7 @@ function App() {
           <h1>Asistan Sistemi</h1>
           <p className="subtext">Giriş türünü seçip devam et.</p>
 
-          <div className="login-actions">
+          <div className="login-actions login-role-actions">
             <button
               type="button"
               className={loginView === 'admin' ? 'active' : ''}
@@ -8301,18 +8315,35 @@ function App() {
             <button
               type="button"
               className={
-                loginView === 'assistant' || loginView === 'assistant-password'
+                assistantAccessTarget === 'assistant' &&
+                (loginView === 'assistant' || loginView === 'assistant-password')
                   ? 'secondary active'
                   : 'secondary'
               }
               disabled={assistantAccessChecking}
               onClick={() => {
-                void openAssistantAccess()
+                void openAssistantAccess('assistant')
               }}
             >
-              {assistantAccessChecking && loginView === 'choose'
+              {assistantAccessChecking && assistantAccessTarget === 'assistant'
                 ? 'Kontrol ediliyor...'
                 : 'Asistan Hekim'}
+            </button>
+            <button
+              type="button"
+              className={`specialist-login-button${
+                assistantAccessTarget === 'specialist' && loginView === 'assistant-password'
+                  ? ' active'
+                  : ''
+              }`}
+              disabled={assistantAccessChecking}
+              onClick={() => {
+                void openAssistantAccess('specialist')
+              }}
+            >
+              {assistantAccessChecking && assistantAccessTarget === 'specialist'
+                ? 'Kontrol ediliyor...'
+                : 'Uzman'}
             </button>
           </div>
 
@@ -8386,11 +8417,13 @@ function App() {
           {loginView === 'assistant-password' ? (
             <div className="assistant-access-panel">
               <div className="assistant-access-heading">
-                <span>Asistan Girişi</span>
+                <span>
+                  {assistantAccessTarget === 'specialist' ? 'Uzman Girişi' : 'Asistan Girişi'}
+                </span>
                 <strong>Cihazını doğrula</strong>
               </div>
               <div className="date-control">
-                <label htmlFor="assistant-access-password">Asistan Şifresi</label>
+                <label htmlFor="assistant-access-password">Ortak Giriş Şifresi</label>
                 <input
                   id="assistant-access-password"
                   type="password"
@@ -9929,7 +9962,11 @@ function App() {
       ) : (
         <main className="stack-layout">
           <section className="card fade-up delay-2 section-switcher">
-            <h2>Asistan Hekim Modülleri</h2>
+            <h2>
+              {loggedAssistantName === SPECIALIST_LOGIN_NAME
+                ? 'Uzman Modülleri'
+                : 'Asistan Hekim Modülleri'}
+            </h2>
             <div className="subpanel-toggle observer-toggle">
               <button
                 type="button"
