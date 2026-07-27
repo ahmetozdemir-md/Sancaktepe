@@ -1,14 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import {
-  browserSupportsWebAuthn,
-  startAuthentication,
-  startRegistration,
-  type PublicKeyCredentialCreationOptionsJSON,
-  type PublicKeyCredentialRequestOptionsJSON,
-} from '@simplewebauthn/browser'
 import './App.css'
 import {
-  ASSISTANT_PASSKEY_FUNCTION,
   isCloudWriteEnabled,
   isSupabaseAdminAuthRequired,
   CHANGE_ASSISTANT_ACCESS_PASSWORD_RPC,
@@ -191,21 +183,6 @@ interface AssistantAccessVerificationRow {
   status_message?: unknown
 }
 
-interface AssistantPasskeyRegistrationOptions {
-  options: PublicKeyCredentialCreationOptionsJSON
-  challengeId: string
-}
-
-interface AssistantPasskeyAuthenticationOptions {
-  options: PublicKeyCredentialRequestOptionsJSON
-  challengeId: string
-}
-
-interface AssistantPasskeyVerification {
-  verified?: unknown
-  accessToken?: unknown
-}
-
 interface LoginEventEntry {
   id: number
   personName: string
@@ -288,7 +265,6 @@ const ADMIN_LOGIN_GUARD_KEY = 'assistant-admin-login-guard-v1'
 const ADMIN_AUTH_EMAIL_KEY = 'assistant-admin-auth-email-v1'
 const ASSISTANT_ACCESS_DEVICE_KEY = 'assistant-access-device-v1'
 const ASSISTANT_ACCESS_TOKEN_KEY = 'assistant-access-token-v1'
-const ASSISTANT_PASSKEY_ENROLLED_KEY = 'assistant-passkey-enrolled-v1'
 const CLOUD_READ_ONLY_TEXT = 'Bulut salt-okunur modda (yerelden buluta yazma kapalı).'
 const CLOUD_AUTH_LOCKED_TEXT = 'Bulut yazma kilitli: güvenli admin girişi gerekli.'
 const CLOUD_SAFE_GUARD_TEXT =
@@ -2927,57 +2903,6 @@ function storeAssistantAccessToken(token: string) {
   }
 }
 
-function safeReadAssistantPasskeyEnrolled(): boolean {
-  if (typeof window === 'undefined') {
-    return false
-  }
-  return localStorage.getItem(ASSISTANT_PASSKEY_ENROLLED_KEY) === 'true'
-}
-
-function storeAssistantPasskeyEnrolled(enrolled: boolean) {
-  if (typeof window === 'undefined') {
-    return
-  }
-  if (enrolled) {
-    localStorage.setItem(ASSISTANT_PASSKEY_ENROLLED_KEY, 'true')
-  } else {
-    localStorage.removeItem(ASSISTANT_PASSKEY_ENROLLED_KEY)
-  }
-}
-
-async function invokeAssistantPasskey<T>(body: Record<string, unknown>): Promise<T> {
-  if (!supabase) {
-    throw new Error('passkey-service-unavailable')
-  }
-
-  const { data, error } = await supabase.functions.invoke(ASSISTANT_PASSKEY_FUNCTION, {
-    body,
-  })
-
-  if (error) {
-    let errorCode = 'passkey-service-unavailable'
-    const context = 'context' in error ? error.context : null
-    if (context instanceof Response) {
-      try {
-        const payload = (await context.clone().json()) as { error?: unknown }
-        if (typeof payload.error === 'string') {
-          errorCode = payload.error
-        }
-      } catch {
-        // The generic message below is safer than exposing a raw server response.
-      }
-    }
-    throw new Error(errorCode)
-  }
-
-  if (data && typeof data === 'object' && 'error' in data) {
-    const errorCode = (data as { error?: unknown }).error
-    throw new Error(typeof errorCode === 'string' ? errorCode : 'passkey-service-unavailable')
-  }
-
-  return data as T
-}
-
 async function sha256Hex(value: string): Promise<string> {
   if (typeof crypto === 'undefined' || !crypto.subtle) {
     return ''
@@ -3085,12 +3010,6 @@ function App() {
   const [assistantAccessChecking, setAssistantAccessChecking] = useState(false)
   const [assistantAccessRemembered, setAssistantAccessRemembered] = useState(false)
   const [assistantAccessBlockedUntil, setAssistantAccessBlockedUntil] = useState(0)
-  const [assistantPasskeyChecking, setAssistantPasskeyChecking] = useState(false)
-  const [assistantPasskeyEnrolled, setAssistantPasskeyEnrolled] = useState(
-    () => safeReadAssistantPasskeyEnrolled(),
-  )
-  const assistantPasskeySupported =
-    typeof window !== 'undefined' && browserSupportsWebAuthn()
   const [assistantPasswordNew, setAssistantPasswordNew] = useState('')
   const [assistantPasswordConfirm, setAssistantPasswordConfirm] = useState('')
   const [assistantPasswordSaving, setAssistantPasswordSaving] = useState(false)
@@ -4232,153 +4151,11 @@ function App() {
       }
 
       storeAssistantAccessToken('')
-      storeAssistantPasskeyEnrolled(false)
-      setAssistantPasskeyEnrolled(false)
       setAssistantAccessRemembered(false)
       setLoginView('assistant-password')
       showWarning('Şifre değişti veya cihaz doğrulaması iptal edildi. Lütfen tekrar şifre gir.')
     } finally {
       setAssistantAccessChecking(false)
-    }
-  }
-
-  const registerAssistantPasskey = async (
-    accessToken = safeReadAssistantAccessToken(),
-    automatic = false,
-  ): Promise<boolean> => {
-    if (!assistantPasskeySupported) {
-      if (!automatic) {
-        showWarning('Bu tarayıcı Face ID, Touch ID veya geçiş anahtarı kaydını desteklemiyor.')
-      }
-      return false
-    }
-    if (!accessToken) {
-      showWarning('Cihaz kaydı oluşturmak için önce ortak şifreyi doğrula.')
-      return false
-    }
-
-    setAssistantPasskeyChecking(true)
-    try {
-      const registrationOptions =
-        await invokeAssistantPasskey<AssistantPasskeyRegistrationOptions>({
-          action: 'register-options',
-          accessToken,
-        })
-      const registrationResponse = await startRegistration({
-        optionsJSON: registrationOptions.options,
-      })
-      const verification = await invokeAssistantPasskey<AssistantPasskeyVerification>({
-        action: 'register-verify',
-        accessToken,
-        challengeId: registrationOptions.challengeId,
-        response: registrationResponse,
-      })
-
-      if (verification.verified !== true) {
-        throw new Error('registration-verification-failed')
-      }
-
-      storeAssistantPasskeyEnrolled(true)
-      setAssistantPasskeyEnrolled(true)
-      showSuccess(
-        'Bu cihaz Face ID / Touch ID geçiş anahtarıyla kalıcı olarak hatırlanacak.',
-      )
-      return true
-    } catch (error) {
-      const errorName = error instanceof Error ? error.name : ''
-      const errorCode = error instanceof Error ? error.message : 'passkey-error'
-
-      if (errorName === 'InvalidStateError') {
-        storeAssistantPasskeyEnrolled(true)
-        setAssistantPasskeyEnrolled(true)
-        if (!automatic) {
-          showSuccess('Bu cihazın geçiş anahtarı zaten kayıtlı.')
-        }
-        return true
-      }
-
-      if (errorName === 'NotAllowedError') {
-        if (!automatic) {
-          showWarning('Geçiş anahtarı kaydı iptal edildi veya zaman aşımına uğradı.')
-        }
-        return false
-      }
-
-      showWarning(
-        errorCode === 'invalid-access-token'
-          ? 'Cihaz doğrulaması geçersiz. Ortak şifreyi yeniden gir.'
-          : errorCode === 'passkey-service-unavailable'
-            ? 'Geçiş anahtarı servisine ulaşılamadı. Şifreyle giriş yapmaya devam edebilirsin.'
-            : 'Geçiş anahtarı kaydedilemedi. Şifreyle giriş yapmaya devam edebilirsin.',
-      )
-      return false
-    } finally {
-      setAssistantPasskeyChecking(false)
-    }
-  }
-
-  const authenticateAssistantPasskey = async () => {
-    if (!assistantPasskeySupported) {
-      showWarning('Bu tarayıcı Face ID, Touch ID veya geçiş anahtarı girişini desteklemiyor.')
-      return
-    }
-    if (!isSupabaseConfigured || !supabase) {
-      showWarning('Geçiş anahtarıyla giriş için Supabase bağlantısı gerekli.')
-      return
-    }
-
-    setAssistantPasskeyChecking(true)
-    setNotice(null)
-    try {
-      const authenticationOptions =
-        await invokeAssistantPasskey<AssistantPasskeyAuthenticationOptions>({
-          action: 'authentication-options',
-        })
-      const authenticationResponse = await startAuthentication({
-        optionsJSON: authenticationOptions.options,
-      })
-      const verification = await invokeAssistantPasskey<AssistantPasskeyVerification>({
-        action: 'authentication-verify',
-        challengeId: authenticationOptions.challengeId,
-        response: authenticationResponse,
-      })
-
-      if (verification.verified !== true || typeof verification.accessToken !== 'string') {
-        throw new Error('authentication-verification-failed')
-      }
-
-      storeAssistantAccessToken(verification.accessToken)
-      storeAssistantPasskeyEnrolled(true)
-      setAssistantPasskeyEnrolled(true)
-      setAssistantAccessRemembered(true)
-      setAssistantAccessPassword('')
-      setAssistantAccessBlockedUntil(0)
-      setLoginView('assistant')
-      showSuccess('Cihaz Face ID / Touch ID geçiş anahtarıyla doğrulandı.')
-    } catch (error) {
-      const errorName = error instanceof Error ? error.name : ''
-      const errorCode = error instanceof Error ? error.message : 'passkey-error'
-
-      if (
-        errorCode === 'credential-not-found' ||
-        errorCode === 'no-passkeys' ||
-        errorCode === 'authentication-verification-failed'
-      ) {
-        storeAssistantPasskeyEnrolled(false)
-        setAssistantPasskeyEnrolled(false)
-      }
-
-      if (errorName === 'NotAllowedError') {
-        showWarning('Face ID / Touch ID doğrulaması iptal edildi veya zaman aşımına uğradı.')
-      } else if (errorCode === 'no-passkeys' || errorCode === 'credential-not-found') {
-        showWarning('Bu cihaz için geçerli geçiş anahtarı bulunamadı. Ortak şifreyi gir.')
-      } else if (errorCode === 'passkey-service-unavailable') {
-        showWarning('Geçiş anahtarı servisine ulaşılamadı. Ortak şifreyle giriş yapabilirsin.')
-      } else {
-        showWarning('Geçiş anahtarı doğrulanamadı. Ortak şifreyle giriş yapabilirsin.')
-      }
-    } finally {
-      setAssistantPasskeyChecking(false)
     }
   }
 
@@ -4440,10 +4217,7 @@ function App() {
         setAssistantAccessBlockedUntil(0)
         setAssistantAccessRemembered(true)
         setLoginView('assistant')
-        setNotice(null)
-        if (assistantPasskeySupported && !assistantPasskeyEnrolled) {
-          void registerAssistantPasskey(row.access_token, true)
-        }
+        showSuccess('Bu cihaz, asistan şifresi değişene kadar hatırlandı.')
         return
       }
 
@@ -4522,8 +4296,6 @@ function App() {
       }
 
       storeAssistantAccessToken('')
-      storeAssistantPasskeyEnrolled(false)
-      setAssistantPasskeyEnrolled(false)
       setAssistantAccessRemembered(false)
       setAssistantPasswordNew('')
       setAssistantPasswordConfirm('')
@@ -8525,7 +8297,7 @@ function App() {
                   ? 'secondary active'
                   : 'secondary'
               }
-              disabled={assistantAccessChecking || assistantPasskeyChecking}
+              disabled={assistantAccessChecking}
               onClick={() => {
                 void openAssistantAccess()
               }}
@@ -8609,26 +8381,6 @@ function App() {
                 <span>Asistan Girişi</span>
                 <strong>Cihazını doğrula</strong>
               </div>
-              {assistantPasskeySupported ? (
-                <>
-                  <button
-                    type="button"
-                    className="assistant-passkey-button"
-                    onClick={() => {
-                      void authenticateAssistantPasskey()
-                    }}
-                    disabled={assistantAccessChecking || assistantPasskeyChecking}
-                  >
-                    <span aria-hidden="true">◎</span>
-                    {assistantPasskeyChecking
-                      ? 'Cihaz Doğrulanıyor...'
-                      : 'Face ID / Touch ID ile Devam Et'}
-                  </button>
-                  <div className="assistant-access-divider">
-                    <span>veya ortak şifre</span>
-                  </div>
-                </>
-              ) : null}
               <div className="date-control">
                 <label htmlFor="assistant-access-password">Asistan Şifresi</label>
                 <input
@@ -8646,7 +8398,6 @@ function App() {
                   autoComplete="current-password"
                   disabled={
                     assistantAccessChecking ||
-                    assistantPasskeyChecking ||
                     assistantAccessBlockRemainingMs > 0
                   }
                 />
@@ -8673,7 +8424,6 @@ function App() {
                 }}
                 disabled={
                   assistantAccessChecking ||
-                  assistantPasskeyChecking ||
                   assistantAccessBlockRemainingMs > 0
                 }
               >
@@ -8688,42 +8438,18 @@ function App() {
 
           {loginView === 'assistant' ? (
             <>
-              <div
-                className={`assistant-device-status ${
-                  assistantPasskeyEnrolled ? 'assistant-device-status-passkey' : ''
-                }`}
-              >
+              <div className="assistant-device-status">
                 <div>
-                  <span>
-                    {assistantPasskeyEnrolled ? 'Kalıcı Cihaz Doğrulaması' : 'Cihaz Doğrulandı'}
-                  </span>
-                  <strong>
-                    {assistantPasskeyEnrolled
-                      ? 'Face ID / Touch ID geçiş anahtarı hazır.'
-                      : 'Şimdi asistan ismini seçebilirsin.'}
-                  </strong>
+                  <span>Bu Cihaz Hatırlanıyor</span>
+                  <strong>Şifre değişene kadar yeniden şifre sorulmaz.</strong>
                 </div>
                 <div className="assistant-device-actions">
-                  {assistantPasskeySupported && !assistantPasskeyEnrolled ? (
-                    <button
-                      type="button"
-                      className="assistant-passkey-compact"
-                      onClick={() => {
-                        void registerAssistantPasskey()
-                      }}
-                      disabled={assistantPasskeyChecking}
-                    >
-                      {assistantPasskeyChecking
-                        ? 'Kaydediliyor...'
-                        : 'Bu Cihazı Kalıcı Hatırla'}
-                    </button>
-                  ) : null}
                   <button
                     type="button"
                     className="ghost-button compact-action"
                     onClick={resetAssistantAccessPassword}
                   >
-                    Farklı Şifre Kullan
+                    Bu Cihazı Unut
                   </button>
                 </div>
               </div>
