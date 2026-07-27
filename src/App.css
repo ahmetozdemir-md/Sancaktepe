@@ -3994,7 +3994,12 @@ code {
     width: 400%;
     min-width: 400%;
     table-layout: fixed;
-    zoom: 0.25;
+    transform: scale(0.25);
+    transform-origin: top left;
+  }
+
+  .weekly-export-table-wrap.mobile-scaled-table-wrap {
+    overflow-y: hidden;
   }
 
   .weekly-export-table th,
@@ -4195,6 +4200,7 @@ code {
 
   .weekly-export-table-wrap {
     overflow: visible;
+    height: auto !important;
     border: 1px solid #000 !important;
   }
 
@@ -4204,6 +4210,8 @@ code {
     border-collapse: collapse;
     border-spacing: 0;
     table-layout: auto;
+    transform: none !important;
+    zoom: 1 !important;
   }
 
   .weekly-export-table th,

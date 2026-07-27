@@ -1,3 +1,5 @@
+import { useLayoutEffect, useRef, useState } from 'react'
+
 export type WeeklyRotaExportTone = 'sancak' | 'cekmekoy' | 'feriha' | 'diger'
 
 export interface WeeklyRotaExportDay {
@@ -48,6 +50,47 @@ function WeeklyRotaExportView({
   onNextWeek,
   onPrint,
 }: WeeklyRotaExportViewProps) {
+  const tableRef = useRef<HTMLTableElement>(null)
+  const [mobileTableHeight, setMobileTableHeight] = useState<number | null>(null)
+
+  useLayoutEffect(() => {
+    const table = tableRef.current
+    if (!table || typeof window === 'undefined') {
+      return
+    }
+
+    const mobileMedia = window.matchMedia('(max-width: 760px)')
+    let animationFrame = 0
+
+    const measureTable = () => {
+      window.cancelAnimationFrame(animationFrame)
+      animationFrame = window.requestAnimationFrame(() => {
+        if (!mobileMedia.matches) {
+          setMobileTableHeight(null)
+          return
+        }
+
+        const visualHeight = Math.ceil(table.getBoundingClientRect().height)
+        setMobileTableHeight((currentHeight) =>
+          currentHeight === visualHeight ? currentHeight : visualHeight,
+        )
+      })
+    }
+
+    measureTable()
+    window.addEventListener('resize', measureTable)
+
+    const resizeObserver =
+      typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measureTable)
+    resizeObserver?.observe(table)
+
+    return () => {
+      window.cancelAnimationFrame(animationFrame)
+      window.removeEventListener('resize', measureTable)
+      resizeObserver?.disconnect()
+    }
+  }, [days, groups])
+
   return (
     <div className="weekly-export-page">
       <div className="weekly-export-toolbar no-print">
@@ -81,8 +124,17 @@ function WeeklyRotaExportView({
           <h1>{title}</h1>
           <p>{weekRangeLabel}</p>
         </div>
-        <div className="weekly-export-table-wrap">
-          <table className="weekly-export-table">
+        <div
+          className={`weekly-export-table-wrap${
+            mobileTableHeight === null ? '' : ' mobile-scaled-table-wrap'
+          }`}
+          style={
+            mobileTableHeight === null
+              ? undefined
+              : { height: `${mobileTableHeight + 10}px` }
+          }
+        >
+          <table ref={tableRef} className="weekly-export-table">
             <thead>
               <tr>
                 <th className="group-col" />
