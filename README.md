@@ -37,6 +37,8 @@ Bu modda asistanlar listeyi okumaya devam eder; veri yazma, yedek alma ve yedekt
 
 Ortak asistan şifresi ve hatırlanan cihaz doğrulaması için güvenli admin modu kurulduktan sonra
 `supabase/005_assistant_access_password.sql` dosyasını Supabase SQL Editor'de çalıştır.
+Mevcut kurulumlarda cihaz doğrulamasını şifre değişene kadar hatırlamak için ardından
+`supabase/006_assistant_access_until_password_change.sql` dosyasını çalıştır.
 
 - İlk ortak şifre `sancaktepe` olarak yalnız kurulum sırasında bcrypt hash biçiminde oluşturulur.
 - Gerçek şifre tarayıcıda veya veritabanında düz metin olarak saklanmaz.

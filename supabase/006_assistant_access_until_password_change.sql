@@ -1,42 +1,12 @@
--- Shared assistant-entry password, remembered-device sessions, and lockout.
--- Run this migration after 003_auth_harden_portal_state.sql.
+-- Keep remembered assistant devices valid until the shared password changes.
+-- Run this migration after 005_assistant_access_password.sql.
 
-create extension if not exists pgcrypto with schema extensions;
+alter table public.assistant_access_sessions
+  alter column expires_at drop not null;
 
-create table if not exists public.assistant_access_config (
-  id integer primary key check (id = 1),
-  password_hash text not null,
-  password_version bigint not null default 1,
-  updated_at timestamptz not null default now(),
-  updated_by uuid references auth.users(id) on delete set null
-);
-
-create table if not exists public.assistant_access_sessions (
-  token_hash text primary key,
-  password_version bigint not null,
-  created_at timestamptz not null default now(),
-  expires_at timestamptz,
-  last_used_at timestamptz not null default now()
-);
-
-create table if not exists public.assistant_access_attempts (
-  device_hash text primary key,
-  failed_attempts integer not null default 0 check (failed_attempts >= 0),
-  blocked_until timestamptz,
-  updated_at timestamptz not null default now()
-);
-
-insert into public.assistant_access_config (id, password_hash)
-values (1, '$2a$12$1F/qolQQJR5hUSNcGn471O5sYrl9kDE/pNM7fG34mBunEK90hjTnK')
-on conflict (id) do nothing;
-
-alter table public.assistant_access_config enable row level security;
-alter table public.assistant_access_sessions enable row level security;
-alter table public.assistant_access_attempts enable row level security;
-
-revoke all on table public.assistant_access_config from public, anon, authenticated;
-revoke all on table public.assistant_access_sessions from public, anon, authenticated;
-revoke all on table public.assistant_access_attempts from public, anon, authenticated;
+update public.assistant_access_sessions
+set expires_at = null
+where expires_at is not null;
 
 create or replace function public.verify_assistant_access(
   p_password text,
@@ -177,62 +147,13 @@ begin
 end;
 $$;
 
-create or replace function public.change_assistant_access_password(
-  p_new_password text
-)
-returns bigint
-language plpgsql
-security definer
-set search_path = public, extensions, pg_temp
-as $$
-declare
-  v_new_version bigint;
-begin
-  if auth.uid() is null
-     or not exists (
-       select 1
-       from public.portal_admins
-       where user_id = auth.uid()
-     ) then
-    raise exception 'Only portal admins can change the assistant password'
-      using errcode = '42501';
-  end if;
-
-  if p_new_password is null
-     or char_length(p_new_password) < 8
-     or char_length(p_new_password) > 128 then
-    raise exception 'Assistant password must contain 8 to 128 characters'
-      using errcode = '22023';
-  end if;
-
-  update public.assistant_access_config
-  set password_hash = extensions.crypt(p_new_password, extensions.gen_salt('bf', 12)),
-      password_version = password_version + 1,
-      updated_at = now(),
-      updated_by = auth.uid()
-  where id = 1
-  returning password_version into v_new_version;
-
-  delete from public.assistant_access_sessions;
-  delete from public.assistant_access_attempts;
-
-  return v_new_version;
-end;
-$$;
-
 revoke all on function public.verify_assistant_access(text, text) from public;
 revoke all on function public.validate_assistant_access(text) from public;
-revoke all on function public.change_assistant_access_password(text) from public;
 
 grant execute on function public.verify_assistant_access(text, text) to anon, authenticated;
 grant execute on function public.validate_assistant_access(text) to anon, authenticated;
-grant execute on function public.change_assistant_access_password(text) to authenticated;
 
-comment on table public.assistant_access_config is
-  'Stores only the bcrypt hash and version of the shared assistant-entry password.';
 comment on table public.assistant_access_sessions is
-  'Stores only hashes of remembered-device tokens. Password changes invalidate all versions.';
-comment on function public.verify_assistant_access(text, text) is
-  'Verifies the shared assistant password and enforces five-attempt device lockout.';
-comment on function public.change_assistant_access_password(text) is
-  'Allows portal admins to rotate the shared assistant password and revoke remembered devices.';
+  'Stores hashes of remembered-device tokens until the shared password changes.';
+comment on function public.validate_assistant_access(text) is
+  'Validates a remembered-device token against the current shared-password version.';
