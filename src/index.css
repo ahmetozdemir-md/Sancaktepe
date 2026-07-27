@@ -4,8 +4,8 @@
   font-family: 'IBM Plex Sans', 'Segoe UI', sans-serif;
   line-height: 1.4;
   font-weight: 400;
-  color: #32423a;
-  background-color: #efe8d6;
+  color: #2f4b4a;
+  background-color: #f3f1e9;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
@@ -26,10 +26,10 @@ body {
   touch-action: pan-y pinch-zoom;
   overscroll-behavior-x: none;
   background:
-    radial-gradient(circle at 8% 5%, rgba(245, 182, 162, 0.35), transparent 30%),
-    radial-gradient(circle at 88% 16%, rgba(184, 223, 242, 0.4), transparent 35%),
-    radial-gradient(circle at 60% 90%, rgba(215, 239, 227, 0.5), transparent 40%),
-    linear-gradient(180deg, #f7f1e0 0%, #f2ebd8 50%, #f7f1e0 100%);
+    radial-gradient(circle at 7% 3%, rgba(228, 170, 70, 0.13), transparent 27%),
+    radial-gradient(circle at 92% 10%, rgba(27, 72, 96, 0.12), transparent 34%),
+    radial-gradient(circle at 72% 92%, rgba(13, 109, 92, 0.1), transparent 38%),
+    linear-gradient(180deg, #f8f6ef 0%, #f1f4ef 48%, #f7f3e9 100%);
 }
 
 body::before {
@@ -37,13 +37,12 @@ body::before {
   position: fixed;
   inset: 0;
   pointer-events: none;
-  background-image: linear-gradient(
-      rgba(143, 123, 89, 0.05) 1px,
-      transparent 1px
-    ),
-    linear-gradient(90deg, rgba(143, 123, 89, 0.05) 1px, transparent 1px);
-  background-size: 26px 26px;
-  opacity: 0.24;
+  background-image:
+    linear-gradient(rgba(21, 74, 68, 0.045) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(21, 74, 68, 0.045) 1px, transparent 1px);
+  background-size: 32px 32px;
+  mask-image: linear-gradient(to bottom, rgba(0, 0, 0, 0.45), transparent 74%);
+  opacity: 0.38;
   z-index: -1;
 }
 

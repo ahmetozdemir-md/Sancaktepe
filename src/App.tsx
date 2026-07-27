@@ -33,7 +33,7 @@ type AdminSection =
   | 'backups'
   | 'loginEvents'
   | 'password'
-type ObserverSection = 'myPanel' | 'personWeek' | 'dailyMap'
+type ObserverSection = 'myPanel' | 'personWeek'
 type LoginView = 'choose' | 'admin' | 'assistant-password' | 'assistant'
 type ObserverWeekDetailView = 'person' | 'room' | 'duty'
 type PlannerView = 'rooms' | 'status'
@@ -48,6 +48,9 @@ type SpecialistDutySite =
   | 'Feriha C456'
   | 'Feriha G123'
 type SeniorityLevel = number
+
+const SPECIALIST_LOGIN_NAME = 'Uzman'
+const EXCLUDED_ASSISTANT_LOGIN_NAME = 'Ahmet Özdemir'
 
 type ManualAssignments = Record<string, Record<string, string[]>>
 type DutyRoster = Record<string, DutyAssignment[]>
@@ -749,10 +752,34 @@ function normalizeAssistantName(rawName: string): string {
 }
 
 function buildAssistantAccounts(assistants: string[]): AssistantAccount[] {
-  return uniqueSortedNames(assistants).map((assistantName) => ({
-    assistantName,
-    username: assistantName.toLocaleLowerCase('tr'),
-  }))
+  const excludedLoginName = EXCLUDED_ASSISTANT_LOGIN_NAME.toLocaleLowerCase('tr')
+  const specialistLoginName = SPECIALIST_LOGIN_NAME.toLocaleLowerCase('tr')
+  const assistantAccounts = uniqueSortedNames(assistants)
+    .filter((assistantName) => {
+      const normalizedName = assistantName.toLocaleLowerCase('tr')
+      return normalizedName !== excludedLoginName && normalizedName !== specialistLoginName
+    })
+    .map((assistantName) => ({
+      assistantName,
+      username: assistantName.toLocaleLowerCase('tr'),
+    }))
+
+  return [
+    {
+      assistantName: SPECIALIST_LOGIN_NAME,
+      username: SPECIALIST_LOGIN_NAME.toLocaleLowerCase('tr'),
+    },
+    ...assistantAccounts,
+  ]
+}
+
+function shuffledCopy<T>(items: T[]): T[] {
+  const shuffled = [...items]
+  for (let index = shuffled.length - 1; index > 0; index -= 1) {
+    const randomIndex = Math.floor(Math.random() * (index + 1))
+    ;[shuffled[index], shuffled[randomIndex]] = [shuffled[randomIndex], shuffled[index]]
+  }
+  return shuffled
 }
 
 function hashString(value: string): number {
@@ -3006,6 +3033,7 @@ function App() {
   const [isAdminCloudAuthVerified, setIsAdminCloudAuthVerified] = useState(!isSupabaseAdminAuthRequired)
   const [assistantUsernameInput, setAssistantUsernameInput] = useState('')
   const [assistantUserPickerOpen, setAssistantUserPickerOpen] = useState(false)
+  const [assistantLoginShuffleSeed, setAssistantLoginShuffleSeed] = useState(0)
   const [assistantAccessPassword, setAssistantAccessPassword] = useState('')
   const [assistantAccessChecking, setAssistantAccessChecking] = useState(false)
   const [assistantAccessRemembered, setAssistantAccessRemembered] = useState(false)
@@ -3036,8 +3064,6 @@ function App() {
   const cloudHistoryBackupLastAtRef = useRef(0)
   const preChangeBackupLastAtRef = useRef<Record<string, number>>({})
   const observerWeeklyScrollerRef = useRef<HTMLDivElement | null>(null)
-  const observerDailyWeekScrollerRef = useRef<HTMLDivElement | null>(null)
-  const observerDailyDayScrollerRef = useRef<HTMLDivElement | null>(null)
   const plannerMonthDayScrollerRef = useRef<HTMLDivElement | null>(null)
   const [backupEntries, setBackupEntries] = useState<BackupEntry[]>([])
   const [isBackupLoading, setIsBackupLoading] = useState(false)
@@ -3085,9 +3111,8 @@ function App() {
   const [observerDutyMonthDraft, setObserverDutyMonthDraft] = useState(currentMonthISO)
   const [observerDutyMonthActive, setObserverDutyMonthActive] = useState(currentMonthISO)
   const [observerDutyListOpen, setObserverDutyListOpen] = useState(false)
-  const [activeObserverWeek, setActiveObserverWeek] = useState('')
   const [observerWeeklyWeekStart, setObserverWeeklyWeekStart] = useState(currentWeekStartISO)
-  const [observerDay, setObserverDay] = useState('')
+  const [observerPersonShuffleSeed, setObserverPersonShuffleSeed] = useState(0)
   const [observerWeekRoom, setObserverWeekRoom] = useState('')
   const [observerWeekDutySite, setObserverWeekDutySite] = useState<DutySite>('Sancaktepe')
   const [observerWeekDetailView, setObserverWeekDetailView] =
@@ -3152,10 +3177,6 @@ function App() {
         }
       }),
     [currentWeekStartISO],
-  )
-  const observerActiveWeekDays = useMemo(
-    () => observerRollingWeekOptions.find((group) => group.weekStartISO === activeObserverWeek)?.days ?? [],
-    [activeObserverWeek, observerRollingWeekOptions],
   )
   const observerWeeklyDays = useMemo(() => buildWeek(observerWeeklyWeekStart), [observerWeeklyWeekStart])
   const sortedLocations = useMemo(() => sortLocationsForState(data.locations, todayISO), [data.locations, todayISO])
@@ -3244,10 +3265,6 @@ function App() {
     () => groupBySite(plannerStatusLocations, plannerReferenceDay),
     [groupBySite, plannerReferenceDay, plannerStatusLocations],
   )
-  const groupedObserverLocations = useMemo(
-    () => groupBySite(sortedLocations, todayISO),
-    [groupBySite, sortedLocations, todayISO],
-  )
   const observerWeekRoomOptions = useMemo(
     () => sortedLocations.filter((location) => location.kind === 'normal'),
     [sortedLocations],
@@ -3269,17 +3286,31 @@ function App() {
     [assistantGroupLevels, data.assistantRanks, data.assistants],
   )
   const assistantAccounts = useMemo(() => buildAssistantAccounts(data.assistants), [data.assistants])
+  const shuffledAssistantAccounts = useMemo(() => {
+    void assistantLoginShuffleSeed
+    const specialistAccount = assistantAccounts.find(
+      (account) => account.assistantName === SPECIALIST_LOGIN_NAME,
+    )
+    const otherAccounts = shuffledCopy(
+      assistantAccounts.filter((account) => account.assistantName !== SPECIALIST_LOGIN_NAME),
+    )
+    return specialistAccount ? [specialistAccount, ...otherAccounts] : otherAccounts
+  }, [assistantAccounts, assistantLoginShuffleSeed])
+  const observerPersonOptions = useMemo(() => {
+    void observerPersonShuffleSeed
+    return shuffledCopy(data.assistants)
+  }, [data.assistants, observerPersonShuffleSeed])
   const assistantLoginQuery = assistantUsernameInput.trim().toLocaleLowerCase('tr')
   const assistantLoginQueryCanonical = normalizeAssistantName(assistantUsernameInput).toLocaleLowerCase('tr')
   const filteredAssistantAccounts = useMemo(() => {
     if (!assistantLoginQuery) {
-      return assistantAccounts
+      return shuffledAssistantAccounts
     }
-    return assistantAccounts.filter((account) => {
+    return shuffledAssistantAccounts.filter((account) => {
       const name = account.assistantName.toLocaleLowerCase('tr')
       return name.includes(assistantLoginQuery)
     })
-  }, [assistantAccounts, assistantLoginQuery])
+  }, [assistantLoginQuery, shuffledAssistantAccounts])
   const matchedAssistantAccount = useMemo(
     () =>
       assistantAccounts.find((account) => {
@@ -3864,22 +3895,18 @@ function App() {
       return
     }
     const lowerLastUser = lastUser.toLocaleLowerCase('tr')
-    const exactByName = data.assistants.find((assistant) => assistant.toLocaleLowerCase('tr') === lowerLastUser)
-    if (exactByName) {
+    const matchingAccount = assistantAccounts.find(
+      (account) =>
+        account.assistantName.toLocaleLowerCase('tr') === lowerLastUser ||
+        account.username === lowerLastUser,
+    )
+    if (matchingAccount) {
       if (loginView === 'choose') {
         setLoginView('assistant')
       }
-      setAssistantUsernameInput(exactByName)
-      return
+      setAssistantUsernameInput(matchingAccount.assistantName)
     }
-    const byAccount = assistantAccounts.find((account) => account.username === lowerLastUser)
-    if (byAccount) {
-      if (loginView === 'choose') {
-        setLoginView('assistant')
-      }
-      setAssistantUsernameInput(byAccount.assistantName)
-    }
-  }, [assistantAccounts, assistantUsernameInput, data.assistants, loginView])
+  }, [assistantAccounts, assistantUsernameInput, loginView])
 
   useEffect(() => {
     setUserBindings((previous) => {
@@ -3962,39 +3989,9 @@ function App() {
     }
 
     if (!data.assistants.includes(observerAssistant)) {
-      setObserverAssistant(data.assistants[0] ?? '')
+      setObserverAssistant(observerPersonOptions[0] ?? '')
     }
-  }, [data.assistants, observerAssistant, session])
-
-  useEffect(() => {
-    if (!observerRollingWeekOptions.length) {
-      if (activeObserverWeek) {
-        setActiveObserverWeek('')
-      }
-      return
-    }
-
-    if (!observerRollingWeekOptions.some((group) => group.weekStartISO === activeObserverWeek)) {
-      const preferredWeek = observerRollingWeekOptions.find((group) =>
-        group.days.some((day) => day.key === todayISO),
-      )
-      setActiveObserverWeek(preferredWeek?.weekStartISO ?? observerRollingWeekOptions[0].weekStartISO)
-    }
-  }, [activeObserverWeek, observerRollingWeekOptions, todayISO])
-
-  useEffect(() => {
-    if (!observerActiveWeekDays.length) {
-      if (observerDay) {
-        setObserverDay('')
-      }
-      return
-    }
-
-    if (!observerActiveWeekDays.some((day) => day.key === observerDay)) {
-      const preferredDay = observerActiveWeekDays.find((day) => day.key === todayISO)
-      setObserverDay(preferredDay?.key ?? observerActiveWeekDays[0].key)
-    }
-  }, [observerActiveWeekDays, observerDay, todayISO])
+  }, [data.assistants, observerAssistant, observerPersonOptions, session])
 
   useEffect(() => {
     if (
@@ -4030,12 +4027,7 @@ function App() {
     if (observerSection === 'personWeek') {
       scrollItemToStart(observerWeeklyScrollerRef.current, `[data-week-start="${currentWeekStartISO}"]`)
     }
-
-    if (observerSection === 'dailyMap') {
-      scrollItemToStart(observerDailyWeekScrollerRef.current, `[data-week-start="${currentWeekStartISO}"]`)
-      scrollItemToStart(observerDailyDayScrollerRef.current, `[data-day-key="${observerDay}"]`)
-    }
-  }, [currentWeekStartISO, observerDay, observerRollingWeekOptions, observerSection])
+  }, [currentWeekStartISO, observerRollingWeekOptions, observerSection])
 
   useEffect(() => {
     if (!plannerMonthDays.length) {
@@ -4572,8 +4564,24 @@ function App() {
     }
   }
 
+  const randomizeObserverPersonList = () => {
+    const randomizedAssistants = shuffledCopy(data.assistants)
+    setObserverPersonShuffleSeed((previous) => previous + 1)
+    setObserverAssistant(randomizedAssistants[0] ?? '')
+  }
+
   const selectObserverSection = (section: ObserverSection) => {
+    if (section === 'personWeek') {
+      randomizeObserverPersonList()
+    }
     setObserverSection(section)
+  }
+
+  const openAssistantUserPicker = () => {
+    if (!assistantUserPickerOpen) {
+      setAssistantLoginShuffleSeed((previous) => previous + 1)
+    }
+    setAssistantUserPickerOpen(true)
   }
 
   useEffect(() => {
@@ -4581,7 +4589,11 @@ function App() {
       return
     }
 
-    if (!session.assistantName || !data.assistants.includes(session.assistantName)) {
+    if (
+      !session.assistantName ||
+      (session.assistantName !== SPECIALIST_LOGIN_NAME &&
+        !data.assistants.includes(session.assistantName))
+    ) {
       showWarning('Asistan eşleşmesi bulunamadı. Lütfen tekrar giriş yapıp asistan seç.')
       setSession(null)
       setLoginView('assistant')
@@ -8476,7 +8488,7 @@ function App() {
                     name="assistant-picker-search"
                     type="search"
                     value={assistantUsernameInput}
-                    onFocus={() => setAssistantUserPickerOpen(true)}
+                    onFocus={openAssistantUserPicker}
                     onBlur={() => {
                       setTimeout(() => setAssistantUserPickerOpen(false), 120)
                     }}
@@ -8520,7 +8532,7 @@ function App() {
                   ) : null}
                 </div>
                 <p className="hint-text">
-                  Boşken tıklarsan tüm asistanları görürsün. Harf yazdıkça liste otomatik filtrelenir.
+                  Boşken tıklarsan tüm kullanıcıları görürsün. Harf yazdıkça liste otomatik filtrelenir.
                 </p>
               </div>
 
@@ -8695,9 +8707,11 @@ function App() {
 
           {session.role === 'assistant' ? (
             <div className="session-role assistant-welcome-card">
-              <span>Asistan Hekim</span>
+              <span>
+                {session.assistantName === SPECIALIST_LOGIN_NAME ? 'Uzman' : 'Asistan Hekim'}
+              </span>
               <strong className="assistant-welcome-text">
-                Hoşgeldiniz Sayın {observerAssistant || session.assistantName || 'Asistan'}
+                Hoşgeldiniz Sayın {session.assistantName || observerAssistant || 'Asistan'}
               </strong>
             </div>
           ) : null}
@@ -9934,13 +9948,6 @@ function App() {
               >
                 Haftalık Görünüm
               </button>
-              <button
-                type="button"
-                className={observerSection === 'dailyMap' ? 'active' : ''}
-                onClick={() => selectObserverSection('dailyMap')}
-              >
-                Günlük Harita
-              </button>
             </div>
           </section>
 
@@ -9952,29 +9959,32 @@ function App() {
                 tablolarını ayrı sayfada hızlıca açmasını sağlar.
               </p>
 
-              <article className="weekly-brief-card">
-                <header>
-                  <div>
-                    <span>Bu Haftanın Özeti</span>
-                    <h3>Sayın {loggedAssistantName || 'Asistan'}, {myWeeklyBriefPeriodLabel} planın</h3>
-                  </div>
-                  <small>{myWeeklyBriefRangeLabel}</small>
-                </header>
+              {loggedAssistantName !== SPECIALIST_LOGIN_NAME ? (
+                <article className="weekly-brief-card">
+                  <header>
+                    <div>
+                      <span>Bu Haftanın Özeti</span>
+                      <h3>
+                        Sayın {loggedAssistantName || 'Asistan'}, {myWeeklyBriefPeriodLabel} planın
+                      </h3>
+                    </div>
+                    <small>{myWeeklyBriefRangeLabel}</small>
+                  </header>
 
-                <ol className="weekly-brief-list">
-                  {myWeeklyBriefDays.map((briefDay) => {
-                    const hasDailyPlan =
-                      briefDay.normalAssignments.length ||
-                      briefDay.leaveLabels.length ||
-                      briefDay.postDutySite ||
-                      briefDay.dutyInfo
+                  <ol className="weekly-brief-list">
+                    {myWeeklyBriefDays.map((briefDay) => {
+                      const hasDailyPlan =
+                        briefDay.normalAssignments.length ||
+                        briefDay.leaveLabels.length ||
+                        briefDay.postDutySite ||
+                        briefDay.dutyInfo
 
-                    return (
-                      <li key={`my-weekly-brief-${briefDay.day.key}`} className="weekly-brief-item">
-                        <div className="weekly-brief-date">
-                          <strong>{briefDay.weekdayLabel}</strong>
-                          <span>{briefDay.day.shortLabel}</span>
-                        </div>
+                      return (
+                        <li key={`my-weekly-brief-${briefDay.day.key}`} className="weekly-brief-item">
+                          <div className="weekly-brief-date">
+                            <strong>{briefDay.weekdayLabel}</strong>
+                            <span>{briefDay.day.shortLabel}</span>
+                          </div>
 
                         <div className="weekly-brief-body">
                           {briefDay.normalAssignments.map((assignment) => (
@@ -10087,8 +10097,9 @@ function App() {
                       </li>
                     )
                   })}
-                </ol>
-              </article>
+                  </ol>
+                </article>
+              ) : null}
 
               <article className="focus-location my-calendar-export-launch">
                 <h3>Takvim Tablosu</h3>
@@ -10190,7 +10201,10 @@ function App() {
                 <button
                   type="button"
                   className={observerWeekDetailView === 'person' ? 'active' : ''}
-                  onClick={() => setObserverWeekDetailView('person')}
+                  onClick={() => {
+                    setObserverWeekDetailView('person')
+                    randomizeObserverPersonList()
+                  }}
                 >
                   Kişi Bazlı
                 </button>
@@ -10218,7 +10232,7 @@ function App() {
                       onChange={(event) => setObserverAssistant(event.target.value)}
                     >
                       <option value="">Kişi seç</option>
-                      {data.assistants.map((assistant) => (
+                      {observerPersonOptions.map((assistant) => (
                         <option key={assistant} value={assistant}>
                           {assistant}
                         </option>
@@ -10368,138 +10382,6 @@ function App() {
                   </div>
                 </>
               ) : null}
-            </section>
-          ) : null}
-
-          {observerSection === 'dailyMap' ? (
-            <section className="card fade-up delay-3">
-            <h2>Günlük Genel Dağılım</h2>
-            <p className="subtext">
-              Başka birinin nerede olduğunu veya bir alanda kimlerin olduğunu buradan hızlıca gör.
-            </p>
-
-            <div className="form-row responsive">
-              <select
-                className="my-calendar-month-select"
-                value={observerMonth}
-                onChange={(event) => {
-                  setObserverMonth(event.target.value)
-                  setActiveObserverWeek('')
-                }}
-              >
-                {myCalendarMonthOptions.map((option) => (
-                  <option key={`observer-month-${option.value}`} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <h3 className="observer-tab-title">Hafta Seç</h3>
-            <div
-              ref={observerDailyWeekScrollerRef}
-              className="planner-day-tabs observer-week-tabs observer-rolling-week-tabs"
-            >
-              {observerRollingWeekOptions.map((group) => (
-                <button
-                  key={`observer-week-${group.weekStartISO}`}
-                  type="button"
-                  data-week-start={group.weekStartISO}
-                  className={activeObserverWeek === group.weekStartISO ? 'active' : ''}
-                  onClick={() => setActiveObserverWeek(group.weekStartISO)}
-                >
-                  <strong>{group.label}</strong>
-                  <span>{group.rangeLabel}</span>
-                </button>
-              ))}
-            </div>
-
-            {observerActiveWeekDays.length ? (
-              <>
-                <h3 className="observer-tab-title">Gün Seç</h3>
-                <div
-                  ref={observerDailyDayScrollerRef}
-                  className="planner-day-tabs observer-day-tabs observer-rolling-day-tabs"
-                >
-                {observerActiveWeekDays.map((day) => (
-                  <button
-                    key={`observer-day-${day.key}`}
-                    type="button"
-                    data-day-key={day.key}
-                    className={observerDay === day.key ? 'active' : ''}
-                    onClick={() => setObserverDay(day.key)}
-                  >
-                    {day.shortLabel} (
-                    {fromISODate(day.key).toLocaleDateString('tr-TR', { weekday: 'long' })})
-                  </button>
-                ))}
-                </div>
-              </>
-            ) : (
-              <p className="hint-text planner-hint">Bu ay için gösterilecek gün bulunamadı.</p>
-            )}
-
-            {groupedObserverLocations.map(([siteName, siteLocations]) => (
-              <section key={`observer-site-group-${siteName}`} className="site-group-card">
-                <h3 className="site-group-title">{siteName}</h3>
-                <div className="location-tiles">
-                  {siteLocations.map((location) => {
-                    const names = observerDay
-                      ? getDisplayAssignmentsForLocation(data, observerDay, location)
-                      : []
-                    const specialistLabel = observerDay
-                      ? getSpecialistLabelForLocation(data, observerDay, location)
-                      : null
-                    const dutySpecialistNames =
-                      observerDay && location.kind === 'duty'
-                        ? sortSpecialistDutyAssignments(data.specialistDutyRoster[observerDay] ?? []).map(
-                            formatSpecialistDutyLabel,
-                          )
-                        : []
-
-                    return (
-                      <article key={`observer-${location.id}`} className={`tile tone-${location.tone}`}>
-                        <header>
-                          <h4>{location.name}</h4>
-                          <small>{LOCATION_KIND_LABELS[location.kind]}</small>
-                        </header>
-                        {specialistLabel ? (
-                          <p className="tile-specialist-inline specialist-work-meta">{specialistLabel}</p>
-                        ) : null}
-                        {dutySpecialistNames.length ? (
-                          <div className="daily-map-duty-specialists">
-                            <span>Nöbetçi uzmanlar</span>
-                            <div className="duty-specialist-row">
-                              {dutySpecialistNames.map((name) => (
-                                <span
-                                  key={`observer-duty-specialist-${observerDay}-${name}`}
-                                  className="duty-name-line specialist-duty-name-line"
-                                >
-                                  {name}
-                                </span>
-                              ))}
-                            </div>
-                          </div>
-                        ) : null}
-                        <div className="chip-wrap">
-                          {names.length ? (
-                            names.map((name) => (
-                              <span className="chip" key={`observer-${location.id}-${name}`}>
-                                {name}
-                              </span>
-                            ))
-                          ) : dutySpecialistNames.length ? (
-                            <span className="empty">Nöbetçi asistan görünmüyor</span>
-                          ) : (
-                            <span className="empty">Atama yok</span>
-                          )}
-                        </div>
-                      </article>
-                    )
-                  })}
-                </div>
-              </section>
-            ))}
             </section>
           ) : null}
 
