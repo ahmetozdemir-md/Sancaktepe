@@ -8269,7 +8269,20 @@ function App() {
   if (!session) {
     return (
       <div className="page-shell login-shell">
-        <section className="card login-card fade-up">
+        <div className="login-portal-layout">
+          <figure className="login-hero fade-up" aria-hidden="true">
+            <div className="login-hero-glow" />
+            <img
+              src="/assets/anesthesia-hero.png"
+              alt=""
+              width="800"
+              height="593"
+              decoding="async"
+              fetchPriority="high"
+            />
+          </figure>
+
+          <section className="card login-card fade-up">
           <p className="eyebrow">Giriş</p>
           <h1>Asistan Sistemi</h1>
           <p className="subtext">Giriş türünü seçip devam et.</p>
@@ -8544,7 +8557,8 @@ function App() {
               {notice.text}
             </div>
           ) : null}
-        </section>
+          </section>
+        </div>
         {appFooter}
       </div>
     )
