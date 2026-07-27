@@ -33,6 +33,17 @@ Bunun için sırasıyla:
 
 Bu modda asistanlar listeyi okumaya devam eder; veri yazma, yedek alma ve yedekten dönme sadece yetkili Supabase admin oturumuyla yapılır.
 
+## Asistan Giriş Şifresi
+
+Ortak asistan şifresi ve hatırlanan cihaz doğrulaması için güvenli admin modu kurulduktan sonra
+`supabase/005_assistant_access_password.sql` dosyasını Supabase SQL Editor'de çalıştır.
+
+- İlk ortak şifre `sancaktepe` olarak yalnız kurulum sırasında bcrypt hash biçiminde oluşturulur.
+- Gerçek şifre tarayıcıda veya veritabanında düz metin olarak saklanmaz.
+- Admin panelindeki **Şifre** modülü yalnız `portal_admins` tablosunda yetkili Supabase kullanıcısıyla çalışır.
+- Şifre değişince daha önce hatırlanan bütün cihaz anahtarları geçersiz olur.
+- Aynı cihazdan art arda 5 yanlış deneme, asistan girişini 1 saat bloke eder.
+
 ## Veri Güvenliği Notu
 
 Admin panelindeki **Yedekler** modülü, mevcut online verinin elle yedeğini alıp gerektiğinde geri yüklemek için eklendi.

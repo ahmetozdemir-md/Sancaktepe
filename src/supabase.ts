@@ -10,6 +10,9 @@ export const REMOTE_STATE_TABLE = 'portal_state'
 export const REMOTE_STATE_ROW_ID = 1
 export const REMOTE_STATE_HISTORY_TABLE = 'portal_state_history'
 export const LOGIN_EVENTS_TABLE = 'login_events'
+export const VERIFY_ASSISTANT_ACCESS_RPC = 'verify_assistant_access'
+export const VALIDATE_ASSISTANT_ACCESS_RPC = 'validate_assistant_access'
+export const CHANGE_ASSISTANT_ACCESS_PASSWORD_RPC = 'change_assistant_access_password'
 
 export const isSupabaseConfigured = Boolean(supabaseUrl && supabaseKey)
 export const isCloudWriteEnabled = cloudWriteEnv.toLocaleLowerCase('tr') !== 'false'

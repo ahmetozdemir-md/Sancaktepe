@@ -3,8 +3,11 @@ import './App.css'
 import {
   isCloudWriteEnabled,
   isSupabaseAdminAuthRequired,
+  CHANGE_ASSISTANT_ACCESS_PASSWORD_RPC,
   LOGIN_EVENTS_TABLE,
   REMOTE_STATE_HISTORY_TABLE,
+  VALIDATE_ASSISTANT_ACCESS_RPC,
+  VERIFY_ASSISTANT_ACCESS_RPC,
   isSupabaseConfigured,
   REMOTE_STATE_ROW_ID,
   REMOTE_STATE_TABLE,
@@ -29,7 +32,9 @@ type AdminSection =
   | 'specialists'
   | 'backups'
   | 'loginEvents'
+  | 'password'
 type ObserverSection = 'myPanel' | 'personWeek' | 'dailyMap'
+type LoginView = 'choose' | 'admin' | 'assistant-password' | 'assistant'
 type ObserverWeekDetailView = 'person' | 'room' | 'duty'
 type PlannerView = 'rooms' | 'status'
 type LocationKind = 'normal' | 'leave' | 'duty' | 'postDuty'
@@ -170,6 +175,14 @@ interface AdminLoginGuardState {
   rememberedAdmin: boolean
 }
 
+interface AssistantAccessVerificationRow {
+  success?: unknown
+  access_token?: unknown
+  blocked_until?: unknown
+  attempts_remaining?: unknown
+  status_message?: unknown
+}
+
 interface LoginEventEntry {
   id: number
   personName: string
@@ -250,6 +263,8 @@ const LAST_ASSISTANT_USER_KEY = 'assistant-last-user-v1'
 const LOGIN_EVENT_CLEANUP_KEY = 'assistant-login-event-cleanup-v1'
 const ADMIN_LOGIN_GUARD_KEY = 'assistant-admin-login-guard-v1'
 const ADMIN_AUTH_EMAIL_KEY = 'assistant-admin-auth-email-v1'
+const ASSISTANT_ACCESS_DEVICE_KEY = 'assistant-access-device-v1'
+const ASSISTANT_ACCESS_TOKEN_KEY = 'assistant-access-token-v1'
 const CLOUD_READ_ONLY_TEXT = 'Bulut salt-okunur modda (yerelden buluta yazma kapalı).'
 const CLOUD_AUTH_LOCKED_TEXT = 'Bulut yazma kilitli: güvenli admin girişi gerekli.'
 const CLOUD_SAFE_GUARD_TEXT =
@@ -2852,6 +2867,42 @@ function safeReadAdminAuthEmail() {
   return localStorage.getItem(ADMIN_AUTH_EMAIL_KEY) ?? ''
 }
 
+function getOrCreateAssistantAccessDeviceId(): string {
+  if (typeof window === 'undefined') {
+    return ''
+  }
+
+  const storedDeviceId = localStorage.getItem(ASSISTANT_ACCESS_DEVICE_KEY)
+  if (storedDeviceId) {
+    return storedDeviceId
+  }
+
+  const deviceId =
+    typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`
+  localStorage.setItem(ASSISTANT_ACCESS_DEVICE_KEY, deviceId)
+  return deviceId
+}
+
+function safeReadAssistantAccessToken(): string {
+  if (typeof window === 'undefined') {
+    return ''
+  }
+  return localStorage.getItem(ASSISTANT_ACCESS_TOKEN_KEY) ?? ''
+}
+
+function storeAssistantAccessToken(token: string) {
+  if (typeof window === 'undefined') {
+    return
+  }
+  if (token) {
+    localStorage.setItem(ASSISTANT_ACCESS_TOKEN_KEY, token)
+  } else {
+    localStorage.removeItem(ASSISTANT_ACCESS_TOKEN_KEY)
+  }
+}
+
 async function sha256Hex(value: string): Promise<string> {
   if (typeof crypto === 'undefined' || !crypto.subtle) {
     return ''
@@ -2937,7 +2988,7 @@ function App() {
   const [observerSection, setObserverSection] = useState<ObserverSection>('myPanel')
   const [plannerView, setPlannerView] = useState<PlannerView>('rooms')
   const [session, setSession] = useState<SessionInfo | null>(null)
-  const [loginView, setLoginView] = useState<'choose' | 'admin' | 'assistant'>('choose')
+  const [loginView, setLoginView] = useState<LoginView>('choose')
   const [blockClockMs, setBlockClockMs] = useState(() => Date.now())
   const initialAdminLoginGuard = useMemo(() => safeReadAdminLoginGuard(), [])
   const [adminLoginGuard, setAdminLoginGuard] = useState<AdminLoginGuardState>(initialAdminLoginGuard)
@@ -2955,6 +3006,13 @@ function App() {
   const [isAdminCloudAuthVerified, setIsAdminCloudAuthVerified] = useState(!isSupabaseAdminAuthRequired)
   const [assistantUsernameInput, setAssistantUsernameInput] = useState('')
   const [assistantUserPickerOpen, setAssistantUserPickerOpen] = useState(false)
+  const [assistantAccessPassword, setAssistantAccessPassword] = useState('')
+  const [assistantAccessChecking, setAssistantAccessChecking] = useState(false)
+  const [assistantAccessRemembered, setAssistantAccessRemembered] = useState(false)
+  const [assistantAccessBlockedUntil, setAssistantAccessBlockedUntil] = useState(0)
+  const [assistantPasswordNew, setAssistantPasswordNew] = useState('')
+  const [assistantPasswordConfirm, setAssistantPasswordConfirm] = useState('')
+  const [assistantPasswordSaving, setAssistantPasswordSaving] = useState(false)
   const assistantLoginManuallyClearedRef = useRef(false)
   const [data, setData] = useState<PlannerState>(() => safeReadState())
   const [userBindings, setUserBindings] = useState<Record<string, string>>(() => safeReadUserBindings())
@@ -3348,6 +3406,10 @@ function App() {
     (session?.role === 'assistant' &&
       (assistantMonthlyTableOpen || assistantWeeklyExportOpen || observerDutyListOpen))
   const adminBlockRemainingMs = Math.max(0, adminLoginGuard.blockedUntil - blockClockMs)
+  const assistantAccessBlockRemainingMs = Math.max(
+    0,
+    assistantAccessBlockedUntil - blockClockMs,
+  )
   const isSecureCloudWriteUnlocked = !isSupabaseAdminAuthRequired || isAdminCloudAuthVerified
 
   useEffect(() => {
@@ -3488,7 +3550,11 @@ function App() {
 
   useEffect(() => {
     setBlockClockMs(Date.now())
-    if (adminLoginGuard.blockedUntil <= Date.now()) {
+    const nextBlockedUntil = Math.max(
+      adminLoginGuard.blockedUntil,
+      assistantAccessBlockedUntil,
+    )
+    if (nextBlockedUntil <= Date.now()) {
       return
     }
     const timer = window.setInterval(() => {
@@ -3497,7 +3563,7 @@ function App() {
     return () => {
       window.clearInterval(timer)
     }
-  }, [adminLoginGuard.blockedUntil])
+  }, [adminLoginGuard.blockedUntil, assistantAccessBlockedUntil])
 
   useEffect(() => {
     if (!adminLoginGuard.blockedUntil || adminBlockRemainingMs > 0) {
@@ -3512,6 +3578,13 @@ function App() {
       : previous,
     )
   }, [adminBlockRemainingMs, adminLoginGuard.blockedUntil])
+
+  useEffect(() => {
+    if (!assistantAccessBlockedUntil || assistantAccessBlockRemainingMs > 0) {
+      return
+    }
+    setAssistantAccessBlockedUntil(0)
+  }, [assistantAccessBlockRemainingMs, assistantAccessBlockedUntil])
 
   useEffect(() => {
     const scroller = plannerMonthDayScrollerRef.current
@@ -4037,6 +4110,203 @@ function App() {
     }
   }
 
+  const openAssistantAccess = async () => {
+    setNotice(null)
+    const rememberedToken = safeReadAssistantAccessToken()
+    if (!rememberedToken) {
+      setAssistantAccessRemembered(false)
+      setLoginView('assistant-password')
+      return
+    }
+
+    if (!isSupabaseConfigured || !supabase) {
+      storeAssistantAccessToken('')
+      setAssistantAccessRemembered(false)
+      setLoginView('assistant-password')
+      showWarning('Asistan şifresini doğrulamak için Supabase bağlantısı gerekli.')
+      return
+    }
+
+    setAssistantAccessChecking(true)
+    try {
+      const { data: isValid, error } = await supabase.rpc(
+        VALIDATE_ASSISTANT_ACCESS_RPC,
+        { p_access_token: rememberedToken },
+      )
+
+      if (error) {
+        storeAssistantAccessToken('')
+        setAssistantAccessRemembered(false)
+        setLoginView('assistant-password')
+        showWarning(
+          'Asistan şifre sistemi hazır değil. Supabase üzerinde 005 SQL dosyasını çalıştır.',
+        )
+        return
+      }
+
+      if (isValid === true) {
+        setAssistantAccessRemembered(true)
+        setLoginView('assistant')
+        return
+      }
+
+      storeAssistantAccessToken('')
+      setAssistantAccessRemembered(false)
+      setLoginView('assistant-password')
+      showWarning('Şifre değişti veya cihaz doğrulamasının süresi doldu. Lütfen tekrar şifre gir.')
+    } finally {
+      setAssistantAccessChecking(false)
+    }
+  }
+
+  const verifyAssistantAccessPassword = async () => {
+    if (assistantAccessBlockRemainingMs > 0) {
+      showWarning(
+        `Bu cihazda asistan girişi geçici olarak bloke. ${formatRemainingBlock(
+          assistantAccessBlockRemainingMs,
+        )} sonra tekrar dene.`,
+      )
+      return
+    }
+
+    if (!assistantAccessPassword) {
+      showWarning('Asistan giriş şifresini yaz.')
+      return
+    }
+
+    if (!isSupabaseConfigured || !supabase) {
+      showWarning('Asistan şifresini doğrulamak için Supabase bağlantısı gerekli.')
+      return
+    }
+
+    const deviceId = getOrCreateAssistantAccessDeviceId()
+    const deviceHash = await sha256Hex(deviceId)
+    if (!deviceHash) {
+      showWarning('Bu tarayıcı güvenli cihaz doğrulamasını desteklemiyor.')
+      return
+    }
+
+    setAssistantAccessChecking(true)
+    try {
+      const { data: verificationData, error } = await supabase.rpc(
+        VERIFY_ASSISTANT_ACCESS_RPC,
+        {
+          p_password: assistantAccessPassword,
+          p_device_hash: deviceHash,
+        },
+      )
+
+      if (error) {
+        showWarning(
+          'Asistan şifre sistemi hazır değil. Supabase üzerinde 005 SQL dosyasını çalıştır.',
+        )
+        return
+      }
+
+      const row = (
+        Array.isArray(verificationData) ? verificationData[0] : verificationData
+      ) as AssistantAccessVerificationRow | null
+      const blockedUntil =
+        typeof row?.blocked_until === 'string'
+          ? Date.parse(row.blocked_until)
+          : 0
+
+      if (row?.success === true && typeof row.access_token === 'string') {
+        storeAssistantAccessToken(row.access_token)
+        setAssistantAccessPassword('')
+        setAssistantAccessBlockedUntil(0)
+        setAssistantAccessRemembered(true)
+        setLoginView('assistant')
+        setNotice(null)
+        return
+      }
+
+      if (Number.isFinite(blockedUntil) && blockedUntil > Date.now()) {
+        setAssistantAccessBlockedUntil(blockedUntil)
+        showWarning(
+          `5 yanlış deneme yapıldı. Bu cihazda asistan girişi ${formatRemainingBlock(
+            blockedUntil - Date.now(),
+          )} bloke edildi.`,
+        )
+        return
+      }
+
+      const attemptsRemaining =
+        typeof row?.attempts_remaining === 'number'
+          ? Math.max(0, Math.floor(row.attempts_remaining))
+          : null
+      showWarning(
+        attemptsRemaining === null
+          ? 'Asistan giriş şifresi hatalı.'
+          : `Asistan giriş şifresi hatalı. Blok uygulanmadan önce ${attemptsRemaining} deneme kaldı.`,
+      )
+    } finally {
+      setAssistantAccessChecking(false)
+    }
+  }
+
+  const resetAssistantAccessPassword = () => {
+    storeAssistantAccessToken('')
+    setAssistantAccessRemembered(false)
+    setAssistantAccessPassword('')
+    setAssistantAccessBlockedUntil(0)
+    setAssistantUserPickerOpen(false)
+    setLoginView('assistant-password')
+    setNotice(null)
+  }
+
+  const changeAssistantAccessPassword = async () => {
+    if (!assistantPasswordNew || !assistantPasswordConfirm) {
+      showWarning('Yeni şifreyi iki kutuya da yaz.')
+      return
+    }
+    if (assistantPasswordNew !== assistantPasswordConfirm) {
+      showWarning('Yeni şifreler birbiriyle eşleşmiyor.')
+      return
+    }
+    if (assistantPasswordNew.length < 8 || assistantPasswordNew.length > 128) {
+      showWarning('Asistan şifresi 8 ile 128 karakter arasında olmalı.')
+      return
+    }
+    if (!isSupabaseConfigured || !supabase) {
+      showWarning('Şifreyi değiştirmek için Supabase bağlantısı gerekli.')
+      return
+    }
+
+    setAssistantPasswordSaving(true)
+    try {
+      const { data: authData, error: authError } = await supabase.auth.getSession()
+      if (authError || !authData.session?.user) {
+        showWarning(
+          'Şifreyi değiştirmek için güvenli Supabase admin oturumu gerekli. Çıkış yapıp admin olarak tekrar giriş yap.',
+        )
+        return
+      }
+
+      const { error } = await supabase.rpc(CHANGE_ASSISTANT_ACCESS_PASSWORD_RPC, {
+        p_new_password: assistantPasswordNew,
+      })
+      if (error) {
+        showWarning(
+          error.code === '42501'
+            ? 'Bu Supabase hesabı portal admini olarak yetkili değil.'
+            : 'Şifre değiştirilemedi. 005 SQL dosyasının Supabase üzerinde çalıştırıldığını kontrol et.',
+        )
+        return
+      }
+
+      storeAssistantAccessToken('')
+      setAssistantAccessRemembered(false)
+      setAssistantPasswordNew('')
+      setAssistantPasswordConfirm('')
+      showSuccess(
+        'Asistan giriş şifresi değiştirildi. Daha önce hatırlanan tüm cihazlar yeniden şifre isteyecek.',
+      )
+    } finally {
+      setAssistantPasswordSaving(false)
+    }
+  }
+
   const loginAsAdmin = async () => {
     const now = Date.now()
     if (adminLoginGuard.blockedUntil > now) {
@@ -4212,9 +4482,29 @@ function App() {
     }
   }, [])
 
-  const loginAsAssistant = () => {
+  const loginAsAssistant = async () => {
     if (!matchedAssistantAccount) {
       showWarning('Lütfen listede bulunan bir asistan ismi seç.')
+      return
+    }
+
+    const rememberedToken = safeReadAssistantAccessToken()
+    if (!assistantAccessRemembered || !rememberedToken || !supabase) {
+      resetAssistantAccessPassword()
+      showWarning('Asistan seçimine devam etmek için giriş şifresini doğrula.')
+      return
+    }
+
+    setAssistantAccessChecking(true)
+    const { data: accessIsValid, error: accessError } = await supabase.rpc(
+      VALIDATE_ASSISTANT_ACCESS_RPC,
+      { p_access_token: rememberedToken },
+    )
+    setAssistantAccessChecking(false)
+
+    if (accessError || accessIsValid !== true) {
+      resetAssistantAccessPassword()
+      showWarning('Cihaz doğrulaması geçersiz. Asistan giriş şifresini tekrar yaz.')
       return
     }
 
@@ -4256,6 +4546,10 @@ function App() {
     assistantLoginManuallyClearedRef.current = false
     setPasswordInput('')
     setAdminCloudAuthPassword('')
+    setAssistantAccessPassword('')
+    setAssistantAccessChecking(false)
+    setAssistantAccessRemembered(false)
+    setAssistantAccessBlockedUntil(0)
     setAssistantUsernameInput('')
     setAssistantUserPickerOpen(false)
     if (isSupabaseAdminAuthRequired) {
@@ -7986,15 +8280,31 @@ function App() {
           <p className="subtext">Giriş türünü seçip devam et.</p>
 
           <div className="login-actions">
-            <button type="button" className={loginView === 'admin' ? 'active' : ''} onClick={() => setLoginView('admin')}>
+            <button
+              type="button"
+              className={loginView === 'admin' ? 'active' : ''}
+              onClick={() => {
+                setLoginView('admin')
+                setNotice(null)
+              }}
+            >
               Admin
             </button>
             <button
               type="button"
-              className={loginView === 'assistant' ? 'secondary active' : 'secondary'}
-              onClick={() => setLoginView('assistant')}
+              className={
+                loginView === 'assistant' || loginView === 'assistant-password'
+                  ? 'secondary active'
+                  : 'secondary'
+              }
+              disabled={assistantAccessChecking}
+              onClick={() => {
+                void openAssistantAccess()
+              }}
             >
-              Asistan Hekim
+              {assistantAccessChecking && loginView === 'choose'
+                ? 'Kontrol ediliyor...'
+                : 'Asistan Hekim'}
             </button>
           </div>
 
@@ -8065,8 +8375,76 @@ function App() {
             </>
           ) : null}
 
+          {loginView === 'assistant-password' ? (
+            <div className="assistant-access-panel">
+              <div className="assistant-access-heading">
+                <span>Asistan Girişi</span>
+                <strong>Ortak giriş şifresini doğrula</strong>
+              </div>
+              <div className="date-control">
+                <label htmlFor="assistant-access-password">Asistan Şifresi</label>
+                <input
+                  id="assistant-access-password"
+                  type="password"
+                  value={assistantAccessPassword}
+                  onChange={(event) => setAssistantAccessPassword(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') {
+                      event.preventDefault()
+                      void verifyAssistantAccessPassword()
+                    }
+                  }}
+                  placeholder="Şifreyi gir"
+                  autoComplete="current-password"
+                  disabled={assistantAccessChecking || assistantAccessBlockRemainingMs > 0}
+                />
+              </div>
+              <p className="assistant-access-security-note">
+                Şifre Anestezi Asistanları ekibi tarafından belirlenmektedir. Veri güvenliği
+                amacıyla şifrelenmektedir.
+              </p>
+              {assistantAccessBlockRemainingMs > 0 ? (
+                <p className="hint-text assistant-access-block-note">
+                  Bu cihazda 5 yanlış deneme yapıldı. Kalan bloke süresi:{' '}
+                  {formatRemainingBlock(assistantAccessBlockRemainingMs)}
+                </p>
+              ) : (
+                <p className="hint-text">
+                  Doğru girişten sonra bu cihaz güvenli bir doğrulama anahtarıyla hatırlanır;
+                  gerçek şifre cihazda saklanmaz.
+                </p>
+              )}
+              <button
+                type="button"
+                onClick={() => {
+                  void verifyAssistantAccessPassword()
+                }}
+                disabled={assistantAccessChecking || assistantAccessBlockRemainingMs > 0}
+              >
+                {assistantAccessChecking
+                  ? 'Doğrulanıyor...'
+                  : assistantAccessBlockRemainingMs > 0
+                    ? 'Geçici Olarak Bloklu'
+                    : 'Şifreyi Doğrula'}
+              </button>
+            </div>
+          ) : null}
+
           {loginView === 'assistant' ? (
             <>
+              <div className="assistant-device-status">
+                <div>
+                  <span>Cihaz Doğrulandı</span>
+                  <strong>Şimdi asistan ismini seçebilirsin.</strong>
+                </div>
+                <button
+                  type="button"
+                  className="ghost-button compact-action"
+                  onClick={resetAssistantAccessPassword}
+                >
+                  Farklı Şifre Kullan
+                </button>
+              </div>
               <div className="date-control">
                 <label htmlFor="assistant-picker-search">Asistan Seç</label>
                 <div className="assistant-user-picker">
@@ -8145,8 +8523,14 @@ function App() {
               ) : null}
 
               <div className="login-actions">
-                <button type="button" onClick={loginAsAssistant}>
-                  Giriş
+                <button
+                  type="button"
+                  onClick={() => {
+                    void loginAsAssistant()
+                  }}
+                  disabled={assistantAccessChecking}
+                >
+                  {assistantAccessChecking ? 'Doğrulanıyor...' : 'Giriş'}
                 </button>
               </div>
             </>
@@ -8381,6 +8765,13 @@ function App() {
                 onClick={() => selectAdminSection('loginEvents')}
               >
                 Girişler
+              </button>
+              <button
+                type="button"
+                className={adminSection === 'password' ? 'active' : ''}
+                onClick={() => selectAdminSection('password')}
+              >
+                Şifre
               </button>
             </div>
           </section>
@@ -9431,6 +9822,88 @@ function App() {
                   </table>
                 </div>
               </article>
+            </section>
+          ) : null}
+
+          {adminSection === 'password' ? (
+            <section className="card fade-up delay-5 assistant-password-admin-card">
+              <div className="assistant-password-admin-heading">
+                <div>
+                  <p className="eyebrow">Erişim Güvenliği</p>
+                  <h2>Asistan Giriş Şifresi</h2>
+                  <p className="subtext">
+                    Asistan Hekim girişinden önce sorulan ortak şifreyi buradan
+                    değiştirebilirsin.
+                  </p>
+                </div>
+                <span className="assistant-password-security-badge">Supabase ile şifreli</span>
+              </div>
+
+              <div className="assistant-password-info-grid">
+                <article>
+                  <span>Saklama</span>
+                  <strong>Yalnız bcrypt hash</strong>
+                  <small>Gerçek şifre veritabanına veya cihazlara kaydedilmez.</small>
+                </article>
+                <article>
+                  <span>Cihazlar</span>
+                  <strong>Değişince çıkış yapılır</strong>
+                  <small>Hatırlanan tüm cihazlar yeni şifreyi tekrar girmek zorunda kalır.</small>
+                </article>
+                <article>
+                  <span>Koruma</span>
+                  <strong>5 deneme / 1 saat</strong>
+                  <small>Bir cihaz art arda 5 kez yanılırsa geçici olarak bloke edilir.</small>
+                </article>
+              </div>
+
+              <div className="assistant-password-form">
+                <label htmlFor="assistant-password-new">
+                  Yeni Şifre
+                  <input
+                    id="assistant-password-new"
+                    type="password"
+                    value={assistantPasswordNew}
+                    onChange={(event) => setAssistantPasswordNew(event.target.value)}
+                    minLength={8}
+                    maxLength={128}
+                    autoComplete="new-password"
+                    placeholder="En az 8 karakter"
+                  />
+                </label>
+                <label htmlFor="assistant-password-confirm">
+                  Yeni Şifre Tekrarı
+                  <input
+                    id="assistant-password-confirm"
+                    type="password"
+                    value={assistantPasswordConfirm}
+                    onChange={(event) => setAssistantPasswordConfirm(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter') {
+                        event.preventDefault()
+                        void changeAssistantAccessPassword()
+                      }
+                    }}
+                    minLength={8}
+                    maxLength={128}
+                    autoComplete="new-password"
+                    placeholder="Yeni şifreyi tekrar yaz"
+                  />
+                </label>
+                <p className="assistant-password-form-note">
+                  Şifre büyük ve küçük harfe duyarlıdır. Değişiklik yalnız güvenli Supabase
+                  portal-admin oturumuyla kaydedilir.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    void changeAssistantAccessPassword()
+                  }}
+                  disabled={assistantPasswordSaving}
+                >
+                  {assistantPasswordSaving ? 'Şifre Değiştiriliyor...' : 'Yeni Şifreyi Kaydet'}
+                </button>
+              </div>
             </section>
           ) : null}
         </main>
