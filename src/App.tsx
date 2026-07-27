@@ -3901,9 +3901,6 @@ function App() {
         account.username === lowerLastUser,
     )
     if (matchingAccount) {
-      if (loginView === 'choose') {
-        setLoginView('assistant')
-      }
       setAssistantUsernameInput(matchingAccount.assistantName)
     }
   }, [assistantAccounts, assistantUsernameInput, loginView])
@@ -4480,23 +4477,9 @@ function App() {
       return
     }
 
-    const rememberedToken = safeReadAssistantAccessToken()
-    if (!assistantAccessRemembered || !rememberedToken || !supabase) {
+    if (!assistantAccessRemembered) {
       resetAssistantAccessPassword()
       showWarning('Asistan seçimine devam etmek için giriş şifresini doğrula.')
-      return
-    }
-
-    setAssistantAccessChecking(true)
-    const { data: accessIsValid, error: accessError } = await supabase.rpc(
-      VALIDATE_ASSISTANT_ACCESS_RPC,
-      { p_access_token: rememberedToken },
-    )
-    setAssistantAccessChecking(false)
-
-    if (accessError || accessIsValid !== true) {
-      resetAssistantAccessPassword()
-      showWarning('Cihaz doğrulaması geçersiz. Asistan giriş şifresini tekrar yaz.')
       return
     }
 
