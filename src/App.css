@@ -3981,8 +3981,7 @@ code {
     width: 400%;
     min-width: 400%;
     table-layout: fixed;
-    transform: scale(0.25);
-    transform-origin: top left;
+    zoom: 0.25;
   }
 
   .weekly-export-table th,
