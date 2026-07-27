@@ -3297,8 +3297,8 @@ function App() {
   }, [assistantAccounts, assistantLoginShuffleSeed])
   const observerPersonOptions = useMemo(() => {
     void observerPersonShuffleSeed
-    return shuffledCopy(data.assistants)
-  }, [data.assistants, observerPersonShuffleSeed])
+    return shuffledCopy(assistantAccounts.map((account) => account.assistantName))
+  }, [assistantAccounts, observerPersonShuffleSeed])
   const assistantLoginQuery = assistantUsernameInput.trim().toLocaleLowerCase('tr')
   const assistantLoginQueryCanonical = normalizeAssistantName(assistantUsernameInput).toLocaleLowerCase('tr')
   const filteredAssistantAccounts = useMemo(() => {
@@ -3984,7 +3984,7 @@ function App() {
       return
     }
 
-    if (!data.assistants.includes(observerAssistant)) {
+    if (!observerPersonOptions.includes(observerAssistant)) {
       setObserverAssistant(observerPersonOptions[0] ?? '')
     }
   }, [data.assistants, observerAssistant, observerPersonOptions, session])
@@ -4578,7 +4578,9 @@ function App() {
   }
 
   const randomizeObserverPersonList = () => {
-    const randomizedAssistants = shuffledCopy(data.assistants)
+    const randomizedAssistants = shuffledCopy(
+      assistantAccounts.map((account) => account.assistantName),
+    )
     setObserverPersonShuffleSeed((previous) => previous + 1)
     setObserverAssistant(randomizedAssistants[0] ?? '')
   }
