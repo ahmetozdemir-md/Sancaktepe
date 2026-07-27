@@ -10032,8 +10032,6 @@ function App() {
 
           {observerSection === 'myPanel' ? (
             <section className="card fade-up delay-2">
-              <h2>Toplu Görünüm</h2>
-
               {loggedAssistantName !== SPECIALIST_LOGIN_NAME ? (
                 <article className="weekly-brief-card">
                   <header>
@@ -10178,7 +10176,7 @@ function App() {
 
               <article className="focus-location my-calendar-export-launch">
                 <h3>Takvim Tablosu</h3>
-                <p className="subtext">Ay seçip Görüntüle dediğinde takvim ayrı sayfada sadece tablo olarak açılır.</p>
+                <p className="subtext">Aylık çalışma takvimini aç.</p>
                 <div className="form-row my-calendar-export-row">
                   <select
                     className="my-calendar-month-select"
@@ -10199,7 +10197,7 @@ function App() {
 
               <article className="focus-location my-calendar-export-launch">
                 <h3>Nöbet Listesi</h3>
-                <p className="subtext">Ayı seçip Görüntüle dediğinde nöbet tablosu ayrı sayfada açılır.</p>
+                <p className="subtext">Aylık nöbet listesini aç.</p>
                 <div className="form-row duty-list-launch-row">
                   <select
                     className="my-calendar-month-select"
@@ -10220,9 +10218,7 @@ function App() {
 
               <article className="focus-location my-calendar-export-launch">
                 <h3>Haftalık Herkes</h3>
-                <p className="subtext">
-                  Haftayı seçip Görüntüle dediğinde herkesin haftalık çalışma listesi ayrı sayfada açılır.
-                </p>
+                <p className="subtext">Herkesin haftalık çalışma listesini aç.</p>
                 <div className="form-row weekly-everyone-launch-row">
                   <select
                     className="my-calendar-month-select"
