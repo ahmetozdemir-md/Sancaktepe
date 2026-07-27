@@ -3998,14 +3998,23 @@ code {
     transform-origin: top left;
   }
 
-  .weekly-export-table-wrap.mobile-scaled-table-wrap {
-    overflow-y: hidden;
+  body.table-pan-unlocked .weekly-export-table-wrap.mobile-scaled-table-wrap {
+    overflow: hidden;
+    touch-action: pan-y pinch-zoom;
   }
 
   .weekly-export-table th,
   .weekly-export-table td {
     padding: 0.15rem 0.18rem;
-    font-size: 0.56rem;
+    font-size: 0.784rem;
+  }
+
+  .weekly-export-table thead th strong {
+    font-size: 1.204rem;
+  }
+
+  .weekly-export-table thead th span {
+    font-size: 1.008rem;
   }
 
   .weekly-export-table .group-col {
@@ -4021,18 +4030,18 @@ code {
   }
 
   .weekly-export-assistant-chip {
-    font-size: 0.56rem;
+    font-size: 0.784rem;
     line-height: 1.15;
     border-radius: 4px;
     padding: 0.03rem 0.14rem;
   }
 
   .weekly-export-specialist-line {
-    font-size: 0.52rem;
+    font-size: 0.896rem !important;
   }
 
   .weekly-export-rotator-chip {
-    font-size: 0.5rem;
+    font-size: 0.7rem;
     border-radius: 4px;
     padding: 0.03rem 0.14rem;
   }

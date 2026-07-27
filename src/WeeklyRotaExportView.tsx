@@ -51,11 +51,13 @@ function WeeklyRotaExportView({
   onPrint,
 }: WeeklyRotaExportViewProps) {
   const tableRef = useRef<HTMLTableElement>(null)
+  const tableWrapRef = useRef<HTMLDivElement>(null)
   const [mobileTableHeight, setMobileTableHeight] = useState<number | null>(null)
 
   useLayoutEffect(() => {
     const table = tableRef.current
-    if (!table || typeof window === 'undefined') {
+    const tableWrap = tableWrapRef.current
+    if (!table || !tableWrap || typeof window === 'undefined') {
       return
     }
 
@@ -70,6 +72,7 @@ function WeeklyRotaExportView({
           return
         }
 
+        tableWrap.scrollLeft = 0
         const visualHeight = Math.ceil(table.getBoundingClientRect().height)
         setMobileTableHeight((currentHeight) =>
           currentHeight === visualHeight ? currentHeight : visualHeight,
@@ -125,6 +128,7 @@ function WeeklyRotaExportView({
           <p>{weekRangeLabel}</p>
         </div>
         <div
+          ref={tableWrapRef}
           className={`weekly-export-table-wrap${
             mobileTableHeight === null ? '' : ' mobile-scaled-table-wrap'
           }`}
