@@ -601,7 +601,7 @@ h4 {
 }
 
 .subpanel-toggle.observer-toggle {
-  grid-template-columns: repeat(2, minmax(100px, 1fr));
+  grid-template-columns: repeat(3, minmax(100px, 1fr));
 }
 
 .subpanel-toggle button {
@@ -3382,6 +3382,131 @@ body.table-pan-unlocked .assistant-monthly-calendar-scroll {
   font-size: 0.78rem;
 }
 
+.daily-map-card {
+  padding: 0.9rem;
+}
+
+.daily-map-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.8rem;
+}
+
+.daily-map-heading .subtext {
+  margin-top: 0.2rem;
+}
+
+.daily-map-heading > strong {
+  flex: 0 0 auto;
+  border: 1px solid rgba(13, 109, 92, 0.18);
+  border-radius: 999px;
+  padding: 0.32rem 0.62rem;
+  background: rgba(235, 247, 241, 0.82);
+  color: #145d4b;
+  font-size: 0.72rem;
+  text-transform: capitalize;
+}
+
+.daily-map-week-tabs,
+.daily-map-day-tabs {
+  margin-top: 0.58rem;
+}
+
+.daily-map-day-tabs button {
+  gap: 0.08rem;
+}
+
+.daily-map-day-tabs button strong {
+  font-size: 0.72rem;
+  text-transform: capitalize;
+}
+
+.daily-map-day-tabs button span {
+  font-size: 0.66rem;
+}
+
+.daily-map-groups {
+  display: grid;
+  gap: 0.58rem;
+  margin-top: 0.62rem;
+}
+
+.daily-map-site-card {
+  margin-top: 0;
+  padding: 0.56rem;
+  border-radius: 12px;
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.78), rgba(243, 249, 245, 0.72));
+}
+
+.daily-map-site-card .site-group-title {
+  margin: 0 0 0.34rem;
+  font-size: 0.86rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.daily-map-location-grid {
+  margin-top: 0;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.42rem;
+}
+
+.daily-map-tile {
+  min-width: 0;
+  padding: 0.48rem;
+  border-radius: 11px;
+}
+
+.daily-map-tile > header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.35rem;
+}
+
+.daily-map-tile h4 {
+  min-width: 0;
+  font-size: 0.8rem;
+  line-height: 1.18;
+  overflow-wrap: anywhere;
+}
+
+.daily-map-tile small {
+  flex: 0 0 auto;
+  font-size: 0.56rem;
+  line-height: 1.15;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.daily-map-tile .tile-specialist-inline {
+  margin: 0.28rem 0 0.16rem;
+  font-size: 0.65rem;
+  line-height: 1.25;
+}
+
+.daily-map-tile .chip-wrap {
+  gap: 0.2rem;
+  margin-top: 0.28rem;
+}
+
+.daily-map-tile .chip {
+  padding: 0.14rem 0.36rem;
+  font-size: 0.68rem;
+  line-height: 1.15;
+}
+
+.daily-map-tile .empty {
+  font-size: 0.66rem;
+}
+
+.daily-map-tile .daily-map-duty-specialists {
+  margin: 0.28rem 0 0.34rem;
+  padding: 0.3rem;
+}
+
 .tone-sand {
   background-color: rgba(251, 232, 192, 0.26);
 }
@@ -3659,7 +3784,7 @@ code {
 
   .subpanel-toggle.observer-toggle {
     display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
     overflow: visible;
     gap: 0.45rem;
     padding-bottom: 0;
@@ -3948,7 +4073,7 @@ code {
 
   .subpanel-toggle.observer-toggle {
     display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
     overflow: visible;
     gap: 0.45rem;
     padding-bottom: 0;
@@ -3959,7 +4084,46 @@ code {
     white-space: normal;
     text-align: center;
     line-height: 1.2;
-    min-height: 44px;
+    min-height: 40px;
+    padding: 0.42rem 0.28rem;
+    font-size: 0.7rem;
+  }
+
+  .daily-map-card {
+    padding: 0.66rem;
+  }
+
+  .daily-map-heading {
+    display: grid;
+    gap: 0.38rem;
+  }
+
+  .daily-map-heading > strong {
+    width: fit-content;
+    font-size: 0.64rem;
+  }
+
+  .daily-map-location-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.34rem;
+  }
+
+  .daily-map-tile.kind-duty,
+  .daily-map-tile.kind-postDuty,
+  .daily-map-tile.kind-leave {
+    grid-column: 1 / -1;
+  }
+
+  .daily-map-tile {
+    padding: 0.42rem;
+  }
+
+  .daily-map-tile h4 {
+    font-size: 0.74rem;
+  }
+
+  .daily-map-tile .chip {
+    font-size: 0.64rem;
   }
 
   .planner-day-tabs.observer-week-tabs,

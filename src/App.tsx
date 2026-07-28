@@ -33,7 +33,7 @@ type AdminSection =
   | 'backups'
   | 'loginEvents'
   | 'password'
-type ObserverSection = 'myPanel' | 'personWeek'
+type ObserverSection = 'myPanel' | 'personWeek' | 'dailyMap'
 type LoginView = 'choose' | 'admin' | 'assistant-password' | 'assistant'
 type AssistantAccessTarget = 'assistant' | 'specialist'
 type ObserverWeekDetailView = 'specialist' | 'assistant' | 'room' | 'duty'
@@ -3059,6 +3059,8 @@ function App() {
   const cloudHistoryBackupLastAtRef = useRef(0)
   const preChangeBackupLastAtRef = useRef<Record<string, number>>({})
   const observerWeeklyScrollerRef = useRef<HTMLDivElement | null>(null)
+  const observerDailyWeekScrollerRef = useRef<HTMLDivElement | null>(null)
+  const observerDailyDayScrollerRef = useRef<HTMLDivElement | null>(null)
   const plannerMonthDayScrollerRef = useRef<HTMLDivElement | null>(null)
   const [backupEntries, setBackupEntries] = useState<BackupEntry[]>([])
   const [isBackupLoading, setIsBackupLoading] = useState(false)
@@ -3107,6 +3109,8 @@ function App() {
   const [observerDutyMonthActive, setObserverDutyMonthActive] = useState(currentMonthISO)
   const [observerDutyListOpen, setObserverDutyListOpen] = useState(false)
   const [observerWeeklyWeekStart, setObserverWeeklyWeekStart] = useState(currentWeekStartISO)
+  const [observerDailyWeekStart, setObserverDailyWeekStart] = useState(currentWeekStartISO)
+  const [observerDay, setObserverDay] = useState(todayISO)
   const [observerPersonShuffleSeed, setObserverPersonShuffleSeed] = useState(0)
   const [observerWeekSpecialist, setObserverWeekSpecialist] = useState('')
   const [observerWeekRoom, setObserverWeekRoom] = useState('')
@@ -3173,6 +3177,12 @@ function App() {
         }
       }),
     [currentWeekStartISO],
+  )
+  const observerDailyWeekDays = useMemo(
+    () =>
+      observerRollingWeekOptions.find((week) => week.weekStartISO === observerDailyWeekStart)?.days ??
+      buildWeek(observerDailyWeekStart),
+    [observerDailyWeekStart, observerRollingWeekOptions],
   )
   const observerWeeklyDays = useMemo(() => buildWeek(observerWeeklyWeekStart), [observerWeeklyWeekStart])
   const observerWeekSpecialistOptions = useMemo(
@@ -3269,6 +3279,10 @@ function App() {
   const groupedStatusLocations = useMemo(
     () => groupBySite(plannerStatusLocations, plannerReferenceDay),
     [groupBySite, plannerReferenceDay, plannerStatusLocations],
+  )
+  const groupedObserverDailyLocations = useMemo(
+    () => groupBySite(getLocationsForDay(data, observerDay), observerDay),
+    [data, groupBySite, observerDay],
   )
   const observerWeekRoomOptions = useMemo(
     () => sortedLocations.filter((location) => location.kind === 'normal'),
@@ -3999,6 +4013,29 @@ function App() {
   }, [currentWeekStartISO, observerRollingWeekOptions, observerWeeklyWeekStart])
 
   useEffect(() => {
+    if (
+      observerRollingWeekOptions.length &&
+      !observerRollingWeekOptions.some((week) => week.weekStartISO === observerDailyWeekStart)
+    ) {
+      setObserverDailyWeekStart(currentWeekStartISO)
+      setObserverDay(todayISO)
+      return
+    }
+
+    if (!observerDailyWeekDays.some((day) => day.key === observerDay)) {
+      const preferredDay = observerDailyWeekDays.find((day) => day.key === todayISO)
+      setObserverDay(preferredDay?.key ?? observerDailyWeekDays[0]?.key ?? todayISO)
+    }
+  }, [
+    currentWeekStartISO,
+    observerDailyWeekDays,
+    observerDailyWeekStart,
+    observerDay,
+    observerRollingWeekOptions,
+    todayISO,
+  ])
+
+  useEffect(() => {
     if (!observerWeekSpecialistOptions.includes(observerWeekSpecialist)) {
       setObserverWeekSpecialist(observerWeekSpecialistOptions[0] ?? '')
     }
@@ -4029,7 +4066,21 @@ function App() {
     if (observerSection === 'personWeek') {
       scrollItemToStart(observerWeeklyScrollerRef.current, `[data-week-start="${currentWeekStartISO}"]`)
     }
-  }, [currentWeekStartISO, observerRollingWeekOptions, observerSection])
+
+    if (observerSection === 'dailyMap') {
+      scrollItemToStart(
+        observerDailyWeekScrollerRef.current,
+        `[data-week-start="${observerDailyWeekStart}"]`,
+      )
+      scrollItemToStart(observerDailyDayScrollerRef.current, `[data-day-key="${observerDay}"]`)
+    }
+  }, [
+    currentWeekStartISO,
+    observerDailyWeekStart,
+    observerDay,
+    observerRollingWeekOptions,
+    observerSection,
+  ])
 
   useEffect(() => {
     if (!plannerMonthDays.length) {
@@ -10027,6 +10078,13 @@ function App() {
               >
                 Haftalık Görünüm
               </button>
+              <button
+                type="button"
+                className={observerSection === 'dailyMap' ? 'active' : ''}
+                onClick={() => selectObserverSection('dailyMap')}
+              >
+                Günlük Harita
+              </button>
             </div>
           </section>
 
@@ -10513,6 +10571,152 @@ function App() {
                   </div>
                 </>
               ) : null}
+            </section>
+          ) : null}
+
+          {observerSection === 'dailyMap' ? (
+            <section className="card fade-up delay-2 daily-map-card">
+              <header className="daily-map-heading">
+                <div>
+                  <h2>Günlük Harita</h2>
+                  <p className="subtext">
+                    Seçtiğin gün hastanelerde kimlerin çalıştığını tek ekranda gör.
+                  </p>
+                </div>
+                <strong>
+                  {fromISODate(observerDay).toLocaleDateString('tr-TR', {
+                    day: 'numeric',
+                    month: 'long',
+                    year: 'numeric',
+                    weekday: 'long',
+                  })}
+                </strong>
+              </header>
+
+              <div
+                ref={observerDailyWeekScrollerRef}
+                className="planner-day-tabs observer-week-tabs observer-rolling-week-tabs daily-map-week-tabs"
+                aria-label="Hafta seç"
+              >
+                {observerRollingWeekOptions.map((week) => (
+                  <button
+                    key={`observer-daily-week-${week.weekStartISO}`}
+                    type="button"
+                    data-week-start={week.weekStartISO}
+                    className={observerDailyWeekStart === week.weekStartISO ? 'active' : ''}
+                    onClick={() => {
+                      setObserverDailyWeekStart(week.weekStartISO)
+                      setObserverDay(
+                        week.days.find((day) => day.key === todayISO)?.key ??
+                          week.days[0]?.key ??
+                          week.weekStartISO,
+                      )
+                    }}
+                  >
+                    <strong>{week.label}</strong>
+                    <span>{week.rangeLabel}</span>
+                  </button>
+                ))}
+              </div>
+
+              <div
+                ref={observerDailyDayScrollerRef}
+                className="planner-day-tabs observer-day-tabs observer-rolling-day-tabs daily-map-day-tabs"
+                aria-label="Gün seç"
+              >
+                {observerDailyWeekDays.map((day) => (
+                  <button
+                    key={`observer-daily-day-${day.key}`}
+                    type="button"
+                    data-day-key={day.key}
+                    className={observerDay === day.key ? 'active' : ''}
+                    onClick={() => setObserverDay(day.key)}
+                  >
+                    <strong>
+                      {fromISODate(day.key).toLocaleDateString('tr-TR', { weekday: 'short' })}
+                    </strong>
+                    <span>{day.shortLabel}</span>
+                  </button>
+                ))}
+              </div>
+
+              <div className="daily-map-groups">
+                {groupedObserverDailyLocations.map(([siteName, siteLocations]) => (
+                  <section
+                    key={`observer-daily-site-${siteName}`}
+                    className="site-group-card daily-map-site-card"
+                  >
+                    <h3 className="site-group-title">{siteName}</h3>
+                    <div className="location-tiles daily-map-location-grid">
+                      {siteLocations.map((location) => {
+                        const names = getDisplayAssignmentsForLocation(data, observerDay, location)
+                        const specialistLabel = getSpecialistLabelForLocation(
+                          data,
+                          observerDay,
+                          location,
+                        )
+                        const dutySpecialistNames =
+                          location.kind === 'duty'
+                            ? sortSpecialistDutyAssignments(
+                                data.specialistDutyRoster[observerDay] ?? [],
+                              ).map(formatSpecialistDutyLabel)
+                            : []
+
+                        return (
+                          <article
+                            key={`observer-daily-${location.id}`}
+                            className={`tile tone-${location.tone} kind-${location.kind} daily-map-tile`}
+                          >
+                            <header>
+                              <h4>{location.name}</h4>
+                              <small>{LOCATION_KIND_LABELS[location.kind]}</small>
+                            </header>
+
+                            {specialistLabel ? (
+                              <p className="tile-specialist-inline specialist-work-meta">
+                                {specialistLabel}
+                              </p>
+                            ) : null}
+
+                            {dutySpecialistNames.length ? (
+                              <div className="daily-map-duty-specialists">
+                                <span>Nöbetçi uzmanlar</span>
+                                <div className="duty-specialist-row">
+                                  {dutySpecialistNames.map((name) => (
+                                    <span
+                                      key={`observer-daily-duty-specialist-${observerDay}-${name}`}
+                                      className="duty-name-line specialist-duty-name-line"
+                                    >
+                                      {name}
+                                    </span>
+                                  ))}
+                                </div>
+                              </div>
+                            ) : null}
+
+                            <div className="chip-wrap">
+                              {names.length ? (
+                                names.map((name) => (
+                                  <span
+                                    className="chip"
+                                    key={`observer-daily-${location.id}-${name}`}
+                                  >
+                                    {name}
+                                  </span>
+                                ))
+                              ) : dutySpecialistNames.length ? (
+                                <span className="empty">Nöbetçi asistan görünmüyor</span>
+                              ) : (
+                                <span className="empty">Atama yok</span>
+                              )}
+                            </div>
+                          </article>
+                        )
+                      })}
+                    </div>
+                  </section>
+                ))}
+              </div>
             </section>
           ) : null}
 
