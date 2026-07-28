@@ -10576,13 +10576,7 @@ function App() {
 
           {observerSection === 'dailyMap' ? (
             <section className="card fade-up delay-2 daily-map-card">
-              <header className="daily-map-heading">
-                <div>
-                  <h2>Günlük Harita</h2>
-                  <p className="subtext">
-                    Seçtiğin gün hastanelerde kimlerin çalıştığını tek ekranda gör.
-                  </p>
-                </div>
+              <header className="daily-map-heading daily-map-heading-date-only">
                 <strong>
                   {fromISODate(observerDay).toLocaleDateString('tr-TR', {
                     day: 'numeric',
