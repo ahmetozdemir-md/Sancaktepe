@@ -10669,7 +10669,9 @@ function App() {
                           >
                             <header>
                               <h4>{location.name}</h4>
-                              <small>{LOCATION_KIND_LABELS[location.kind]}</small>
+                              {location.kind !== 'normal' ? (
+                                <small>{LOCATION_KIND_LABELS[location.kind]}</small>
+                              ) : null}
                             </header>
 
                             {specialistLabel ? (
