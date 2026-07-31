@@ -2126,13 +2126,13 @@ body.table-pan-unlocked .duty-list-table-wrap {
   grid-template-columns: minmax(0, 1fr) minmax(260px, 340px) minmax(0, 1fr);
   gap: 0.5rem;
   align-items: center;
-  border: 1px solid rgba(47, 143, 115, 0.18);
+  border: 1px solid rgba(13, 109, 92, 0.2);
   border-radius: 16px;
   padding: 0.45rem;
   background:
-    radial-gradient(circle at left, rgba(228, 170, 70, 0.17), transparent 34%),
-    linear-gradient(135deg, rgba(255, 253, 248, 0.96), rgba(235, 246, 241, 0.94));
-  box-shadow: 0 10px 26px rgba(24, 57, 52, 0.07);
+    radial-gradient(circle at left, rgba(228, 170, 70, 0.14), transparent 34%),
+    linear-gradient(135deg, rgba(255, 253, 248, 0.98), rgba(220, 238, 232, 0.78));
+  box-shadow: 0 10px 26px rgba(18, 42, 43, 0.08);
   backdrop-filter: blur(10px);
 }
 
@@ -2166,11 +2166,11 @@ body.table-pan-unlocked .duty-list-table-wrap {
   display: grid;
   justify-items: center;
   gap: 0.04rem;
-  border: 1px solid rgba(47, 143, 115, 0.2);
+  border: 1px solid rgba(13, 109, 92, 0.22);
   border-radius: 12px;
   padding: 0.35rem 0.75rem;
-  background: rgba(255, 255, 255, 0.76);
-  box-shadow: 0 5px 14px rgba(47, 143, 115, 0.06);
+  background: rgba(255, 253, 248, 0.88);
+  box-shadow: inset 3px 0 0 rgba(228, 170, 70, 0.72), 0 5px 14px rgba(13, 109, 92, 0.06);
 }
 
 .weekly-export-week-card span {
@@ -2187,11 +2187,11 @@ body.table-pan-unlocked .duty-list-table-wrap {
 }
 
 .weekly-export-sheet {
-  border: 1px solid rgba(47, 143, 115, 0.18);
+  border: 1px solid rgba(13, 109, 92, 0.2);
   border-radius: 18px;
   background:
-    radial-gradient(circle at 8% 4%, rgba(245, 213, 143, 0.2), transparent 28%),
-    linear-gradient(145deg, rgba(255, 253, 247, 0.96), rgba(246, 251, 247, 0.94));
+    radial-gradient(circle at 8% 4%, rgba(228, 170, 70, 0.13), transparent 28%),
+    linear-gradient(145deg, rgba(255, 253, 248, 0.98), rgba(242, 246, 242, 0.96));
   padding: 0.55rem;
   box-shadow: 0 16px 40px rgba(42, 51, 46, 0.08);
 }
@@ -2204,13 +2204,13 @@ body.table-pan-unlocked .duty-list-table-wrap {
   border-radius: 14px;
   padding: 0.58rem 1rem 0.62rem;
   background:
-    linear-gradient(135deg, rgba(32, 58, 49, 0.96), rgba(47, 143, 115, 0.92)),
-    radial-gradient(circle at right, rgba(245, 213, 143, 0.22), transparent 40%);
+    linear-gradient(135deg, rgba(18, 42, 43, 0.98), rgba(13, 109, 92, 0.94)),
+    radial-gradient(circle at right, rgba(228, 170, 70, 0.2), transparent 40%);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.16), 0 8px 20px rgba(31, 41, 36, 0.12);
 }
 
 .weekly-export-title-block span {
-  color: rgba(236, 255, 246, 0.78);
+  color: rgba(247, 207, 125, 0.92);
   font-size: 0.58rem;
   font-weight: 850;
   letter-spacing: 0.16em;
@@ -2236,9 +2236,9 @@ body.table-pan-unlocked .duty-list-table-wrap {
 .weekly-export-table-wrap {
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
-  border: 1px solid rgba(63, 69, 66, 0.16);
+  border: 1px solid rgba(13, 109, 92, 0.16);
   border-radius: 12px;
-  background: rgba(255, 255, 255, 0.62);
+  background: rgba(255, 253, 248, 0.76);
   padding: 0.18rem;
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.82);
   touch-action: pan-x pinch-zoom;
@@ -2261,7 +2261,7 @@ body.table-pan-unlocked .weekly-export-table-wrap {
 
 .weekly-export-table th,
 .weekly-export-table td {
-  border: 1px solid rgba(58, 66, 62, 0.14);
+  border: 1px solid rgba(47, 75, 74, 0.15);
   border-radius: 5px;
   padding: 0.2rem 0.27rem;
   vertical-align: top;
@@ -2270,7 +2270,7 @@ body.table-pan-unlocked .weekly-export-table-wrap {
 }
 
 .weekly-export-table thead th {
-  background: linear-gradient(135deg, #243b33, #315a4d);
+  background: linear-gradient(135deg, var(--ink-900), var(--mint-strong));
   color: #fff;
   text-align: center;
   font-weight: 800;
@@ -2292,8 +2292,8 @@ body.table-pan-unlocked .weekly-export-table-wrap {
   padding: 0.04rem 0.3rem;
   font-weight: 850;
   font-size: 0.64rem;
-  color: #dff6ed;
-  background: rgba(255, 255, 255, 0.12);
+  color: #ffe1a1;
+  background: rgba(228, 170, 70, 0.16);
 }
 
 .weekly-export-table .group-col {
@@ -2305,7 +2305,7 @@ body.table-pan-unlocked .weekly-export-table-wrap {
   width: 66px;
   text-align: center;
   font-weight: 800;
-  color: #32443d;
+  color: var(--ink-700);
 }
 
 .weekly-export-table .day-col {
@@ -2316,8 +2316,8 @@ body.table-pan-unlocked .weekly-export-table-wrap {
   position: relative;
   font-weight: 900;
   letter-spacing: 0.06em;
-  color: #22352e;
-  border-color: rgba(34, 53, 46, 0.14);
+  color: var(--ink-900);
+  border-color: rgba(18, 42, 43, 0.16);
 }
 
 .weekly-export-table .group-label span {
@@ -2345,11 +2345,11 @@ body.table-pan-unlocked .weekly-export-table-wrap {
   max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
-  color: #2d4038;
-  border: 1px solid rgba(47, 82, 69, 0.18);
+  color: var(--ink-700);
+  border: 1px solid rgba(13, 109, 92, 0.2);
   border-radius: 5px;
   padding: 0.035rem 0.24rem;
-  background: rgba(255, 255, 255, 0.8);
+  background: rgba(255, 253, 248, 0.9);
   box-shadow: 0 1px 0 rgba(255, 255, 255, 0.76) inset;
 }
 
@@ -2359,12 +2359,12 @@ body.table-pan-unlocked .weekly-export-table-wrap {
   order: 0;
   font-size: 0.59rem !important;
   letter-spacing: 0.02em;
-  color: #235544;
+  color: var(--mint-strong);
   font-weight: 850;
-  border: 1px dashed rgba(47, 143, 115, 0.28);
+  border: 1px dashed rgba(13, 109, 92, 0.3);
   border-radius: 4px;
   padding: 0.035rem 0.2rem;
-  background: rgba(239, 250, 244, 0.72);
+  background: rgba(220, 238, 232, 0.58);
 }
 
 .weekly-export-rotator-chip {
@@ -2375,11 +2375,11 @@ body.table-pan-unlocked .weekly-export-table-wrap {
   font-weight: 900;
   line-height: 1.15;
   white-space: nowrap;
-  color: #725008;
-  border: 1px solid rgba(198, 139, 25, 0.42);
+  color: #76520b;
+  border: 1px solid rgba(228, 170, 70, 0.54);
   border-radius: 5px;
   padding: 0.035rem 0.22rem;
-  background: linear-gradient(135deg, rgba(255, 235, 144, 0.96), rgba(255, 252, 224, 0.96));
+  background: linear-gradient(135deg, rgba(248, 218, 145, 0.94), rgba(255, 249, 226, 0.96));
   box-shadow: 0 1px 0 rgba(255, 255, 255, 0.72) inset;
 }
 
@@ -2390,38 +2390,38 @@ body.table-pan-unlocked .weekly-export-table-wrap {
 
 .weekly-export-row.tone-sancak th,
 .weekly-export-row.tone-sancak td {
-  background: linear-gradient(135deg, rgba(252, 231, 213, 0.9), rgba(255, 246, 238, 0.96));
+  background: linear-gradient(135deg, rgba(247, 227, 207, 0.86), rgba(255, 249, 242, 0.97));
 }
 
 .weekly-export-row.tone-cekmekoy th,
 .weekly-export-row.tone-cekmekoy td {
-  background: linear-gradient(135deg, rgba(222, 238, 219, 0.92), rgba(246, 253, 244, 0.97));
+  background: linear-gradient(135deg, rgba(220, 238, 232, 0.88), rgba(247, 252, 249, 0.98));
 }
 
 .weekly-export-row.tone-feriha th,
 .weekly-export-row.tone-feriha td {
-  background: linear-gradient(135deg, rgba(250, 239, 199, 0.92), rgba(255, 252, 238, 0.97));
+  background: linear-gradient(135deg, rgba(246, 234, 198, 0.88), rgba(255, 252, 242, 0.98));
 }
 
 .weekly-export-row.tone-diger th,
 .weekly-export-row.tone-diger td {
-  background: linear-gradient(135deg, rgba(218, 234, 249, 0.92), rgba(246, 251, 255, 0.97));
+  background: linear-gradient(135deg, rgba(218, 233, 240, 0.9), rgba(248, 252, 253, 0.98));
 }
 
 .weekly-export-row .group-label.tone-sancak {
-  background: linear-gradient(180deg, #efc89f, #f7dfc5);
+  background: linear-gradient(180deg, #e8bd8e, #f4dcc1);
 }
 
 .weekly-export-row .group-label.tone-cekmekoy {
-  background: linear-gradient(180deg, #c8dfc4, #e4f2e1);
+  background: linear-gradient(180deg, #add5c8, #dceee8);
 }
 
 .weekly-export-row .group-label.tone-feriha {
-  background: linear-gradient(180deg, #edd785, #fbefbf);
+  background: linear-gradient(180deg, #e5cb76, #f5e8b5);
 }
 
 .weekly-export-row .group-label.tone-diger {
-  background: linear-gradient(180deg, #b9d5ef, #dfedfb);
+  background: linear-gradient(180deg, #b6d1df, #dceaf1);
 }
 
 .planner-export-row {
