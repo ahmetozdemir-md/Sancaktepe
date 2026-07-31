@@ -2118,22 +2118,21 @@ body.table-pan-unlocked .duty-list-table-wrap {
 
 .weekly-export-page {
   display: grid;
-  gap: 1rem;
+  gap: 0.65rem;
 }
 
 .weekly-export-toolbar {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.65rem;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 340px) minmax(0, 1fr);
+  gap: 0.5rem;
   align-items: center;
-  justify-content: space-between;
   border: 1px solid rgba(47, 143, 115, 0.18);
-  border-radius: 20px;
-  padding: 0.62rem;
+  border-radius: 16px;
+  padding: 0.45rem;
   background:
-    radial-gradient(circle at left, rgba(245, 213, 143, 0.28), transparent 36%),
-    linear-gradient(135deg, rgba(255, 253, 247, 0.92), rgba(236, 246, 240, 0.86));
-  box-shadow: 0 14px 36px rgba(51, 61, 55, 0.08);
+    radial-gradient(circle at left, rgba(228, 170, 70, 0.17), transparent 34%),
+    linear-gradient(135deg, rgba(255, 253, 248, 0.96), rgba(235, 246, 241, 0.94));
+  box-shadow: 0 10px 26px rgba(24, 57, 52, 0.07);
   backdrop-filter: blur(10px);
 }
 
@@ -2148,6 +2147,13 @@ body.table-pan-unlocked .duty-list-table-wrap {
   justify-content: flex-end;
 }
 
+.weekly-export-toolbar button {
+  min-height: 34px;
+  padding: 0.38rem 0.72rem;
+  border-radius: 10px;
+  font-size: 0.78rem;
+}
+
 .weekly-export-week-label {
   font-weight: 700;
   color: var(--ink-900);
@@ -2156,20 +2162,20 @@ body.table-pan-unlocked .duty-list-table-wrap {
 }
 
 .weekly-export-week-card {
-  min-width: min(100%, 320px);
+  min-width: 0;
   display: grid;
   justify-items: center;
-  gap: 0.12rem;
+  gap: 0.04rem;
   border: 1px solid rgba(47, 143, 115, 0.2);
-  border-radius: 16px;
-  padding: 0.48rem 0.9rem;
-  background: rgba(255, 255, 255, 0.72);
-  box-shadow: 0 8px 22px rgba(47, 143, 115, 0.08);
+  border-radius: 12px;
+  padding: 0.35rem 0.75rem;
+  background: rgba(255, 255, 255, 0.76);
+  box-shadow: 0 5px 14px rgba(47, 143, 115, 0.06);
 }
 
 .weekly-export-week-card span {
   color: var(--mint-strong);
-  font-size: 0.68rem;
+  font-size: 0.6rem;
   font-weight: 850;
   letter-spacing: 0.12em;
   text-transform: uppercase;
@@ -2177,35 +2183,35 @@ body.table-pan-unlocked .duty-list-table-wrap {
 
 .weekly-export-week-card strong {
   color: var(--ink-900);
-  font-size: 0.98rem;
+  font-size: 0.86rem;
 }
 
 .weekly-export-sheet {
   border: 1px solid rgba(47, 143, 115, 0.18);
-  border-radius: 24px;
+  border-radius: 18px;
   background:
     radial-gradient(circle at 8% 4%, rgba(245, 213, 143, 0.2), transparent 28%),
     linear-gradient(145deg, rgba(255, 253, 247, 0.96), rgba(246, 251, 247, 0.94));
-  padding: 0.78rem;
-  box-shadow: 0 20px 50px rgba(42, 51, 46, 0.1);
+  padding: 0.55rem;
+  box-shadow: 0 16px 40px rgba(42, 51, 46, 0.08);
 }
 
 .weekly-export-title-block {
   display: grid;
   justify-items: center;
-  gap: 0.22rem;
-  margin-bottom: 0.78rem;
-  border-radius: 18px;
-  padding: 0.9rem 1rem;
+  gap: 0.08rem;
+  margin-bottom: 0.5rem;
+  border-radius: 14px;
+  padding: 0.58rem 1rem 0.62rem;
   background:
     linear-gradient(135deg, rgba(32, 58, 49, 0.96), rgba(47, 143, 115, 0.92)),
     radial-gradient(circle at right, rgba(245, 213, 143, 0.22), transparent 40%);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.16), 0 12px 26px rgba(31, 41, 36, 0.16);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.16), 0 8px 20px rgba(31, 41, 36, 0.12);
 }
 
 .weekly-export-title-block span {
   color: rgba(236, 255, 246, 0.78);
-  font-size: 0.7rem;
+  font-size: 0.58rem;
   font-weight: 850;
   letter-spacing: 0.16em;
   text-transform: uppercase;
@@ -2214,13 +2220,13 @@ body.table-pan-unlocked .duty-list-table-wrap {
 .weekly-export-title-block p {
   margin: 0;
   color: rgba(255, 255, 255, 0.82);
-  font-size: 0.9rem;
+  font-size: 0.75rem;
   font-weight: 700;
 }
 
 .weekly-export-sheet h1 {
   text-align: center;
-  font-size: clamp(1.35rem, 2.2vw, 2rem);
+  font-size: clamp(1.15rem, 1.8vw, 1.62rem);
   margin: 0;
   letter-spacing: 0.02em;
   font-weight: 900;
@@ -2231,9 +2237,9 @@ body.table-pan-unlocked .duty-list-table-wrap {
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
   border: 1px solid rgba(63, 69, 66, 0.16);
-  border-radius: 16px;
+  border-radius: 12px;
   background: rgba(255, 255, 255, 0.62);
-  padding: 0.28rem;
+  padding: 0.18rem;
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.82);
   touch-action: pan-x pinch-zoom;
   overscroll-behavior-x: auto;
@@ -2247,20 +2253,20 @@ body.table-pan-unlocked .weekly-export-table-wrap {
 
 .weekly-export-table {
   width: 100%;
-  min-width: 980px;
+  min-width: 920px;
   border-collapse: separate;
-  border-spacing: 3px;
+  border-spacing: 2px;
   table-layout: fixed;
 }
 
 .weekly-export-table th,
 .weekly-export-table td {
-  border: 1px solid rgba(58, 66, 62, 0.16);
-  border-radius: 8px;
-  padding: 0.28rem 0.34rem;
+  border: 1px solid rgba(58, 66, 62, 0.14);
+  border-radius: 5px;
+  padding: 0.2rem 0.27rem;
   vertical-align: top;
-  font-size: 0.79rem;
-  line-height: 1.2;
+  font-size: 0.74rem;
+  line-height: 1.14;
 }
 
 .weekly-export-table thead th {
@@ -2274,36 +2280,36 @@ body.table-pan-unlocked .weekly-export-table-wrap {
 
 .weekly-export-table thead th strong {
   display: block;
-  font-size: 0.86rem;
+  font-size: 0.78rem;
   letter-spacing: 0.01em;
 }
 
 .weekly-export-table thead th span {
   display: block;
   width: fit-content;
-  margin: 0.12rem auto 0;
+  margin: 0.05rem auto 0;
   border-radius: 999px;
-  padding: 0.08rem 0.38rem;
+  padding: 0.04rem 0.3rem;
   font-weight: 850;
-  font-size: 0.72rem;
+  font-size: 0.64rem;
   color: #dff6ed;
   background: rgba(255, 255, 255, 0.12);
 }
 
 .weekly-export-table .group-col {
-  width: 44px;
+  width: 38px;
   text-align: center;
 }
 
 .weekly-export-table .unit-col {
-  width: 72px;
+  width: 66px;
   text-align: center;
   font-weight: 800;
   color: #32443d;
 }
 
 .weekly-export-table .day-col {
-  min-width: 132px;
+  min-width: 124px;
 }
 
 .weekly-export-table .group-label {
@@ -2325,14 +2331,14 @@ body.table-pan-unlocked .weekly-export-table-wrap {
   display: flex;
   flex-wrap: wrap;
   align-items: flex-start;
-  gap: 0.12rem 0.2rem;
+  gap: 0.08rem 0.14rem;
 }
 
 .weekly-export-assistant-chip {
   display: inline-flex;
   align-items: center;
   order: 1;
-  font-size: 1.11rem;
+  font-size: 0.9rem;
   font-weight: 800;
   line-height: 1.15;
   white-space: nowrap;
@@ -2340,41 +2346,41 @@ body.table-pan-unlocked .weekly-export-table-wrap {
   overflow: hidden;
   text-overflow: ellipsis;
   color: #2d4038;
-  border: 1px solid rgba(47, 82, 69, 0.22);
-  border-radius: 999px;
-  padding: 0.08rem 0.34rem;
-  background: rgba(255, 255, 255, 0.78);
-  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.84) inset, 0 4px 10px rgba(36, 50, 43, 0.06);
+  border: 1px solid rgba(47, 82, 69, 0.18);
+  border-radius: 5px;
+  padding: 0.035rem 0.24rem;
+  background: rgba(255, 255, 255, 0.8);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.76) inset;
 }
 
 .weekly-export-specialist-line {
   display: block !important;
   width: 100%;
   order: 0;
-  font-size: 0.64rem !important;
+  font-size: 0.59rem !important;
   letter-spacing: 0.02em;
   color: #235544;
   font-weight: 850;
   border: 1px dashed rgba(47, 143, 115, 0.28);
-  border-radius: 7px;
-  padding: 0.05rem 0.24rem;
-  background: rgba(239, 250, 244, 0.78);
+  border-radius: 4px;
+  padding: 0.035rem 0.2rem;
+  background: rgba(239, 250, 244, 0.72);
 }
 
 .weekly-export-rotator-chip {
   display: inline-flex;
   align-items: center;
   order: 2;
-  font-size: 0.88rem;
+  font-size: 0.72rem;
   font-weight: 900;
   line-height: 1.15;
   white-space: nowrap;
   color: #725008;
   border: 1px solid rgba(198, 139, 25, 0.42);
-  border-radius: 999px;
-  padding: 0.06rem 0.3rem;
+  border-radius: 5px;
+  padding: 0.035rem 0.22rem;
   background: linear-gradient(135deg, rgba(255, 235, 144, 0.96), rgba(255, 252, 224, 0.96));
-  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.82) inset, 0 4px 10px rgba(125, 83, 8, 0.08);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.72) inset;
 }
 
 .weekly-export-empty {
@@ -3939,14 +3945,24 @@ code {
     padding: 0.45rem;
   }
 
+  .weekly-export-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.42rem;
+    padding: 0.42rem;
+  }
+
   .weekly-export-toolbar-group,
   .weekly-export-toolbar-group-right {
     flex: 1 1 100%;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.42rem;
   }
 
   .weekly-export-toolbar-group .ghost-button,
   .weekly-export-toolbar-group .secondary {
-    flex: 1 1 0;
+    width: 100%;
   }
 
   .weekly-export-table {
