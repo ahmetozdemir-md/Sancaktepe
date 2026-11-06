@@ -22,8 +22,9 @@ import type {
   WorkLocation,
   PlannerState,
 } from './plannerTypes'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import './App.css'
+import type { PublishedPortalPayload } from './dutyPlannerCloud'
 import {
   isCloudWriteEnabled,
   isSupabaseAdminAuthRequired,
@@ -2416,6 +2417,8 @@ function formatRemainingBlock(ms: number): string {
   return `${seconds} sn`
 }
 
+const DutyPlannerPortal = lazy(() => import('./DutyPlannerPortal'))
+
 function App() {
   const [today, setToday] = useState(() => new Date())
   const todayISO = toISODate(today)
@@ -2427,6 +2430,9 @@ function App() {
   const [observerSection, setObserverSection] = useState<ObserverSection>('myPanel')
   const [plannerView, setPlannerView] = useState<PlannerView>('rooms')
   const [session, setSession] = useState<SessionInfo | null>(null)
+  const [dutyPlannerOpen, setDutyPlannerOpen] = useState(() =>
+    typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('module') === 'nobet',
+  )
   const [loginView, setLoginView] = useState<LoginView>('choose')
   const [assistantAccessTarget, setAssistantAccessTarget] =
     useState<AssistantAccessTarget>('assistant')
@@ -2872,6 +2878,44 @@ function App() {
   )
   const isSecureCloudWriteUnlocked = !isSupabaseAdminAuthRequired || isAdminCloudAuthVerified
 
+  const handleDutyPlannerPublished = useCallback((payload: PublishedPortalPayload, revision: string) => {
+    const nextPlannerState = payload.plannerState as PlannerState
+    const nextBindings = sanitizeUserBindings(payload.userBindings)
+    // The RPC returned the committed snapshot. Keep the portal's autosave CAS in step with it.
+    cloudPayloadRef.current = JSON.stringify(buildRemotePayload(nextPlannerState, nextBindings))
+    cloudRevisionRef.current = revision
+    cloudCanWriteRef.current = isCloudWriteEnabled && adminCloudWriteUnlockedRef.current
+    if (cloudSaveTimerRef.current) clearTimeout(cloudSaveTimerRef.current)
+    cloudSaveTimerRef.current = null
+    setData(nextPlannerState)
+    setUserBindings(nextBindings)
+    setCloudLastSavedAt(revision)
+    setCloudState('ready')
+    setCloudStateText(isCloudWriteEnabled ? 'Bulut kaydı aktif.' : CLOUD_READ_ONLY_TEXT)
+  }, [])
+
+  const closeDutyPlanner = useCallback(() => {
+    setDutyPlannerOpen(false)
+    const url = new URL(window.location.href)
+    url.searchParams.delete('module')
+    window.history.replaceState(null, '', `${url.pathname}${url.search}${url.hash}`)
+  }, [])
+
+  const openDutyPlanner = () => {
+    if (!isSupabaseConfigured || !isSecureCloudWriteUnlocked) {
+      showWarning('Çevrimiçi nöbet planlamak için güvenli admin girişi gerekli.')
+      return
+    }
+    if (cloudState !== 'ready' || isCloudSaving || cloudPayload !== cloudPayloadRef.current) {
+      showWarning('Önce çalışma listesindeki değişikliklerin kaydedilmesini bekle.')
+      return
+    }
+    const url = new URL(window.location.href)
+    url.searchParams.set('module', 'nobet')
+    window.history.replaceState(null, '', `${url.pathname}${url.search}${url.hash}`)
+    setDutyPlannerOpen(true)
+  }
+
   useEffect(() => {
     if (typeof document === 'undefined') {
       return
@@ -3191,6 +3235,7 @@ function App() {
 
   useEffect(() => {
     if (
+      dutyPlannerOpen ||
       !isSupabaseConfigured ||
       !supabase ||
       !cloudHydratedRef.current ||
@@ -3305,7 +3350,7 @@ function App() {
         cloudSaveTimerRef.current = null
       }
     }
-  }, [cloudPayload])
+  }, [cloudPayload, dutyPlannerOpen])
 
   useEffect(() => {
     if (
@@ -3373,6 +3418,7 @@ function App() {
   }, [assistantUserPickerOpen, loginView])
 
   useEffect(() => {
+    if (dutyPlannerOpen) return
     setData((previous) =>
       previous.weekStartISO === currentWeekStartISO
         ? previous
@@ -3381,7 +3427,7 @@ function App() {
             weekStartISO: currentWeekStartISO,
           },
     )
-  }, [currentWeekStartISO])
+  }, [currentWeekStartISO, dutyPlannerOpen])
 
   useEffect(() => {
     if (!session) {
@@ -3778,6 +3824,8 @@ function App() {
   }
 
   const loginAsAdmin = async () => {
+    // Event handler: read the clock when the admin presses Giriş, never during render.
+    // eslint-disable-next-line react-hooks/purity
     const now = Date.now()
     if (adminLoginGuard.blockedUntil > now) {
       showWarning(`Çok fazla yanlış deneme. ${formatRemainingBlock(adminLoginGuard.blockedUntil - now)} sonra tekrar dene.`)
@@ -7735,6 +7783,13 @@ function App() {
     )
   }
 
+  if (session.role === 'admin' && dutyPlannerOpen) {
+    if (!isSecureCloudWriteUnlocked || cloudState !== 'ready' || isCloudSaving) {
+      return <section className="page-shell card"><h1>Nöbet planlayıcı</h1><p>{cloudState === 'error' ? cloudStateText : 'Çevrimiçi kayıtlar ve admin girişi kontrol ediliyor…'}</p><button type="button" onClick={closeDutyPlanner}>Çalışma listesine dön</button></section>
+    }
+    return <Suspense fallback={<section className="page-shell card"><p>Nöbet planlayıcı açılıyor…</p></section>}><DutyPlannerPortal onClose={closeDutyPlanner} onPublished={handleDutyPlannerPublished} /></Suspense>
+  }
+
   if (session.role === 'admin' && plannerWeeklyExportOpen) {
     return (
       <div className="page-shell weekly-export-shell">
@@ -7836,15 +7891,14 @@ function App() {
             <h1>Çalışma Listesi Portalı</h1>
           </div>
           {session.role === 'admin' ? (
-            <a
+            <button
+              type="button"
               className="duty-planner-link"
-              href="http://127.0.0.1:4317/"
-              target="_blank"
-              rel="noopener noreferrer"
-              title="Bu bilgisayardaki nöbet programını yeni sekmede aç"
+              onClick={openDutyPlanner}
+              title="Çevrimiçi nöbet planlayıcıyı aç"
             >
               Nöbet listesi yap <span aria-hidden="true">↗</span>
-            </a>
+            </button>
           ) : null}
         </div>
 

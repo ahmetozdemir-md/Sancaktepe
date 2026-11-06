@@ -74,3 +74,13 @@ Mevcut kurulumlarda cihaz doğrulamasını şifre değişene kadar hatırlamak i
 
 Admin panelindeki **Yedekler** modülü, mevcut online verinin elle yedeğini alıp gerektiğinde geri yüklemek için eklendi.
 Güvenli admin modu açılmadan önceki anon-key yapılandırması pratik prototip ve hızlı kullanım içindir.
+
+## Çevrimiçi nöbet planlayıcı
+
+Admin, başlıktaki **Nöbet listesi yap** düğmesinden veya `/?module=nobet` bağlantısından tam planlayıcıyı açar. `supabase/008_duty_planner.sql`, güvenli admin kurulumu ve önceki portal yedek tablosundan sonra uygulanır. Mevcut yerel JSON yedeği ilk kurulumda `duty_planner_state` içine bir kez aktarılır; boş veya örnek veriyle otomatik değiştirilmez.
+
+Taslaklar ve otomatik yedekler yalnız yetkili admin tarafından okunabilir. Taslak kaydetmek asistanların gördüğü listeyi değiştirmez. **Yayınla**, kaydedilmiş seçili ayı önizleme ve onaydan sonra tek veritabanı işlemiyle portalın nöbet listesine aktarır. Diğer aylar, uzman listeleri, izinler ve kullanıcı eşleşmeleri korunur; yeni nöbetin ertesi günündeki normal çalışma ataması önizlemede gösterilerek kaldırılır. İsim eşleşmesi, ardışık nöbetler ve iki kaydın sürümü yeniden doğrulanır. Çakışma durumunda işlem durur.
+
+Yerel programın eski kopyası bağımsız kalır; çevrimiçi çalışmaya geçtikten sonra güncel taslak için portal kullanılmalıdır. Tam JSON yedeği planlayıcının **Veri ve yedek** bölümünden indirilebilir.
+
+Doğrulama: `npm run build`, `npm run lint`, `node --test tests/*.test.*`. `tests/duty-planner-db.sql`, kurulu veritabanında sentetik verilerle gerçek RLS/RPC kontrollerini bir işlem içinde çalıştırır ve sonunda her değişikliği `ROLLBACK` ile geri alır.

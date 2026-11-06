@@ -1,0 +1,42 @@
+.date-field{position:relative;display:flex;align-items:center;min-width:0;width:100%}
+.date-field>input[type=date]{min-width:0;width:100%;padding-right:43px}
+.date-field>input[type=date]::-webkit-calendar-picker-indicator{display:none}
+.date-field-trigger{position:absolute;right:5px;top:50%;transform:translateY(-50%);height:32px;width:34px;display:grid;place-items:center;border:0;border-radius:7px;background:#edf3fc;color:#3768b6;padding:0}
+.date-field-trigger:hover,.date-field-trigger[aria-expanded=true]{background:#dce9fd;color:#174c9c}
+.date-picker{position:fixed;z-index:1000;width:320px;max-width:calc(100vw - 16px);overflow:auto;border:1px solid #ccd9ed;border-radius:15px;background:#fff;color:#273e63;padding:12px;box-shadow:0 14px 48px #173b6b36;font-size:12px;line-height:1.4;box-sizing:border-box;isolation:isolate}
+.date-picker button,.date-picker input,.date-picker select{font:inherit;box-sizing:border-box;color:inherit}
+.date-picker button{cursor:pointer}
+.date-picker button:disabled{cursor:not-allowed;opacity:.35}
+.date-picker button:focus-visible,.date-picker input:focus-visible,.date-picker select:focus-visible{outline:3px solid #7c9fe7;outline-offset:2px}
+.date-picker-header{display:flex;align-items:center;gap:6px;margin-bottom:8px}
+.date-picker-period{display:flex;align-items:center;gap:5px;flex:1;min-width:0}
+.date-picker-month,.date-picker-year{padding:6px 5px;border:1px solid #dbe4f3;border-radius:7px;background:#f8faff;min-width:0;font-weight:650;height:33px}
+.date-picker-month{width:95px;flex:1}
+.date-picker-year{width:72px}
+.date-picker-nav,.date-picker-close{height:31px;width:29px;flex-shrink:0;padding:0;border:0;border-radius:7px;background:#edf3fc;color:#3664a5;font-size:23px!important;line-height:1}
+.date-picker-close{background:transparent;color:#8391a8;font-size:21px!important}
+.date-picker-nav:hover,.date-picker-close:hover{background:#dde9fc}
+.date-picker-grid{width:100%;table-layout:fixed;border-collapse:separate;border-spacing:3px;margin:0}
+.date-picker-grid th{font-size:10px;font-weight:600;color:#8995a8;text-align:center;padding:5px 0}
+.date-picker-grid th.date-picker-weekend-label{color:#426fb0}
+.date-picker-grid td{padding:0;text-align:center;border:0}
+.date-picker-day{display:flex;position:relative;align-items:center;justify-content:center;width:100%;height:32px;border:1px solid transparent;border-radius:7px;padding:0;background:#f5f7fb;font-size:12px!important;font-variant-numeric:tabular-nums}
+.date-picker-day:hover:not(:disabled){border-color:#91afe2;filter:brightness(.96)}
+.date-picker-day.date-picker-weekend{background:#e7f0ff;color:#315f9e}
+.date-picker-day.date-picker-holiday{background:#fce6ee;color:#a63d68}
+.date-picker-day.date-picker-other-month{color:#9aa6b8;background:#fafbfd}
+.date-picker-day.date-picker-other-month.date-picker-weekend{background:#f1f6ff;color:#8fa5c5}
+.date-picker-day.date-picker-other-month.date-picker-holiday{background:#fff1f6;color:#be8ca2}
+.date-picker-day.date-picker-today{border-color:#7096d6;font-weight:750}
+.date-picker-day.date-picker-selected{box-shadow:inset 0 0 0 2px #3768bc;font-weight:750;border-color:#3768bc}
+.date-picker-holiday-dot{position:absolute;bottom:3px;left:50%;transform:translateX(-50%);height:3px;width:3px;border-radius:50%;background:#bc4778}
+.date-picker-legend{display:flex;gap:12px;flex-wrap:wrap;padding:8px 3px 10px;font-size:10px;color:#73809a}
+.date-picker-legend>span{display:flex;align-items:center;gap:5px}
+.date-picker-legend i{display:inline-block;width:9px;height:9px;border-radius:3px;border:1px solid #d3def1}
+.date-picker-weekend-key{background:#e7f0ff}
+.date-picker-legend .date-picker-holiday-key{background:#fce6ee;border-color:#edc8d7}
+.date-picker-footer{display:flex;gap:8px;justify-content:space-between;border-top:1px solid #e9eef8;padding:9px 2px 0}
+.date-picker-footer button{border:0;background:#edf3fc;color:#3664a5;padding:6px 10px;border-radius:6px;font-size:11px}
+.date-picker-footer button:hover{background:#dce9fd}
+.date-picker-live{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+@media print{.date-picker,.date-field-trigger{display:none!important}}
