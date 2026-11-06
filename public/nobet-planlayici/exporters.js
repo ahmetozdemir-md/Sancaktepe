@@ -1,5 +1,6 @@
 import { activePeople, daysInMonth, dayOfWeek, rankOf, tally, targetFor, targetProgress } from './domain.js';
 import { comparePeopleBySeniority } from './person-order.js';
+import { personGroupId } from './person-history.js';
 
 const SITES = ['Sancaktepe', 'Feriha Öz', 'Çekmeköy'];
 const WEEKDAYS = ['Pazar', 'Pazartesi', 'Salı', 'Çarşamba', 'Perşembe', 'Cuma', 'Cumartesi'];
@@ -61,7 +62,7 @@ export function summaryCSV(state, month) {
     const progress = targetProgress(target, totals);
     const holidays = totals.holidays.map(holiday => `${prettyDate(holiday.date)} / ${holiday.name} / ${holiday.site}`).join('\n');
     rows.push([
-      month, person.name, rankOf(state, person.groupId, month) || 'Arşiv',
+      month, person.name, rankOf(state, personGroupId(person, month), month) || 'Arşiv',
       progress?.totalTarget ?? 'Hedef girilmedi', totals.countedTotal, progress?.totalRemaining ?? '',
       progress?.weekendTarget ?? 'Hedef girilmedi', totals.weekend, progress?.weekendRemaining ?? '',
       totals.total, totals.holidayCount, holidays,

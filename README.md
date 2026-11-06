@@ -111,4 +111,8 @@ Taslaklar ve otomatik yedekler yalnız yetkili admin tarafından okunabilir. Tas
 
 Yerel programın eski kopyası bağımsız kalır; çevrimiçi çalışmaya geçtikten sonra güncel taslak için portal kullanılmalıdır. Tam JSON yedeği planlayıcının **Veri ve yedek** bölümünden indirilebilir.
 
+Çevrimiçi sürüm, mevcut aktif kişi listesini koruyarak isimleri ve kıdemleri Asistan uygulamasından eşler. Aylık rotasyonların kaynağı yalnız `locationOwnersByMonth[ay]` ve `postDutyPoolByMonth[ay]` kayıtlarıdır; günlük çalışma listesi veya önceki ay varsayılmaz. Nöbet ertesi rotasyonu hastanesizdir. Rotasyon düzenlemeleri kaynak uygulamadan yapılır. Açılışta, kayıtta, yayın öncesinde ve açık/boşta ekranda 30 saniyede bir kontrol edilir. Eksik kaynak ayı boş gösterilir; çelişen hastaneler tahmin edilmeden uyarılır.
+
+Geçmiş aylar ve kişi kimlikleri korunur. Kıdem değişiklikleri geçerli aydan başlayan `groupHistory` kayıtlarıyla hedef ve yetkinlik mirasına uygulanır. İsimler NFC/Türkçe harf/boşluk eşdeğerliğiyle eşleşir; farklı bir isme dönüşümde ortak kimlik bulunmadığından tahmin yapılmaz, eşleşme uyarısı gösterilir. Rotasyonerler ve arşivlenmiş kişiler otomatik aktifleştirilmez. Gerçek kaynak değişikliği, etkilediği tamamlanmış ayı yeniden taslağa çevirir. JSON nesnelerinin anahtar sırası değişiklik sayılmaz; kaynak güncellemesinden doğan sürümler yalnız kendi başarılı CAS kayıt zinciri üzerinden izlenir, gerçek başka bir kullanıcı kaydı varsa çakışma koruması devam eder.
+
 Doğrulama: `npm run build`, `npm run lint`, `node --test tests/*.test.*`. `tests/duty-planner-db.sql`, kurulu veritabanında sentetik verilerle gerçek RLS/RPC kontrollerini bir işlem içinde çalıştırır ve sonunda her değişikliği `ROLLBACK` ile geri alır.

@@ -1,4 +1,5 @@
 /** Pure adapter from the rich duty-planner draft to the published Asistan roster. */
+import { personGroupId } from '../public/nobet-planlayici/person-history.js';
 const SITES = ['Sancaktepe', 'Feriha Öz', 'Çekmeköy'];
 const DAY = 86400000;
 const object = value => value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -88,7 +89,7 @@ export function createPublicationPreview(draft, portal, month, options = {}) {
     if (!validDate(date) || !byDate.has(date) || !SITES.includes(site)) {
       issue('invalid-assignment', 'Nöbetin tarihi veya hastanesi geçerli değil.', { date, personId }); continue;
     }
-    const person = people.get(personId), group = person && groups.get(person.groupId);
+    const person = people.get(personId), group = person && groups.get(personGroupId(person, month));
     if (!person || !group || !validDate(person.from) || person.from > date
       || (person.until != null && (!validDate(person.until) || person.until <= date))
       || typeof group.from !== 'string' || group.from > month || (group.until != null && group.until <= month)) {

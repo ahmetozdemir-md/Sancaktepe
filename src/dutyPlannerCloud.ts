@@ -1,6 +1,11 @@
 import { supabase, REMOTE_STATE_ROW_ID, REMOTE_STATE_TABLE } from './supabase'
 import { validateState } from '../public/nobet-planlayici/state-schema.js'
 import type { PublicationDraft, PublicationPortal, PublishedDuty } from './month-publication.js'
+import { synchronizePlannerSource, type PlannerSourcePortal } from './plannerSourceSync.js'
+import { synchronizePersonRanks } from '../public/nobet-planlayici/person-history.js'
+import { createSourceRevisionTracker, invalidateSourceCompletion, sourceSignature } from './sourceSyncSafety.js'
+
+const sourceRevisions = createSourceRevisionTracker()
 
 export interface RichPlannerState extends PublicationDraft {
   schemaVersion: number
@@ -56,18 +61,75 @@ export function checkPlannerState(value: unknown): RichPlannerState {
   return value as RichPlannerState
 }
 
-export async function readPlanner() {
+async function readStoredPlanner() {
   const { data, error } = await client().from('duty_planner_state').select('state,revision').eq('id', 1).maybeSingle()
   if (error) fail(error)
   if (!data) throw new PlannerCloudError('Çevrimiçi nöbet taslağı bulunamadı. Mevcut nöbet yedeğini yükleyin.', 404)
   return { state: checkPlannerState(data.state), revision: revision(data.revision) }
 }
 
-export async function savePlanner(state: unknown, expectedRevision: number) {
-  checkPlannerState(state)
+/** Fetch only staff and monthly rotations, leaving large daily schedules out of refreshes. */
+async function readRotationSource() {
+  const fields = ['assistants', 'assistantRanks', 'locations', 'locationOwnersByMonth', 'postDutyPoolByMonth']
+  const { data, error } = await client().from(REMOTE_STATE_TABLE)
+    .select(fields.map(field => `${field}:payload->plannerState->${field}`).join(','))
+    .eq('id', REMOTE_STATE_ROW_ID).maybeSingle()
+  if (error) fail(error)
+  const source = data as unknown as Record<string, unknown> | null
+  const object = (value: unknown) => !!value && typeof value === 'object' && !Array.isArray(value)
+  if (!source || !Array.isArray(source.assistants) || !Array.isArray(source.locations)
+    || !object(source.locationOwnersByMonth) || !object(source.postDutyPoolByMonth) || !object(source.assistantRanks)) {
+    throw new PlannerCloudError('Uygulamanın kişi ve rotasyon kayıtları okunamadı.', 503)
+  }
+  return source as unknown as PlannerSourcePortal
+}
+
+function synchronize(state: RichPlannerState, portal: PlannerSourcePortal): RichPlannerState {
+  const currentMonth = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Europe/Istanbul', year: 'numeric', month: '2-digit' }).format(new Date())
+  const source = state.portalSource as { fromMonth?: string } | undefined
+  const fromMonth = typeof source?.fromMonth === 'string' && /^\d{4}-(0[1-9]|1[0-2])$/.test(source.fromMonth) ? source.fromMonth : currentMonth
+  const options = { fromMonth, currentMonth, rosterPolicy: 'preserve-active' as const }
+  const rotations = synchronizePlannerSource(state, portal, options)
+  const ranks = synchronizePersonRanks(rotations.state, portal, options)
+  const cutoffMonth = fromMonth > currentMonth ? fromMonth : currentMonth
+  const result = invalidateSourceCompletion(state, ranks.state, cutoffMonth) as RichPlannerState
+  result.portalSource = { ...(result.portalSource as object), currentMonth, warnings: [...rotations.warnings, ...ranks.warnings] }
+  return checkPlannerState(result)
+}
+
+async function storePlanner(state: RichPlannerState, expectedRevision: number) {
   const { data, error } = await client().rpc('save_duty_planner', { p_state: state, p_revision: revision(expectedRevision) })
   if (error) fail(error)
-  return { revision: revision(data?.revision) }
+  return { state, revision: revision(data?.revision) }
+}
+
+export async function readPlanner() {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const [draft, source] = await Promise.all([readStoredPlanner(), readRotationSource()])
+    const next = synchronize(draft.state, source)
+    if (sourceSignature(next) === sourceSignature(draft.state)) return draft
+    next.updatedAt = new Date().toISOString()
+    try {
+      const stored = await storePlanner(next, draft.revision)
+      sourceRevisions.record(draft.revision, stored.revision)
+      return stored
+    }
+    catch (error) { if (!(error instanceof PlannerCloudError) || error.status !== 409 || attempt === 1) throw error }
+  }
+  throw new PlannerCloudError('Taslak güncelleniyor. Yeniden dene.', 409)
+}
+
+export async function savePlanner(state: unknown, expectedRevision: number) {
+  const checked = checkPlannerState(state)
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const expected = sourceRevisions.resolve(expectedRevision)
+    const next = synchronize(checked, await readRotationSource())
+    try { return await storePlanner(next, expected) }
+    catch (error) {
+      if (!(error instanceof PlannerCloudError) || error.status !== 409 || sourceRevisions.resolve(expectedRevision) === expected || attempt === 2) throw error
+    }
+  }
+  throw new PlannerCloudError('Taslak başka bir pencerede değişti. Yeniden yükle.', 409)
 }
 
 export async function listPlannerBackups() {

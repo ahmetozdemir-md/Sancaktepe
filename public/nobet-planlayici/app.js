@@ -13,6 +13,8 @@ import {rulesEnabled,siteCoverage} from './capabilities.js';
 import {planMonthClear,clearMonthPlan} from './plan-clear.js';
 import {comparePeopleBySeniority,sortPeopleBySeniority} from './person-order.js';
 import {rotationLabel,rotationColorKey} from './rotations.js';
+import {mergePlannerSourceFields,canAdoptPlannerRefresh} from './source-refresh.js';
+import {personAtMonth} from './person-history.js';
 
 const sites=['Sancaktepe','Feriha Öz','Çekmeköy'];
 const e=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -28,13 +30,14 @@ let datePickerCleanup=()=>{};
 let lastCandidateClick=null;
 let selectedCandidateId=null,candidateSearch='';
 let publishing=false,savingPromise=null;
+let editVersion=0,sourceRefreshPromise=null;
 let pendingLocationScroll=null,locationSaveTimer;
 let sidebarCollapsed=false;
 try{sidebarCollapsed=localStorage.getItem('nobet-online-sidebar-collapsed')==='1'}catch{}
 const app=document.querySelector('#app'),dlg=document.querySelector('#dialog');
 const ctx={get state(){return state},get month(){return month},commit,dialog,toast,render};
 function people(){return sortPeopleBySeniority(state,month,activePeople(state,month));}
-function person(id){return state.people.find(p=>p.id===id)}
+function person(id){const found=state.people.find(p=>p.id===id);return found?personAtMonth(found,month):found}
 function stats(id){if(!monthStats.has(id))monthStats.set(id,tally(state,id,month));return monthStats.get(id)}
 function applicable(list,id,d){return list.filter(r=>r.personId===id&&r.start<=d&&r.end>=d)}
 function rotationFor(id,d){return applicable(state.rotations,id,d).reduce((latest,item)=>!latest||item.start>=latest.start?item:latest,null)}
@@ -107,13 +110,58 @@ function commit(mutator,label='Değişiklik kaydedildi',options={}){
  if(conflict)throw new Error('Başka bir pencere verileri güncelledi. Önce taslağını yedekleyip sayfayı yeniden yükle.');
  const next=structuredClone(state);mutator(next);if(options.invalidate!==false)invalidateAffected(state,next);next.updatedAt=new Date().toISOString();
  const check=validateState(next);if(!check.valid)throw new Error(check.errors.slice(0,4).join(' · '));
- undoStack.push(structuredClone(state));if(undoStack.length>40)undoStack.shift();redoStack=[];state=next;selectedPerson=null;selectedAssignment=null;pendingSave=structuredClone(state);render();void flushSave();if(label)toast(label);
+ undoStack.push(structuredClone(state));if(undoStack.length>40)undoStack.shift();redoStack=[];state=next;editVersion++;selectedPerson=null;selectedAssignment=null;pendingSave=structuredClone(state);render();void flushSave();if(label)toast(label);
 }
 function flushSave(){if(savingPromise)return savingPromise;savingPromise=performSave().finally(()=>{savingPromise=null});return savingPromise}
 async function performSave(){
  if(saving||conflict)return;saving=true;saveError='';updateSave();
- while(pendingSave&&!conflict){const snapshot=pendingSave;pendingSave=null;try{const res=await plannerFetch('/api/state',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({state:snapshot,revision})});const body=await res.json();if(!res.ok){if(res.status===409)conflict=true;throw new Error(body.error||body.errors?.join(' · ')||'Kayıt başarısız')}revision=body.revision}catch(error){pendingSave=pendingSave||snapshot;saveError=error.message;break}}
- saving=false;updateSave();if(saveError)render();
+ let sourceChanged=false;
+ while(pendingSave&&!conflict){
+  const snapshot=pendingSave;pendingSave=null;
+  try{
+   const res=await plannerFetch('/api/state',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({state:snapshot,revision})});
+   const body=await res.json();
+   if(!res.ok){if(res.status===409)conflict=true;throw new Error(body.error||body.errors?.join(' · ')||'Kayıt başarısız')}
+   revision=body.revision;
+   if(body.state){
+    const merged=mergePlannerSourceFields(state,body.state),check=validateState(merged);
+    if(!check.valid)throw new Error(check.errors.slice(0,4).join(' · '));
+    sourceChanged=sourceChanged||JSON.stringify(merged)!==JSON.stringify(state);state=merged;
+    if(pendingSave)pendingSave=mergePlannerSourceFields(pendingSave,body.state);
+    undoStack=undoStack.map(item=>mergePlannerSourceFields(item,body.state));
+    redoStack=redoStack.map(item=>mergePlannerSourceFields(item,body.state));
+   }
+  }catch(error){pendingSave=pendingSave||snapshot;saveError=error.message;break}
+ }
+ saving=false;updateSave();if(saveError)render();else if(sourceChanged)renderSourceUpdate();
+}
+function refreshContext(){return{revision,editVersion,dirty:!!pendingSave,saving,error:!!saveError,conflict,publishing,dialogOpen:dlg.open,shareOpen:!!document.querySelector('#share-view'),visible:document.visibilityState==='visible'}}
+function renderSourceUpdate(){
+ const active=document.activeElement,id=active?.id,selection=typeof active?.selectionStart==='number'?[active.selectionStart,active.selectionEnd]:null;
+ const scrolls=['.content','.plan-table','.candidate-scroll'].map(selector=>{const el=document.querySelector(selector);return{selector,top:el?.scrollTop||0,left:el?.scrollLeft||0}});
+ render();
+ for(const {selector,top,left}of scrolls){const el=document.querySelector(selector);if(el){el.scrollTop=top;el.scrollLeft=left}}
+ const replacement=id&&document.getElementById(id);
+ if(replacement){replacement.focus({preventScroll:true});if(selection&&typeof replacement.setSelectionRange==='function')replacement.setSelectionRange(...selection)}
+}
+async function refreshPlannerSource({forPublish=false}={}){
+ if(sourceRefreshPromise){const prior=await sourceRefreshPromise;if(!forPublish)return prior}
+ const start=refreshContext(),options={allowPublishing:forPublish};
+ if(!state||!canAdoptPlannerRefresh(start,start,options))return{status:'skipped'};
+ sourceRefreshPromise=(async()=>{
+  try{
+   const res=await plannerFetch('/api/state'),body=await res.json();
+   if(!res.ok)throw new Error(body.error||'Asistan verileri yenilenemedi.');
+   if(!canAdoptPlannerRefresh(start,refreshContext(),options))return{status:'edited'};
+   if(!Number.isSafeInteger(body.revision)||body.revision<start.revision||!body.state)throw new Error('Güncel nöbet taslağı okunamadı.');
+   const check=validateState(body.state);if(!check.valid)throw new Error(check.errors.slice(0,4).join(' · '));
+   const changed=body.revision!==revision||JSON.stringify(state)!==JSON.stringify(body.state);
+   revision=body.revision;
+   if(changed){state=body.state;undoStack=[];redoStack=[];selectedPerson=null;selectedAssignment=null;renderSourceUpdate()}
+   return{status:changed?'updated':'unchanged'};
+  }catch(error){return{status:'failed',error}}
+ })().finally(()=>{sourceRefreshPromise=null});
+ return sourceRefreshPromise;
 }
 function updateSave(){const el=document.querySelector('#save-status');if(el){el.textContent=saveError?'Kaydedilemedi':saving||pendingSave?'Kaydediliyor…':'Çevrimiçi kaydedildi';el.classList.toggle('error',!!saveError)}const publish=document.querySelector('[data-action=publish]');if(publish){publish.disabled=!state?.months[month]||publishing||saving||!!pendingSave||!!saveError||conflict;publish.textContent=publishing?'Yayınlanıyor…':'Yayınla'}plannerBridge.notifyStatus({dirty:!!(pendingSave||saving||saveError),busy:publishing||saving,month})}
 async function load(){try{const res=await plannerFetch('/api/state');const payload=await res.json();if(!res.ok)throw new Error(payload.error||'Çevrimiçi nöbet taslağı okunamadı.');if(!payload.state)throw new Error('Çevrimiçi nöbet taslağı henüz oluşturulmadı. Asistan sisteminden mevcut nöbet yedeğini yükle.');revision=payload.revision;state=payload.state;const result=validateState(state);if(!result.valid)throw new Error(result.errors.join(' · '));let saved=null;try{saved=localStorage.getItem('nobet-online-planner-location')}catch{}const location=restorePlannerLocation(state,saved);month=location.month;selectedDay=location.date;selectedSite=location.site;view=location.view;pendingLocationScroll=location;render();if(state.months[month])reconcileWeekendMonth(month);}catch(error){app.innerHTML=`<div class="loading"><div><h2>Dosyalar yüklenemedi</h2><p class="muted">${e(error.message)}</p><button class="btn" data-action="reload">Yeniden dene</button></div></div>`}}
@@ -329,16 +377,20 @@ function askAssignment(id,d,s,moveId=null){
 }
 function openAudit(){const issues=auditMonth(state,month),errors=issues.filter(i=>i.severity==='error'),emptyDays=daysInMonth(month).filter(d=>!state.assignments.some(a=>a.date===d)).length;dialog({title:`${monthLabel(month)} · Son kontrol`,body:`<p>${issues.length?`${issues.length} kontrol notu var.`:'Tanımlı kurallar sağlanıyor.'} ${emptyDays?`${emptyDays} güne henüz nöbet yazılmadı.`:''}</p><div class="issues-scroll">${issuesHTML(issues)}</div><p class="form-help">Eksik hedefler, yarım hafta sonları ve izin/istek istisnalarını kontrol et. Hastane kişi sayısını sen belirlersin.</p>`,confirmLabel:errors.length?'Hataları düzeltmek için dön':issues.length||emptyDays?'Notları gördüm, tamamla':'Listeyi tamamla',onConfirm:()=>{if(errors.length)return true;commit(st=>{st.months[month].completedAt=new Date().toISOString()},'Liste tamamlandı',{invalidate:false})}})}
 function personDetail(id){const p=person(id),c=stats(id),t=targetFor(state,id,month),progress=targetProgress(t,c),list=state.assignments.filter(a=>a.personId===id&&a.date.startsWith(month)).sort((a,b)=>a.date.localeCompare(b.date));dialog({title:p.name,body:`<p>${rankOf(state,p.groupId,month)}. kıdem · ${e(monthLabel(month))}</p><div class="notice info">Toplam nöbet ${fmt(c.countedTotal)} / ${progress?fmt(progress.totalTarget):'—'} · Hafta sonu ${fmt(c.weekend)} / ${progress?fmt(progress.weekendTarget):'—'} puan</div><p class="muted">Gerçek nöbet: ${c.total}${c.countedTotal!==c.total?' · Tatil katkı ayarı toplam hedefe uygulandı.':''}</p>${list.length?`<table class="data-table"><thead><tr><th>Tarih</th><th>Hastane</th><th>Not</th></tr></thead><tbody>${list.map(a=>`<tr><td>${e(dateLabel(a.date,{day:'numeric',month:'short',weekday:'short'}))}</td><td>${e(a.site)}</td><td>${a.overrides?.length?'Onaylı istisna':'—'}</td></tr>`).join('')}</tbody></table>`:'<p class="muted">Bu ay henüz nöbet yazılmadı.</p>'}${c.unpaired.length?`<p class="form-help">Eksik hafta sonu eşi: ${c.unpaired.map(x=>e(shortDate(x.missingDate))).join(', ')}</p>`:''}`,confirmLabel:'Kapat',hideCancel:true})}
-function undo(redo=false){const source=redo?redoStack:undoStack,dest=redo?undoStack:redoStack;if(!source.length)return;if(conflict){toast('Önce kayıt çakışmasını çöz.');return}dest.push(structuredClone(state));state=source.pop();state.updatedAt=new Date().toISOString();pendingSave=structuredClone(state);selectedPerson=null;selectedAssignment=null;render();void flushSave();toast(redo?'İşlem yinelendi':'Son işlem geri alındı')}
+function undo(redo=false){const source=redo?redoStack:undoStack,dest=redo?undoStack:redoStack;if(!source.length)return;if(conflict){toast('Önce kayıt çakışmasını çöz.');return}dest.push(structuredClone(state));state=source.pop();editVersion++;state.updatedAt=new Date().toISOString();pendingSave=structuredClone(state);selectedPerson=null;selectedAssignment=null;render();void flushSave();toast(redo?'İşlem yinelendi':'Son işlem geri alındı')}
 async function publishMonth(){
  if(publishing||!state?.months[month])return;
+ const requestedMonth=month;
  publishing=true;updateSave();
  try{
   await flushSave();
   if(saving||pendingSave||saveError||conflict)throw new Error('Önce değişikliklerinin çevrimiçi kaydedilmesini bekle.');
-  const errors=auditMonth(state,month).filter(item=>item.severity==='error');
+  const refreshed=await refreshPlannerSource({forPublish:true});
+  if(refreshed.status==='failed')throw refreshed.error;
+  if(!['updated','unchanged'].includes(refreshed.status)||month!==requestedMonth)throw new Error('Yenileme sırasında seçim veya taslak değişti. Değişikliklerin kaydedilince yeniden yayınla.');
+  const errors=auditMonth(state,requestedMonth).filter(item=>item.severity==='error');
   if(errors.length){dialog({title:'Yayınlamadan önce düzelt',body:issuesHTML(errors),confirmLabel:'Anladım',hideCancel:true});return}
-  const result=await plannerBridge.request('publish',{month,revision,state:structuredClone(state)},{timeoutMs:600000});
+  const result=await plannerBridge.request('publish',{month:requestedMonth,revision,state:structuredClone(state)},{timeoutMs:600000});
   toast(result?.message||'Nöbet listesi Asistan sistemine yayınlandı.');
  }catch(error){toast(error.message)}finally{publishing=false;updateSave()}
 }
@@ -428,5 +480,8 @@ dlg.addEventListener('close',()=>datePickerCleanup());
 window.addEventListener('beforeprint',()=>{if(view==='plan'&&state?.months[month]&&!document.querySelector('#share-view'))openShareView(state,month)});
 document.addEventListener('scroll',event=>{if(event.target instanceof Element&&event.target.matches('.content,.plan-table,.candidate-scroll')){clearTimeout(locationSaveTimer);locationSaveTimer=setTimeout(rememberLocation,150)}},true);
 window.addEventListener('beforeunload',event=>{rememberLocation();if(pendingSave||saving||saveError||publishing){event.preventDefault();event.returnValue=''}});
-window.addEventListener('pagehide',event=>{if(!event.persisted)plannerBridge.destroy()});
+const sourceRefreshTimer=setInterval(()=>{void refreshPlannerSource()},30000);
+window.addEventListener('focus',()=>{void refreshPlannerSource()});
+document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')void refreshPlannerSource()});
+window.addEventListener('pagehide',event=>{if(!event.persisted){clearInterval(sourceRefreshTimer);plannerBridge.destroy()}});
 load();

@@ -1,7 +1,7 @@
 export interface PublicationIssue { code: string; message: string; date?: string; personId?: string }
 export interface PublishedDuty { name: string; site: 'Sancaktepe' | 'Feriha Öz' | 'Çekmeköy' }
 export interface PublicationDraft {
-  people: Array<{ id: string; name: string; groupId: string; from: string; until?: string | null }>;
+  people: Array<{ id: string; name: string; groupId: string; groupHistory?: Array<{ from: string; groupId: string }>; from: string; until?: string | null }>;
   groups: Array<{ id: string; from: string; until?: string | null }>;
   assignments: Array<{ id?: string; personId: string; date: string; site: string; overrides?: unknown[] }>;
 }

@@ -154,9 +154,15 @@ function renderRecords(state, month) {
   return `${heading('İzinler ve nöbet istekleri', `${month} ile kesişen kayıtlar. İzin, muafiyet ve yazılmasın isteği atama sırasında onayınızla aşılabilir.`, bulkButton('duty', 'Geçmiş nöbetleri aktar'))}<section class="panel">${heading('İzin ve muafiyet', 'Kişi ve tarih aralığıyla ekleyin; iki uç gün de dahildir.', `${bulkButton('absence')} ${button('İzin / muafiyet ekle', 'mg-add-record', 'data-kind="absence"', true)}`)}${absences.length ? table(['Kişi', 'Tarih', 'Tür', 'Açıklama', 'İşlem'], recordRows(state, month, absences, 'absences')) : empty('Bu ay için izin veya muafiyet kaydı yok.')}</section><section class="panel">${heading('Nöbet istekleri', '“Yazılsın” kaydedildiğinde istenen günlere nöbet eklenir. Hastane rotasyondan alınır; rotasyonu veya rotasyon hastanesi yoksa seçtiğiniz hastane kullanılır. Eklenen nöbeti plandan kaldırabilirsiniz.', `${requests.some(record => record.kind === 'prefer') ? button('Yazılsın isteklerini uygula', 'mg-apply-requests') : ''} ${bulkButton('request')} ${button('Talimat', 'mg-copy-request-prompt')} ${button('İstek ekle', 'mg-add-record', 'data-kind="request"', true)}`)}${requests.length ? table(['Kişi', 'Tarih', 'İstek', 'Açıklama', 'İşlem'], recordRows(state, month, requests, 'requests')) : empty('Bu ay için nöbet isteği kaydı yok.')}</section><section class="panel">${heading('Birlikte nöbet istekleri', 'Aynı gün, farklı hastanelerde olabilir. Biri yazılınca diğerleri planlayıcıda istekler arasında görünür.', button('Birlikte istek ekle', 'mg-add-together-request', '', true))}${togetherRows.length ? table(['Kişiler', 'Tarih', 'Açıklama', 'İşlem'], togetherRows) : empty('Bu ay için birlikte nöbet isteği yok.')}</section>`;
 }
 
+function sourceRotations(state, month) {
+  return state.portalSource?.version === 1 && month >= state.portalSource.fromMonth;
+}
 function renderRotations(state, month) {
   const rows = state.rotations.filter(record => insideMonth(record, month)).sort(byPerson(state, month));
-  return `${heading('Gündüz rotasyonları', 'Rotasyon hastanesi, nöbet yerleştirirken bir tercihtir. Nöbet ertesi hastanesiz kaydedilir. Aynı tarihlerde çelişen rotasyonlar kaydedilmez.', `${bulkButton('rotation')} ${button('Dönemi topluca düzenle', 'mg-bulk-rotations', '', true)} ${button('Rotasyon ekle', 'mg-add-record', 'data-kind="rotation"')}`)}<section class="panel">${rows.length ? table(['Kişi', 'Dönem', 'Hastane', 'Birim', 'İşlem'], rows.map(record => `<tr><td><strong>${esc(personName(state, record.personId))}</strong></td><td>${esc(period(record.start, record.end))}</td><td>${isPostCallRotation(record) ? '<span class="rotation-location" data-rotation-site="post-call">Hastanesiz</span>' : esc(record.site)}</td><td>${esc(record.unit || '—')}</td><td>${button('Düzenle', 'mg-edit-record', `data-collection="rotations" data-id="${esc(record.id)}"`)} ${button('Sil', 'mg-delete-record', `data-collection="rotations" data-id="${esc(record.id)}"`)}</td></tr>`)) : empty('Bu ay için rotasyon tanımlanmadı.')}</section>`;
+  const managed = sourceRotations(state, month);
+  const actions = managed ? '' : `${bulkButton('rotation')} ${button('Dönemi topluca düzenle', 'mg-bulk-rotations', '', true)} ${button('Rotasyon ekle', 'mg-add-record', 'data-kind="rotation"')}`;
+  const warnings = managed ? (state.portalSource.warnings ?? []).filter(item => !item.month || item.month === month) : [];
+  return `${heading('Gündüz rotasyonları', managed ? 'Bu ayın rotasyonları Asistan uygulamasından otomatik alınır. Değişiklikleri orada yapabilirsin.' : 'Rotasyon hastanesi, nöbet yerleştirirken bir tercihtir. Nöbet ertesi hastanesiz kaydedilir.', actions)}${warnings.length ? `<div class="notice warn"><ul>${warnings.map(item => `<li>${esc(item.message)}</li>`).join('')}</ul></div>` : ''}<section class="panel">${rows.length ? table(['Kişi', 'Dönem', 'Hastane', 'Birim', ...(managed ? [] : ['İşlem'])], rows.map(record => `<tr><td><strong>${esc(personName(state, record.personId))}</strong></td><td>${esc(period(record.start, record.end))}</td><td>${isPostCallRotation(record) ? '<span class="rotation-location" data-rotation-site="post-call">Hastanesiz</span>' : esc(record.site)}</td><td>${esc(record.unit || '—')}</td>${managed ? '' : `<td>${button('Düzenle', 'mg-edit-record', `data-collection="rotations" data-id="${esc(record.id)}"`)} ${button('Sil', 'mg-delete-record', `data-collection="rotations" data-id="${esc(record.id)}"`)}</td>`}</tr>`)) : empty(managed ? 'Uygulamada bu ay için rotasyon kaydı yok.' : 'Bu ay için rotasyon tanımlanmadı.')}</section>`;
 }
 
 function rotationPeriodPeople(state, start, end) {
@@ -597,6 +603,10 @@ function importDialog(ctx, kind, initialText = '') {
 
 export async function handleManagement(action, element, ctx) {
   if (!action.startsWith('mg-')) return false;
+  if (sourceRotations(ctx.state, ctx.month) && (element.dataset.kind === 'rotation' || element.dataset.collection === 'rotations' || action === 'mg-bulk-rotations')) {
+    ctx.toast('Rotasyonları Asistan uygulamasında düzenle. Değişiklikler otomatik alınır.');
+    return true;
+  }
   switch (action) {
     case 'mg-target': targetDialog(ctx, element); break;
     case 'mg-capabilities': capabilityDialog(ctx, element); break;

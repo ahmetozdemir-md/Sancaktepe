@@ -1,6 +1,7 @@
 import { daysInMonth, dayOfWeek } from './domain.js';
 import { comparePeopleBySeniority } from './person-order.js';
 import { capabilitiesFor, getPlanningSettings } from './capabilities.js';
+import { personAtMonth } from './person-history.js';
 
 const SITES = ['Sancaktepe', 'Feriha Öz', 'Çekmeköy'];
 export const SHARE_HOSPITAL_SHARES = Object.freeze([0.31, 0.51, 0.18]);
@@ -12,7 +13,7 @@ const escapeHTML = value => String(value ?? '').replace(/[&<>"']/gu, character =
 /** A detached, complete calendar snapshot. Historical assignees remain visible. */
 export function buildShareModel(state, month, range = 'all') {
   const dates = daysInMonth(month);
-  const people = new Map((state.people ?? []).map(person => [person.id, person]));
+  const people = new Map((state.people ?? []).map(person => [person.id, personAtMonth(person, month)]));
   const assignments = (state.assignments ?? []).filter(assignment => assignment.date?.slice(0, 7) === month);
   const compare = comparePeopleBySeniority(state, month);
   const ferihaAreaTarget = getPlanningSettings(state).ferihaCapacity;

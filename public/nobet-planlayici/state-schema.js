@@ -1,4 +1,5 @@
 import { isPostCallRotation, isPostCallUnit } from './rotations.js';
+import { personGroupId } from './person-history.js';
 
 /** Shared structural validation for saves and imported backups. No warning is a save blocker. */
 export function validateState(state) {
@@ -51,6 +52,18 @@ export function validateState(state) {
     if (!text(row.name)) add(path, 'Ad boş olamaz.');
     ref(row.groupId, 'groups', path);
     if (!date(row.from) || !(row.until === null || (date(row.until) && row.until > row.from))) add(path, 'Geçerlilik tarihleri hatalı.');
+    if (row.groupHistory !== undefined) {
+      if (!Array.isArray(row.groupHistory)) add(path, 'Kıdem geçmişi liste olmalıdır.');
+      else {
+        let previous = '';
+        for (const entry of row.groupHistory) {
+          if (!object(entry)) { add(path, 'Kıdem geçmişi kaydı nesne olmalıdır.'); continue; }
+          if (!month(entry.from) || entry.from <= previous) add(path, 'Kıdem geçmişi ayları geçerli, tekil ve artan sırada olmalıdır.');
+          if (month(entry.from)) previous = entry.from;
+          ref(entry.groupId, 'groups', path);
+        }
+      }
+    }
   }
   const targetKeys = new Set();
   for (const row of rows.targets) {
@@ -151,7 +164,7 @@ export function validateState(state) {
     if (!Array.isArray(row.overrides)) add(path, 'Onaylanan uyarılar liste olmalıdır.');
     const person = people.get(row.personId);
     if (person && date(row.date) && (row.date < person.from || (person.until !== null && row.date >= person.until))) add(path, 'Kişi bu tarihte aktif değil.');
-    const group = person && groups.get(person.groupId);
+    const group = person && groups.get(personGroupId(person, row.date?.slice(0, 7)));
     if (group && date(row.date)) {
       const dutyMonth = row.date.slice(0, 7);
       if (dutyMonth < group.from || (group.until !== null && dutyMonth >= group.until)) add(path, 'Kişinin kıdem grubu bu ayda aktif değil.');

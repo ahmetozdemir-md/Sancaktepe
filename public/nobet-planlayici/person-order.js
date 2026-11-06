@@ -1,11 +1,12 @@
 import { activeGroups } from './domain.js';
+import { personGroupId } from './person-history.js';
 
 const names = new Intl.Collator('tr', { sensitivity: 'base', numeric: true });
 
 /** Current seniority first, then Turkish name order. Inactive or unknown groups follow active groups. */
 export function comparePeopleBySeniority(state, month) {
   const ranks = new Map(activeGroups(state, month).map((group, index) => [group.id, index]));
-  const rank = person => ranks.get(person?.groupId) ?? Number.MAX_SAFE_INTEGER;
+  const rank = person => ranks.get(personGroupId(person, month)) ?? Number.MAX_SAFE_INTEGER;
   return (left, right) => rank(left) - rank(right)
     || names.compare(left?.name ?? '', right?.name ?? '')
     || String(left?.id ?? '').localeCompare(String(right?.id ?? ''));
