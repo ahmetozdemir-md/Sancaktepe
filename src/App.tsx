@@ -2467,6 +2467,7 @@ function App() {
   const [data, setData] = useState<PlannerState>(() => safeReadState())
   const latestDataRef = useRef(data)
   const bulkImportBusyRef = useRef(false)
+  const [bulkRecordBusy, setBulkRecordBusy] = useState(false)
   const libraryBusyRef = useRef(false)
   const [libraryAdminOpened, setLibraryAdminOpened] = useState(false)
   const onLibraryBusyChange = useCallback((busy: boolean) => { libraryBusyRef.current = busy }, [])
@@ -2517,6 +2518,10 @@ function App() {
 
   const [dutyMonth, setDutyMonth] = useState(currentMonthISO)
   const [dutyImportIssues, setDutyImportIssues] = useState<string[]>([])
+  const [dutyDeleteMonth, setDutyDeleteMonth] = useState(currentMonthISO)
+  const [assistantToRemove, setAssistantToRemove] = useState('')
+  const [locationToRemove, setLocationToRemove] = useState('')
+  const [manualCleanupDay, setManualCleanupDay] = useState(todayISO)
   const [cellDrafts, setCellDrafts] = useState<Record<string, string>>({})
   const [dutyDrafts, setDutyDrafts] = useState<Record<string, string>>({})
   const [dutySiteDrafts, setDutySiteDrafts] = useState<Record<string, DutySite | ''>>({})
@@ -2807,6 +2812,14 @@ function App() {
     data.rotatorRoster,
     plannerMonth,
   ])
+  const dutyDeleteMonthOptions = useMemo(() => {
+    const months = Object.keys(data.dutyRoster).filter(hasIsoShape).map((day) => day.slice(0, 7))
+    return buildRelativeMonthOptions(dutyDeleteMonth, months)
+  }, [buildRelativeMonthOptions, data.dutyRoster, dutyDeleteMonth])
+  const closableLocations = sortedLocations.filter((location) =>
+    location.kind === 'normal' && (!location.activeUntil || location.activeUntil > todayISO),
+  )
+
   const specialistWorkWeekOptions = useMemo(
     () =>
       buildWeekDeleteOptions(specialistWorkDeleteWeek, [
@@ -5550,31 +5563,31 @@ function App() {
   }
 
   const deleteDutyMonth = async () => {
-    if (!isValidMonthISO(dutyMonth)) {
+    if (!isValidMonthISO(dutyDeleteMonth)) {
       showWarning('Sıfırlanacak ay seçimi geçersiz.')
       return
     }
 
-    const dayKeys = listMonthDays(dutyMonth)
+    const dayKeys = listMonthDays(dutyDeleteMonth)
     const totalRecords = dayKeys.reduce(
       (total, dayKey) => total + (data.dutyRoster[dayKey] ?? []).length,
       0,
     )
 
     if (!totalRecords) {
-      showWarning(`${formatMonthSelectLabel(dutyMonth)} için silinecek nöbet kaydı yok.`)
+      showWarning(`${formatMonthSelectLabel(dutyDeleteMonth)} için silinecek nöbet kaydı yok.`)
       return
     }
 
     const approved = window.confirm(
-      `${formatMonthSelectLabel(dutyMonth)} ayındaki ${totalRecords} asistan nöbet kaydı silinecek. Onaylıyor musun?`,
+      `${formatMonthSelectLabel(dutyDeleteMonth)} ayındaki ${totalRecords} asistan nöbet kaydı silinecek. Onaylıyor musun?`,
     )
     if (!approved) {
       showWarning('Nöbet ayı sıfırlanmadı.')
       return
     }
 
-    if (!(await createPreChangeBackup(`before-duty-month-delete-${dutyMonth}`, 'duty-month-delete', true))) {
+    if (!(await createPreChangeBackup(`before-duty-month-delete-${dutyDeleteMonth}`, 'duty-month-delete', true))) {
       return
     }
 
@@ -5609,21 +5622,23 @@ function App() {
     }
 
     setDutyImportIssues([])
-    showSuccess(`${formatMonthSelectLabel(dutyMonth)} ayındaki nöbet kayıtları sıfırlandı.`)
+    showSuccess(`${formatMonthSelectLabel(dutyDeleteMonth)} ayındaki nöbet kayıtları sıfırlandı.`)
   }
 
-  const runBulkRecordChange = async (change: () => Promise<void>) => {
+  const runBulkRecordChange = async (change: () => void | Promise<void>) => {
     if (bulkImportBusyRef.current || isCloudSaving) {
       showWarning('Devam eden kayıt işlemi tamamlandıktan sonra tekrar dene.')
       return
     }
     bulkImportBusyRef.current = true
+    setBulkRecordBusy(true)
     try {
       await change()
     } catch {
       showWarning('İşlem tamamlanamadı. Bulut senkron durumunu kontrol edip yeniden dene.')
     } finally {
       bulkImportBusyRef.current = false
+      setBulkRecordBusy(false)
     }
   }
 
@@ -8070,18 +8085,38 @@ function App() {
 
           {adminSection === 'bulkImport' ? (
             <section className="card fade-up delay-5 specialist-admin-card">
-              <h2>Uzman ve Rotasyoner Kayıt Yönetimi</h2>
+              <h2 id="bulk-record-management-title">Kayıt Yönetimi</h2>
               <p className="subtext">
-                Uzmanları kullanıcıya çevirmeden metinsel planlama verisi olarak kaydedebilirsin.
-                Yeni kayıtları yukarıdaki toplu giriş alanından ekleyebilirsin.
-                Buradan mevcut listeleri hafta veya ay bazında silebilirsin.
+                Hafta/ay bazında kayıt silme, asistan çıkarma, alan kapatma ve manuel atama
+                temizleme işlemlerini buradan yönetebilirsin. Yeni kayıtlar için yukarıdaki alanı kullan.
               </p>
+              <fieldset className="bulk-record-grid" aria-labelledby="bulk-record-management-title" disabled={bulkRecordBusy || isCloudSaving}>
+                <article className="specialist-input-card">
+                  <h3>Asistan Nöbetleri</h3>
+                  <p className="subtext">Seçilen ayın asistan nöbet kayıtlarını sil.</p>
+                  <div className="specialist-delete-row">
+                    <select aria-label="Silinecek asistan nöbet ayı" value={dutyDeleteMonth} onChange={(event) => setDutyDeleteMonth(event.target.value)}>
+                      {dutyDeleteMonthOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                    </select>
+                    <button type="button" className="danger-soft-button" onClick={() => void runBulkRecordChange(deleteDutyMonth)}>Ayı Sil</button>
+                  </div>
+            {dutyImportIssues.length ? (
+              <article className="import-issue-card">
+                <h3>Nöbet Silme Uyarıları</h3>
+                <ul>
+                  {dutyImportIssues.map((issue, index) => (
+                    <li key={`duty-issue-${index}`}>{issue}</li>
+                  ))}
+                </ul>
+              </article>
+            ) : null}
+
+                </article>
 
               <article className="specialist-input-card">
-                <h3>Günlük Çalışma</h3>
+                <h3>Uzman Günlük Çalışma</h3>
                 <p className="subtext">
-                  Günlük çalışma kayıtlarını Toplu Veri Girişinden ekle. Aynı uzman birden fazla
-                  alanda, aynı alanda birden fazla uzman bulunabilir.
+                  Seçilen haftanın uzman günlük çalışma kayıtlarını sil.
                 </p>
                 <div className="specialist-delete-row">
                   <select
@@ -8116,8 +8151,7 @@ function App() {
               <article className="specialist-input-card">
                 <h3>Nöbetçi Uzmanlar</h3>
                 <p className="subtext">
-                  Nöbetçi uzman kayıtlarını Toplu Veri Girişinden ekle. Nöbet yerleri:
-                  Sancaktepe, Çekmeköy, Feriha C123, Feriha C456, Feriha G123.
+                  Seçilen ayın nöbetçi uzman kayıtlarını sil.
                 </p>
                 <div className="specialist-delete-row">
                   <select
@@ -8152,9 +8186,7 @@ function App() {
               <article className="specialist-input-card rotator-input-card">
                 <h3>Rotasyonerler</h3>
                 <p className="subtext">
-                  Rotasyonerleri Toplu Veri Girişinden ekle. Bu kişiler kullanıcı/asistan
-                  olarak oluşturulmaz; yalnızca o gün C1-G3, Sancaktepe YBÜ ve Çekmeköy YBÜ alanlarında
-                  rotasyoner seçeneği olarak görünür.
+                  Seçilen haftanın rotasyoner listesini ve rotasyoner oda atamalarını sil.
                 </p>
                 <div className="specialist-delete-row">
                   <select
@@ -8185,6 +8217,47 @@ function App() {
                   </article>
                 ) : null}
               </article>
+
+                <article className="specialist-input-card">
+                  <h3>Asistan Kaydı</h3>
+                  <p className="subtext">Asistanı havuzdan çıkarır; kişiye ait nöbet ve atama kayıtlarını da temizler.</p>
+                  <div className="specialist-delete-row">
+                    <select aria-label="Listeden çıkarılacak asistan" value={data.assistants.includes(assistantToRemove) ? assistantToRemove : ''} onChange={(event) => setAssistantToRemove(event.target.value)}>
+                      <option value="">Asistan seç</option>
+                      {data.assistants.map((name) => <option key={name} value={name}>{name}</option>)}
+                    </select>
+                    <button type="button" className="danger-soft-button" disabled={!data.assistants.includes(assistantToRemove) || ownersEditMode || Object.values(plannerEditModes).some(Boolean)} onClick={() => void runBulkRecordChange(() => removeAssistant(assistantToRemove))}>Asistanı Çıkar</button>
+                  </div>
+                  {ownersEditMode || Object.values(plannerEditModes).some(Boolean) ? <p className="hint-text">Önce açık alan/planlama taslaklarını kaydet veya iptal et.</p> : null}
+                </article>
+
+                <article className="specialist-input-card">
+                  <h3>Alan Kaydı</h3>
+                  <p className="subtext">Seçilen alanı bugünden itibaren kapatır. Geçmiş tarihlerdeki kayıtları korunur.</p>
+                  <div className="specialist-delete-row">
+                    <select aria-label="Kapatılacak alan" value={closableLocations.some((location) => location.id === locationToRemove) ? locationToRemove : ''} onChange={(event) => setLocationToRemove(event.target.value)}>
+                      <option value="">Alan seç</option>
+                      {closableLocations.map((location) => <option key={location.id} value={location.id}>{location.site} / {location.name}</option>)}
+                    </select>
+                    <button type="button" className="danger-soft-button" disabled={!closableLocations.some((location) => location.id === locationToRemove) || ownersEditMode || Object.values(plannerEditModes).some(Boolean)} onClick={() => void runBulkRecordChange(() => removeLocation(locationToRemove))}>Alanı Kapat</button>
+                  </div>
+                  {ownersEditMode || Object.values(plannerEditModes).some(Boolean) ? <p className="hint-text">Önce açık alan/planlama taslaklarını kaydet veya iptal et.</p> : null}
+                </article>
+
+                <article className="specialist-input-card bulk-manual-cleanup">
+                  <h3>Günlük Manuel Atamalar</h3>
+                  <p className="subtext">Seçilen günün manuel oda, izin/rotasyon ve rotasyoner oda atamalarını temizle. Önce düzenlemeyi aç; temizleme Kaydet ile uygulanır.</p>
+                  <div className="bulk-manual-controls">
+                    <label>Tarih<input type="date" value={manualCleanupDay} disabled={isPlannerDayInEditMode(manualCleanupDay)} onChange={(event) => { if (hasIsoShape(event.target.value)) setManualCleanupDay(event.target.value) }} /></label>
+                    {!isPlannerDayInEditMode(manualCleanupDay) ? <button type="button" className="secondary" onClick={() => startPlannerDayEdit(manualCleanupDay)}>Değiştir</button> : <>
+                      <button type="button" className="danger-soft-button" onClick={() => clearDayAssignments(manualCleanupDay)}>Manueli Temizle</button>
+                      <button type="button" className="secondary" onClick={() => void runBulkRecordChange(() => savePlannerDay(manualCleanupDay))}>Kaydet</button>
+                      <button type="button" className="ghost-button" onClick={() => cancelPlannerDayEdit(manualCleanupDay)}>İptal</button>
+                    </>}
+                  </div>
+                  {isPlannerDayInEditMode(manualCleanupDay) ? <p className="hint-text">Bu günün planlama taslağı açık. Kaydet mevcut taslaktaki tüm değişiklikleri uygular; İptal tümünü geri alır.</p> : null}
+                </article>
+              </fieldset>
             </section>
           ) : null}
 
@@ -8219,6 +8292,7 @@ function App() {
                 </button>
               </div>
 
+              <p className="hint-text">Asistan çıkarma işlemi Toplu Veri Girişi → Kayıt Yönetimi bölümündedir.</p>
               {assistantsBySeniority.map((group) => (
                 <section key={`assistant-rank-group-${group.level}`} className="assistant-rank-group">
                   <header className="assistant-rank-head">
@@ -8228,16 +8302,9 @@ function App() {
                   {group.names.length ? (
                     <div className="assistant-chip-grid">
                       {group.names.map((assistant) => (
-                        <button
-                          key={assistant}
-                          type="button"
-                          className="assistant-chip"
-                          onClick={() => removeAssistant(assistant)}
-                          title="Listeden çıkar"
-                        >
+                        <div key={assistant} className="assistant-chip assistant-chip-static">
                           <span className="assistant-chip-name">{assistant}</span>
-                          <span className="assistant-chip-remove">Kaldır</span>
-                        </button>
+                        </div>
                       ))}
                     </div>
                   ) : (
@@ -8344,6 +8411,7 @@ function App() {
               ) : null}
             </div>
 
+            <p className="hint-text">Alan kapatma işlemi Toplu Veri Girişi → Kayıt Yönetimi bölümündedir.</p>
             {groupedRoomLocations.map(([siteName, locations]) => (
               <section key={`location-group-${siteName}`} className="site-group-card">
                 <h3 className="site-group-title">{siteName}</h3>
@@ -8365,16 +8433,6 @@ function App() {
                             onChange={(event) => updateLocationOrder(location.id, event.target.value)}
                           />
                         </label>
-                        <button
-                          type="button"
-                          className="ghost-button location-delete-button"
-                          disabled={ownersEditMode}
-                          onClick={() => removeLocation(location.id)}
-                          title="Alanı kaldır"
-                          aria-label="Alanı kaldır"
-                        >
-                          🗑
-                        </button>
                       </div>
                       <div className="location-pill-main">
                         <p>
@@ -8497,9 +8555,9 @@ function App() {
               Ay seçip nöbetleri günlük kartlardan veya Toplu Veri Girişinden ekle. Nöbetler her gün yazılır;
               hafta sonu ve resmi tatiller dahildir.
             </p>
-            <div className="specialist-delete-row">
+            <div className="form-row month-only-row">
               <select
-                aria-label="Sıfırlanacak nöbet ayı"
+                aria-label="Görüntülenecek nöbet ayı"
                 className="my-calendar-month-select"
                 value={dutyMonth}
                 onChange={(event) => {
@@ -8515,23 +8573,9 @@ function App() {
                   </option>
                 ))}
               </select>
-              <button type="button" className="danger-soft-button" onClick={deleteDutyMonth}>
-                Ayı Sıfırla
-              </button>
             </div>
 
-            <div className="bulk-import-shortcut"><p>Metinle toplu ekleme için tek giriş ekranını kullan.</p><button type="button" className="secondary" onClick={() => selectAdminSection('bulkImport')}>Toplu Veri Girişini Aç</button></div>
-
-            {dutyImportIssues.length ? (
-              <article className="import-issue-card">
-                <h3>Hızlı Giriş Uyarıları</h3>
-                <ul>
-                  {dutyImportIssues.map((issue, index) => (
-                    <li key={`duty-issue-${index}`}>{issue}</li>
-                  ))}
-                </ul>
-              </article>
-            ) : null}
+            <div className="bulk-import-shortcut"><p>Toplu ekleme ve kayıt temizleme işlemleri Toplu Veri Girişi bölümündedir.</p><button type="button" className="secondary" onClick={() => selectAdminSection('bulkImport')}>Toplu Veri Girişini Aç</button></div>
 
             <div className="week-duty-grid">
               {dutyMonthDays.map((dayKey) => {
@@ -8738,14 +8782,6 @@ function App() {
                     >
                       Varsayılanları Yaz
                     </button>
-                    <button
-                      type="button"
-                      className="ghost-button day-mini-action"
-                      disabled={!isDayEditable}
-                      onClick={() => clearDayAssignments(day.key)}
-                    >
-                      Manueli Temizle
-                    </button>
                   </div>
                   <p className="hint-text planner-hint">
                     {isDayEditable
@@ -8813,7 +8849,7 @@ function App() {
               </p>
             ) : null}
 
-            <div className="bulk-import-shortcut"><p>Metinle toplu ekleme için tek giriş ekranını kullan.</p><button type="button" className="secondary" onClick={() => selectAdminSection('bulkImport')}>Toplu Veri Girişini Aç</button></div>
+            <div className="bulk-import-shortcut"><p>Toplu ekleme ve kayıt temizleme işlemleri Toplu Veri Girişi bölümündedir.</p><button type="button" className="secondary" onClick={() => selectAdminSection('bulkImport')}>Toplu Veri Girişini Aç</button></div>
             </section>
           ) : null}
 

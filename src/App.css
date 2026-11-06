@@ -995,7 +995,7 @@ textarea {
   gap: 0.52rem;
 }
 
-button.assistant-chip {
+.assistant-chip-static {
   width: 100%;
   display: flex;
   align-items: center;
@@ -1009,18 +1009,6 @@ button.assistant-chip {
   text-align: left;
   box-shadow: none;
   transform: none;
-}
-
-button.assistant-chip:hover {
-  border-color: rgba(210, 87, 74, 0.42);
-  background: linear-gradient(160deg, rgba(255, 250, 249, 0.96), rgba(252, 235, 231, 0.82));
-  color: #8f2f27;
-  box-shadow: none;
-  transform: translateY(-1px);
-}
-
-button.assistant-chip:active {
-  transform: translateY(0);
 }
 
 .assistant-chip-name {
@@ -4816,4 +4804,24 @@ code {
   .bulk-import-badge { font-size: 0.7rem; }
   .bulk-import-actions button, .bulk-import-shortcut button { width: 100%; }
   .bulk-import-table { min-width: 650px; }
+}
+
+.bulk-record-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; margin: 0; padding: 0; border: 0; min-width: 0; }
+.bulk-record-grid > article { min-width: 0; }
+.bulk-record-grid .specialist-delete-row { grid-template-columns: minmax(0, 1fr) auto; }
+.bulk-record-grid .specialist-delete-row button { width: auto; }
+.bulk-record-grid select { width: 100%; min-width: 0; }
+.bulk-record-grid:disabled { opacity: .7; }
+.bulk-manual-cleanup { grid-column: 1 / -1; }
+.bulk-manual-controls { display: flex; align-items: flex-end; flex-wrap: wrap; gap: .65rem; margin-top: .8rem; }
+.bulk-manual-controls label { display: grid; gap: .35rem; min-width: 180px; }
+.bulk-manual-controls button { width: auto; }
+@media (max-width: 760px) {
+  .bulk-record-grid { grid-template-columns: minmax(0, 1fr); }
+  .bulk-manual-controls label { width: 100%; }
+}
+@media (max-width: 480px) {
+  .bulk-record-grid .specialist-delete-row { grid-template-columns: minmax(0, 1fr); }
+  .bulk-record-grid .specialist-delete-row button { width: 100%; }
+  .bulk-manual-controls button { flex: 1; }
 }

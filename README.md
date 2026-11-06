@@ -18,8 +18,11 @@ npm run build
 ## Toplu Veri Girişi
 
 Admin panelindeki **Toplu Veri Girişi**, önceki beş metin girişinin ortak ekranıdır.
-Uzman günlük çalışma, nöbetçi uzman ve rotasyoner kayıtlarının hafta/ay bazında yönetimi
-de bu sekmenin altındadır; ayrı bir Uzman ve Rotasyoner sekmesi bulunmaz.
+Bu sekmenin altındaki **Kayıt Yönetimi** bölümünde asistan nöbeti, uzman günlük çalışma,
+nöbetçi uzman ve rotasyoner kayıtları hafta/ay bazında silinir; asistan çıkarma ve alan kapatma
+kontrolleri de buradadır. Günlük manuel atama temizliği mevcut Değiştir/Kaydet/İptal akışını
+korur. Ayrı bir Uzman ve Rotasyoner sekmesi bulunmaz. Nöbet ve Planlama sekmeleri günlük
+düzenleme için kullanılmaya devam eder.
 ChatGPT çıktısı `TÜR | YYYY-AA-GG | Kişi | Alan / durum` biçiminde hazırlanır;
 `ROTASYONER` satırları yalnız ilk üç sütunu içerir. Tek metinde farklı türler ve tarihler bulunabilir.
 Ekrandaki proje talimatları kopyalanabilir; güncel asistan ve alan referansı ayrıca kopyalanır.
