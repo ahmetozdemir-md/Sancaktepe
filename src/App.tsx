@@ -1,3 +1,27 @@
+import BulkImportPanel from './BulkImportPanel'
+import { prepareBulkImport, type ImportRules } from './bulkImport'
+import type {
+  LocationKind,
+  LocationTone,
+  DutySite,
+  SpecialistDutySite,
+  SeniorityLevel,
+  ManualAssignments,
+  DutyRoster,
+  SpecialistWorkAssignments,
+  SpecialistDutyRoster,
+  RotatorRoster,
+  RotatorAssignments,
+  RotatorDayAssignments,
+  LocationOwners,
+  LocationOwnersByMonth,
+  PostDutyPoolByMonth,
+  AssistantRanks,
+  DutyAssignment,
+  SpecialistDutyAssignment,
+  WorkLocation,
+  PlannerState,
+} from './plannerTypes'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import './App.css'
 import {
@@ -26,6 +50,7 @@ import AssistantMonthlyTableView, {
 type PanelMode = 'admin' | 'observer'
 type AdminSection =
   | 'assistants'
+  | 'bulkImport'
   | 'locations'
   | 'duty'
   | 'planner'
@@ -38,43 +63,11 @@ type LoginView = 'choose' | 'admin' | 'assistant-password' | 'assistant'
 type AssistantAccessTarget = 'assistant' | 'specialist'
 type ObserverWeekDetailView = 'specialist' | 'assistant' | 'room' | 'duty'
 type PlannerView = 'rooms' | 'status'
-type LocationKind = 'normal' | 'leave' | 'duty' | 'postDuty'
-type LocationTone = 'sand' | 'sage' | 'amber' | 'sky' | 'rose'
-type DutySite = 'Sancaktepe' | 'Feriha Öz' | 'Çekmeköy'
+
 type AdminCloudAuthStatus = 'disabled' | 'checking' | 'signed-out' | 'signed-in' | 'unauthorized' | 'error'
-type SpecialistDutySite =
-  | 'Sancaktepe'
-  | 'Çekmeköy'
-  | 'Feriha C123'
-  | 'Feriha C456'
-  | 'Feriha G123'
-type SeniorityLevel = number
 
 const SPECIALIST_LOGIN_NAME = 'Uzman'
 const EXCLUDED_ASSISTANT_LOGIN_NAME = 'Ahmet Özdemir'
-
-type ManualAssignments = Record<string, Record<string, string[]>>
-type DutyRoster = Record<string, DutyAssignment[]>
-type SpecialistWorkAssignments = Record<string, Record<string, string[]>>
-type SpecialistWorkDayAssignments = Record<string, string[]>
-type SpecialistDutyRoster = Record<string, SpecialistDutyAssignment[]>
-type RotatorRoster = Record<string, string[]>
-type RotatorAssignments = Record<string, Record<string, string[]>>
-type RotatorDayAssignments = Record<string, string[]>
-type LocationOwners = Record<string, string[]>
-type LocationOwnersByMonth = Record<string, LocationOwners>
-type PostDutyPoolByMonth = Record<string, string[]>
-type AssistantRanks = Record<string, SeniorityLevel>
-
-interface DutyAssignment {
-  name: string
-  site: DutySite
-}
-
-interface SpecialistDutyAssignment {
-  name: string
-  site: SpecialistDutySite
-}
 
 interface DutyCellEntry {
   label: string
@@ -85,34 +78,6 @@ interface SessionInfo {
   role: 'admin' | 'assistant'
   username?: string
   assistantName?: string
-}
-
-interface WorkLocation {
-  id: string
-  site: string
-  name: string
-  kind: LocationKind
-  tone: LocationTone
-  order?: number
-  orderHistory?: Array<{ from: string; value: number }>
-  activeFrom?: string
-  activeUntil?: string | null
-}
-
-interface PlannerState {
-  assistants: string[]
-  assistantRanks: AssistantRanks
-  locations: WorkLocation[]
-  locationOwners: LocationOwners
-  locationOwnersByMonth: LocationOwnersByMonth
-  postDutyPoolByMonth: PostDutyPoolByMonth
-  manualAssignments: ManualAssignments
-  dutyRoster: DutyRoster
-  specialistWorkAssignments: SpecialistWorkAssignments
-  specialistDutyRoster: SpecialistDutyRoster
-  rotatorRoster: RotatorRoster
-  rotatorAssignments: RotatorAssignments
-  weekStartISO: string
 }
 
 interface DayInfo {
@@ -230,25 +195,6 @@ interface BackupInsertResult {
   ok: boolean
   skipped: boolean
   missingTable: boolean
-}
-
-interface DutyParseIssue {
-  lineNumber: number
-  message: string
-  rawLine: string
-}
-
-interface SpecialistParseIssue {
-  lineNumber: number
-  message: string
-  rawLine: string
-}
-
-interface PlannerStatusQuickEntry {
-  dayKey: string
-  assistantName: string
-  locationId: string
-  locationLabel: string
 }
 
 interface AssistantAccount {
@@ -1115,58 +1061,6 @@ function normalizeTrToken(value: string): string {
     .replace(/ç/g, 'c')
 }
 
-function parseTurkishMonthDate(raw: string, fallbackYear: number): string | null {
-  const token = raw.trim()
-  if (!token) {
-    return null
-  }
-
-  const match = token.match(/^(\d{1,2})\s+([A-Za-zÇĞİÖŞÜçğıöşü]+)\s*(\d{4})?$/u)
-  if (!match) {
-    return null
-  }
-
-  const monthToken = normalizeLooseToken(match[2]).replace(/\s+/g, '')
-  const monthLookup = new Map<string, number>([
-    ['ocak', 1],
-    ['subat', 2],
-    ['mart', 3],
-    ['nisan', 4],
-    ['mayis', 5],
-    ['haziran', 6],
-    ['temmuz', 7],
-    ['agustos', 8],
-    ['eylul', 9],
-    ['ekim', 10],
-    ['kasim', 11],
-    ['aralik', 12],
-  ])
-  const month = monthLookup.get(monthToken)
-  if (!month) {
-    return null
-  }
-
-  const day = Number(match[1])
-  const year = match[3] ? Number(match[3]) : fallbackYear
-  if (!Number.isFinite(day) || day < 1 || day > 31 || !Number.isFinite(year) || year < 1900) {
-    return null
-  }
-
-  const parsed = new Date(year, month - 1, day)
-  if (
-    parsed.getFullYear() !== year ||
-    parsed.getMonth() !== month - 1 ||
-    parsed.getDate() !== day
-  ) {
-    return null
-  }
-  return toISODate(parsed)
-}
-
-function normalizeSpecialistDateToken(raw: string, fallbackYear: number): string | null {
-  return normalizeDateToken(raw) ?? parseTurkishMonthDate(raw, fallbackYear)
-}
-
 function buildLocationLookupTokens(location: WorkLocation): Set<string> {
   const tokenSet = new Set<string>()
   const siteToken = normalizeLooseToken(location.site)
@@ -1728,58 +1622,6 @@ function formatMonthSelectLabel(monthISO: string, selectedYear?: number): string
   return monthName
 }
 
-function normalizeDutyLineDateToken(raw: string, fallbackYear: number): string | null {
-  const value = raw.trim()
-  if (!value) {
-    return null
-  }
-
-  if (hasIsoShape(value)) {
-    return normalizeDateToken(value)
-  }
-
-  const match = value.match(/^(\d{1,2})[./-](\d{1,2})(?:[./-](\d{2,4}))?$/)
-  if (!match) {
-    return null
-  }
-
-  const day = Number(match[1])
-  const month = Number(match[2])
-  const rawYear = match[3]
-  const year = rawYear
-    ? rawYear.length === 2
-      ? 2000 + Number(rawYear)
-      : Number(rawYear)
-    : fallbackYear
-
-  if (
-    Number.isNaN(day) ||
-    Number.isNaN(month) ||
-    Number.isNaN(year) ||
-    day < 1 ||
-    day > 31 ||
-    month < 1 ||
-    month > 12
-  ) {
-    return null
-  }
-
-  const parsed = new Date(year, month - 1, day)
-  if (
-    parsed.getFullYear() !== year ||
-    parsed.getMonth() !== month - 1 ||
-    parsed.getDate() !== day
-  ) {
-    return null
-  }
-
-  return toISODate(parsed)
-}
-
-function normalizePlannerStatusDateToken(raw: string, fallbackYear: number): string | null {
-  return normalizeDutyLineDateToken(raw, fallbackYear) ?? normalizeSpecialistDateToken(raw, fallbackYear)
-}
-
 function resolvePlannerStatusSuffix(
   rawRest: string,
 ): { locationId: string; locationLabel: string; rawName: string } | null {
@@ -1806,429 +1648,6 @@ function resolvePlannerStatusSuffix(
     locationLabel: suffix.locationLabel,
     rawName: rawNameToken,
   }
-}
-
-function parsePlannerStatusQuickLines(
-  text: string,
-  fallbackYear: number,
-  assistants: string[],
-): { entries: PlannerStatusQuickEntry[]; issues: SpecialistParseIssue[]; totalEntries: number } {
-  const entries: PlannerStatusQuickEntry[] = []
-  const issues: SpecialistParseIssue[] = []
-  const seen = new Set<string>()
-
-  text
-    .split(/\r?\n/)
-    .forEach((rawLine, index) => {
-      const line = rawLine.trim()
-      if (!line) {
-        return
-      }
-
-      const match = line.match(
-        /^(\d{4}-\d{2}-\d{2}|\d{1,2}[./-]\d{1,2}(?:[./-]\d{2,4})?|\d{1,2}\s+[A-Za-zÇĞİÖŞÜçğıöşü]+(?:\s+\d{4})?)\s*(?:[-:])?\s*(.+)$/u,
-      )
-      if (!match) {
-        issues.push({
-          lineNumber: index + 1,
-          rawLine,
-          message: 'Biçim hatası. Örnek: 15.06.2026 Azmi yıllık izin',
-        })
-        return
-      }
-
-      const dayKey = normalizePlannerStatusDateToken(match[1], fallbackYear)
-      if (!dayKey) {
-        issues.push({
-          lineNumber: index + 1,
-          rawLine,
-          message: `Tarih çözümlenemedi (${match[1]}).`,
-        })
-        return
-      }
-
-      const resolvedStatus = resolvePlannerStatusSuffix(match[2])
-      if (!resolvedStatus) {
-        issues.push({
-          lineNumber: index + 1,
-          rawLine,
-          message: 'İzin türü bulunamadı. Desteklenenler: mazeret izni, yıllık izin, rotasyon.',
-        })
-        return
-      }
-
-      const assistantMatch = resolveAssistantNameFromLooseToken(resolvedStatus.rawName, assistants)
-      if (!assistantMatch.name) {
-        issues.push({
-          lineNumber: index + 1,
-          rawLine,
-          message: assistantMatch.reason ?? 'Asistan eşleşmedi.',
-        })
-        return
-      }
-
-      const duplicateKey = `${dayKey}::${assistantMatch.name}`
-      if (seen.has(duplicateKey)) {
-        issues.push({
-          lineNumber: index + 1,
-          rawLine,
-          message: `${assistantMatch.name} aynı gün için birden fazla satırda yazılmış.`,
-        })
-        return
-      }
-      seen.add(duplicateKey)
-
-      entries.push({
-        dayKey,
-        assistantName: assistantMatch.name,
-        locationId: resolvedStatus.locationId,
-        locationLabel: resolvedStatus.locationLabel,
-      })
-    })
-
-  return { entries, issues, totalEntries: entries.length }
-}
-
-function parseDutyQuickLines(
-  text: string,
-  fallbackYear: number,
-): { data: DutyRoster; issues: DutyParseIssue[]; totalNames: number } {
-  const data: DutyRoster = {}
-  const issues: DutyParseIssue[] = []
-  const invalidDays = new Set<string>()
-  let totalNames = 0
-
-  text
-    .split(/\r?\n/)
-    .forEach((rawLine, index) => {
-      const line = rawLine.trim()
-      if (!line) {
-        return
-      }
-
-      const match = line.match(
-        /^(\d{1,2}[./-]\d{1,2}(?:[./-]\d{2,4})?|\d{4}-\d{2}-\d{2})\s*(?:[:-])?\s*(.+)$/u,
-      )
-      if (!match) {
-        issues.push({
-          lineNumber: index + 1,
-          rawLine,
-          message: 'Biçim hatası. Örnek: 26.01 Aslınur (Çekmeköy), Fatih (Sancaktepe)',
-        })
-        return
-      }
-
-      const dayKey = normalizeDutyLineDateToken(match[1], fallbackYear)
-      if (!dayKey) {
-        issues.push({
-          lineNumber: index + 1,
-          rawLine,
-          message: 'Tarih geçersiz.',
-        })
-        return
-      }
-
-      const rawTokens = match[2]
-        .split(/[;,]/)
-        .map((item) => item.trim())
-        .filter(Boolean)
-      if (!rawTokens.length) {
-        invalidDays.add(dayKey)
-        issues.push({
-          lineNumber: index + 1,
-          rawLine,
-          message: `${dayKey} günü için kişi bulunamadı, günün tüm satırları iptal edildi.`,
-        })
-        return
-      }
-
-      const parsedAssignments: DutyAssignment[] = []
-      for (const token of rawTokens) {
-        const tokenMatch = token.match(/^(.+?)\s*\(([^)]+)\)\s*$/u)
-        if (!tokenMatch) {
-          invalidDays.add(dayKey)
-          issues.push({
-            lineNumber: index + 1,
-            rawLine,
-            message: `${dayKey} günü için "${token}" geçersiz. "Ad (NöbetYeri)" formatı gerekli.`,
-          })
-          return
-        }
-
-        const name = tokenMatch[1].trim()
-        const site = normalizeDutySite(tokenMatch[2])
-        if (!name || !site) {
-          invalidDays.add(dayKey)
-          issues.push({
-            lineNumber: index + 1,
-            rawLine,
-            message: `${dayKey} günü için "${token}" içinde isim veya nöbet yeri geçersiz.`,
-          })
-          return
-        }
-
-        parsedAssignments.push({ name, site })
-      }
-
-      if (!parsedAssignments.length) {
-        invalidDays.add(dayKey)
-        issues.push({
-          lineNumber: index + 1,
-          rawLine,
-          message: `${dayKey} günü için geçerli nöbetçi bulunamadı.`,
-        })
-        return
-      }
-
-      data[dayKey] = uniqueDutyAssignments([...(data[dayKey] ?? []), ...parsedAssignments])
-      totalNames += parsedAssignments.length
-    })
-
-  invalidDays.forEach((dayKey) => {
-    delete data[dayKey]
-  })
-
-  totalNames = Object.values(data).reduce((count, entries) => count + entries.length, 0)
-
-  return { data, issues, totalNames }
-}
-
-function parseSpecialistWorkQuickLines(
-  text: string,
-  fallbackYear: number,
-  locations: WorkLocation[],
-): { data: SpecialistWorkAssignments; issues: SpecialistParseIssue[]; totalNames: number } {
-  const data: SpecialistWorkAssignments = {}
-  const issues: SpecialistParseIssue[] = []
-
-  text
-    .split(/\r?\n/)
-    .forEach((rawLine, index) => {
-      const line = rawLine.trim()
-      if (!line) {
-        return
-      }
-
-      const strictMatch = line.match(/^(.+?)\s+-\s+(.+?)\s+-\s+(.+)$/u)
-      const looseParts = line.split('-').map((part) => part.trim()).filter(Boolean)
-      const parts =
-        strictMatch?.slice(1, 4) ??
-        (looseParts.length >= 3 ? [looseParts[0], looseParts[1], looseParts.slice(2).join('-')] : null)
-      if (!parts) {
-        issues.push({
-          lineNumber: index + 1,
-          rawLine,
-          message: 'Biçim hatası. Örnek: 27 Nisan 2026 - Sami Yarkın Sözüer - Sancaktepe Ameliyathane 1',
-        })
-        return
-      }
-
-      let dateToken = parts[0]
-      let nameToken = parts[1]
-      let areaToken = parts.slice(2).join(' - ')
-      let dayKey = normalizeSpecialistDateToken(dateToken, fallbackYear)
-
-      // Eski serbest formatla girilmiş satırları da (İsim - Alan - Tarih) tolere et.
-      if (!dayKey) {
-        const altDateToken = parts[parts.length - 1]
-        const altDayKey = normalizeSpecialistDateToken(altDateToken, fallbackYear)
-        if (altDayKey) {
-          dayKey = altDayKey
-          dateToken = altDateToken
-          nameToken = parts[0]
-          areaToken = parts.slice(1, parts.length - 1).join(' - ')
-        }
-      }
-
-      if (!dayKey) {
-        issues.push({
-          lineNumber: index + 1,
-          rawLine,
-          message: `Tarih çözümlenemedi (${dateToken}).`,
-        })
-        return
-      }
-
-      const specialistName = normalizeAssistantName(nameToken)
-      if (!specialistName) {
-        issues.push({
-          lineNumber: index + 1,
-          rawLine,
-          message: 'Uzman adı boş veya geçersiz.',
-        })
-        return
-      }
-
-      const resolved = resolveSpecialistWorkLocation(locations, dayKey, areaToken)
-      if (!resolved.location) {
-        issues.push({
-          lineNumber: index + 1,
-          rawLine,
-          message: resolved.reason ?? 'Alan eşleşmedi.',
-        })
-        return
-      }
-
-      const locationId = resolved.location.id
-      const previousDayMap = data[dayKey] ?? {}
-      const previousNames = previousDayMap[locationId] ?? []
-      data[dayKey] = {
-        ...previousDayMap,
-        [locationId]: uniqueSortedNames([...previousNames, specialistName]),
-      }
-    })
-
-  const totalNames = Object.values(data).reduce(
-    (count, locationMap) =>
-      count + Object.values(locationMap).reduce((inner, names) => inner + names.length, 0),
-    0,
-  )
-
-  return { data, issues, totalNames }
-}
-
-function parseSpecialistDutyQuickLines(
-  text: string,
-  fallbackYear: number,
-): { data: SpecialistDutyRoster; issues: SpecialistParseIssue[]; totalNames: number } {
-  const data: SpecialistDutyRoster = {}
-  const issues: SpecialistParseIssue[] = []
-
-  text
-    .split(/\r?\n/)
-    .forEach((rawLine, index) => {
-      const line = rawLine.trim()
-      if (!line) {
-        return
-      }
-
-      const strictMatch = line.match(/^(.+?)\s+-\s+(.+?)\s+-\s+(.+)$/u)
-      const looseParts = line.split('-').map((part) => part.trim()).filter(Boolean)
-      const parts =
-        strictMatch?.slice(1, 4) ??
-        (looseParts.length >= 3 ? [looseParts[0], looseParts[1], looseParts.slice(2).join('-')] : null)
-      if (!parts) {
-        issues.push({
-          lineNumber: index + 1,
-          rawLine,
-          message: 'Biçim hatası. Örnek: 1 Nisan 2026 - Sami Yarkın Sözüer - Sancaktepe',
-        })
-        return
-      }
-
-      const dateToken = parts[0]
-      const specialistName = normalizeAssistantName(parts[1])
-      const siteToken = parts.slice(2).join(' - ')
-      const dayKey = normalizeSpecialistDateToken(dateToken, fallbackYear)
-      const site = normalizeSpecialistDutySite(siteToken)
-
-      if (!dayKey) {
-        issues.push({
-          lineNumber: index + 1,
-          rawLine,
-          message: `Tarih çözümlenemedi (${dateToken}).`,
-        })
-        return
-      }
-      if (!specialistName) {
-        issues.push({
-          lineNumber: index + 1,
-          rawLine,
-          message: 'Uzman adı boş veya geçersiz.',
-        })
-        return
-      }
-      if (!site) {
-        issues.push({
-          lineNumber: index + 1,
-          rawLine,
-          message: `Nöbet yeri geçersiz (${siteToken}).`,
-        })
-        return
-      }
-
-      data[dayKey] = uniqueSpecialistDutyAssignments([
-        ...(data[dayKey] ?? []),
-        { name: specialistName, site },
-      ])
-    })
-
-  const totalNames = Object.values(data).reduce((count, entries) => count + entries.length, 0)
-
-  return { data, issues, totalNames }
-}
-
-function parseRotatorQuickLines(
-  text: string,
-  fallbackYear: number,
-): { data: RotatorRoster; issues: SpecialistParseIssue[]; totalNames: number } {
-  const data: RotatorRoster = {}
-  const issues: SpecialistParseIssue[] = []
-
-  text
-    .split(/\r?\n/)
-    .forEach((rawLine, index) => {
-      const line = rawLine.trim()
-      if (!line) {
-        return
-      }
-
-      const strictMatch = line.match(/^(.+?)\s+-\s+(.+)$/u)
-      const looseParts = line.split('-').map((part) => part.trim()).filter(Boolean)
-      const parts =
-        strictMatch?.slice(1, 3) ??
-        (looseParts.length >= 2 ? [looseParts[0], looseParts.slice(1).join('-')] : null)
-      if (!parts) {
-        issues.push({
-          lineNumber: index + 1,
-          rawLine,
-          message: 'Biçim hatası. Örnek: 27 Nisan 2026 - Tahsin',
-        })
-        return
-      }
-
-      const dayKey = normalizeSpecialistDateToken(parts[0], fallbackYear)
-      const rotatorName = normalizeAssistantName(parts[1])
-      if (!dayKey) {
-        issues.push({
-          lineNumber: index + 1,
-          rawLine,
-          message: `Tarih çözümlenemedi (${parts[0]}).`,
-        })
-        return
-      }
-      if (!rotatorName) {
-        issues.push({
-          lineNumber: index + 1,
-          rawLine,
-          message: 'Rotasyoner adı boş veya geçersiz.',
-        })
-        return
-      }
-
-      data[dayKey] = sortRotatorNames([...(data[dayKey] ?? []), rotatorName])
-    })
-
-  const totalNames = Object.values(data).reduce((count, names) => count + names.length, 0)
-
-  return { data, issues, totalNames }
-}
-
-function cloneSpecialistWorkDayAssignments(
-  assignments?: SpecialistWorkDayAssignments,
-): SpecialistWorkDayAssignments {
-  if (!assignments) {
-    return {}
-  }
-  return Object.fromEntries(
-    Object.entries(assignments).map(([locationId, names]) => [locationId, uniqueSortedNames(names)]),
-  )
-}
-
-function cloneSpecialistDutyDayAssignments(
-  assignments?: SpecialistDutyAssignment[],
-): SpecialistDutyAssignment[] {
-  return uniqueSpecialistDutyAssignments(assignments ?? []).map((entry) => ({ ...entry }))
 }
 
 function cloneRotatorDayAssignments(assignments?: RotatorDayAssignments): RotatorDayAssignments {
@@ -3038,6 +2457,9 @@ function App() {
   const [assistantPasswordSaving, setAssistantPasswordSaving] = useState(false)
   const assistantLoginManuallyClearedRef = useRef(false)
   const [data, setData] = useState<PlannerState>(() => safeReadState())
+  const latestDataRef = useRef(data)
+  const bulkImportBusyRef = useRef(false)
+  useEffect(() => { latestDataRef.current = data }, [data])
   const [userBindings, setUserBindings] = useState<Record<string, string>>(() => safeReadUserBindings())
   const [notice, setNotice] = useState<Notice | null>(null)
   const [cloudState, setCloudState] = useState<'checking' | 'ready' | 'offline' | 'error'>(
@@ -3083,16 +2505,12 @@ function App() {
   const [ownerSelectionDrafts, setOwnerSelectionDrafts] = useState<Record<string, string[]>>({})
 
   const [dutyMonth, setDutyMonth] = useState(currentMonthISO)
-  const [dutyQuickText, setDutyQuickText] = useState('')
   const [dutyImportIssues, setDutyImportIssues] = useState<string[]>([])
   const [cellDrafts, setCellDrafts] = useState<Record<string, string>>({})
   const [dutyDrafts, setDutyDrafts] = useState<Record<string, string>>({})
   const [dutySiteDrafts, setDutySiteDrafts] = useState<Record<string, DutySite | ''>>({})
-  const [specialistWorkText, setSpecialistWorkText] = useState('')
   const [specialistWorkIssues, setSpecialistWorkIssues] = useState<string[]>([])
-  const [specialistDutyText, setSpecialistDutyText] = useState('')
   const [specialistDutyIssues, setSpecialistDutyIssues] = useState<string[]>([])
-  const [rotatorText, setRotatorText] = useState('')
   const [rotatorIssues, setRotatorIssues] = useState<string[]>([])
   const [specialistWorkDeleteWeek, setSpecialistWorkDeleteWeek] = useState(currentWeekStartISO)
   const [specialistDutyDeleteMonth, setSpecialistDutyDeleteMonth] = useState(currentMonthISO)
@@ -3128,8 +2546,6 @@ function App() {
     useState<RotatorAssignments>({})
   const [plannerEditModes, setPlannerEditModes] = useState<Record<string, boolean>>({})
   const [rotatorDrafts, setRotatorDrafts] = useState<Record<string, string>>({})
-  const [plannerStatusQuickText, setPlannerStatusQuickText] = useState('')
-  const [plannerStatusQuickIssues, setPlannerStatusQuickIssues] = useState<string[]>([])
 
   useEffect(() => {
     const refreshToday = () => setToday(new Date())
@@ -4589,6 +4005,10 @@ function App() {
   }
 
   const logout = () => {
+    if (bulkImportBusyRef.current) {
+      showWarning('Toplu kayıt tamamlandıktan sonra çıkış yapabilirsin.')
+      return
+    }
     if (isSupabaseAdminAuthRequired && session?.role === 'admin' && supabase) {
       void supabase.auth.signOut()
     }
@@ -4619,6 +4039,10 @@ function App() {
   }
 
   const selectAdminSection = (section: AdminSection) => {
+    if (bulkImportBusyRef.current) {
+      showWarning('Toplu kayıt devam ediyor; tamamlanmasını bekle.')
+      return
+    }
     setAdminSection(section)
     if (section === 'backups') {
       void refreshBackups()
@@ -6004,102 +5428,68 @@ function App() {
     })
   }
 
-  const importDutyQuickLines = async () => {
-    const yearFromMonth = Number(dutyMonth.slice(0, 4))
-    const fallbackYear = Number.isNaN(yearFromMonth) ? new Date().getFullYear() : yearFromMonth
-    const parsed = parseDutyQuickLines(dutyQuickText, fallbackYear)
-    const issueMessagesFromParser = parsed.issues.map(
-      (issue) => `${issue.lineNumber}. satır: ${issue.message} (${issue.rawLine})`,
-    )
-
-    if (!parsed.totalNames) {
-      setDutyImportIssues(issueMessagesFromParser)
-      showWarning(
-        'Geçerli satır bulunamadı. Örnek: 26.01 Aslınur (Çekmeköy), Fatih (Sancaktepe)',
-      )
-      return
-    }
-
-    const issueMessages = [...issueMessagesFromParser]
-    if (!(await createPreChangeBackup(`before-duty-import-${dutyMonth}`, 'duty-import', true))) {
-      return
-    }
-
-    setData((previous) => {
-      const mergedDuty: DutyRoster = { ...previous.dutyRoster }
-      const rejectedDays: string[] = []
-      let addedCount = 0
-
-      Object.entries(parsed.data).forEach(([dayKey, entries]) => {
-        const unknownNames = uniqueSortedNames(
-          entries
-            .map((entry) => entry.name)
-            .filter((name) => !previous.assistants.includes(name)),
-        )
-        if (unknownNames.length) {
-          rejectedDays.push(`${dayKey} (asistan yok: ${unknownNames.join(', ')})`)
-          issueMessages.push(`${dayKey}: asistan listesinde olmayan kişi var (${unknownNames.join(', ')})`)
-          return
-        }
-
-        const dayNames = entries.map((entry) => entry.name)
-        if (new Set(dayNames).size !== dayNames.length) {
-          rejectedDays.push(`${dayKey} (aynı kişi birden fazla kez yazılmış)`)
-          issueMessages.push(`${dayKey}: aynı kişi birden fazla kez yazılmış`)
-          return
-        }
-
-        const previousDay = toISODate(addDays(fromISODate(dayKey), -1))
-        const nextDay = toISODate(addDays(fromISODate(dayKey), 1))
-        const prevDayNames = new Set(
-          dutyAssignmentsToNames(mergedDuty[previousDay] ?? previous.dutyRoster[previousDay] ?? []),
-        )
-        const nextDayNames = new Set(
-          dutyAssignmentsToNames(mergedDuty[nextDay] ?? previous.dutyRoster[nextDay] ?? []),
-        )
-        const consecutiveNames = dayNames.filter(
-          (name) => prevDayNames.has(name) || nextDayNames.has(name),
-        )
-        if (consecutiveNames.length) {
-          rejectedDays.push(
-            `${dayKey} (üst üste nöbet: ${uniqueSortedNames(consecutiveNames).join(', ')})`,
-          )
-          issueMessages.push(
-            `${dayKey}: üst üste nöbet kuralı (${uniqueSortedNames(consecutiveNames).join(', ')})`,
-          )
-          return
-        }
-
-        const currentDay = mergedDuty[dayKey] ?? previous.dutyRoster[dayKey] ?? []
-        mergedDuty[dayKey] = uniqueDutyAssignments([...currentDay, ...entries])
-        addedCount += entries.length
-      })
-
-      const sanitized = sanitizeManualAssignments(previous.manualAssignments, mergedDuty, previous.locations)
-
-      if (issueMessages.length || rejectedDays.length) {
-        showWarning(
-          `${addedCount} nöbetçi eklendi. Hatalı/atlanan kayıt: ${issueMessages.length}. Reddedilen gün: ${
-            rejectedDays.length ? rejectedDays.join(' | ') : 'yok'
-          }.`,
-        )
-      } else if (sanitized.removedCount > 0) {
-        showWarning(
-          `${addedCount} nöbetçi işlendi. ${sanitized.removedCount} normal atama nöbet kuralı nedeniyle temizlendi.`,
-        )
-      } else {
-        showSuccess(`${addedCount} nöbetçi satırdan eklendi.`)
-      }
-
+  const bulkImportRules: ImportRules = {
+    resolveAssistant: (value) => resolveAssistantNameFromLooseToken(value, data.assistants),
+    normalizeName: normalizeAssistantName,
+    dutySite: normalizeDutySite,
+    specialistDutySite: normalizeSpecialistDutySite,
+    workLocation: (day, value) => {
+      const resolved = resolveSpecialistWorkLocation(data.locations, day, value)
       return {
-        ...previous,
-        dutyRoster: mergedDuty,
-        manualAssignments: sanitized.manualAssignments,
+        id: resolved.location?.id,
+        label: resolved.location ? `${resolved.location.site} ${resolved.location.name}` : undefined,
+        reason: resolved.reason,
       }
-    })
+    },
+    statusLocation: (value) => {
+      const status = resolvePlannerStatusSuffix(value)
+      return status && !status.rawName ? { id: status.locationId, label: status.locationLabel } : null
+    },
+    statusDayError: (day, id) => {
+      const location = data.locations.find((item) => item.id === id && item.kind === 'leave')
+      if (!location || !isLocationActiveOnDay(location, day)) return 'İzin / rotasyon alanı bu tarihte aktif değil.'
+      if (!isRoomAssignableDay(fromISODate(day))) return 'Hafta sonu veya tam gün resmi tatilde izin / rotasyon eklenemez.'
+      return null
+    },
+  }
 
-    setDutyImportIssues(issueMessages)
-    setDutyQuickText('')
+  const applyBulkImport = async (text: string, baseState: PlannerState) => {
+    if (bulkImportBusyRef.current) return { ok: false, message: 'Toplu kayıt devam ediyor.' }
+    if (baseState !== latestDataRef.current) return { ok: false, message: 'Kayıtlar değişti. Yeniden önizle.' }
+    if (ownersEditMode || Object.values(plannerEditModes).some(Boolean)) {
+      return { ok: false, message: 'Önce açık planlama / alan taslaklarını kaydet veya iptal et.' }
+    }
+    if (isCloudSaving) return { ok: false, message: 'Devam eden bulut kaydının bitmesini bekleyip tekrar dene.' }
+    const result = prepareBulkImport(text, data, bulkImportRules)
+    if (!result.nextState) return { ok: false, message: 'Kayıt uygulanmadı. Önizlemedeki sorunları düzelt.' }
+    if (isSupabaseConfigured && (!isCloudWriteEnabled || !cloudCanWriteRef.current)) {
+      return { ok: false, message: 'Buluta yazma hazır değil. Üstteki Bulut Senkron durumunu kontrol et; metin korundu.' }
+    }
+    bulkImportBusyRef.current = true
+    try {
+      await createPreChangeBackup('before-bulk-import', 'bulk-import', true)
+      if (baseState !== latestDataRef.current) return { ok: false, message: 'Yedek alınırken kayıtlar değişti. Yeniden önizle.' }
+      if (isSupabaseConfigured) {
+        // Persist first: an unsuccessful cloud write must not look like a completed import.
+        const saved = await persistPlannerStateNow(result.nextState, 'Toplu veri girişi')
+        if (!saved) {
+          const message = 'Toplu kayıt buluta yazılamadı; aktarım uygulanmadı ve metin korundu. Bulut durumunu kontrol et.'
+          showWarning(message)
+          return { ok: false, message }
+        }
+      }
+      setData(result.nextState)
+      const message = `${result.rows.length} kayıt ${isSupabaseConfigured ? 'buluta' : 'bu cihazda'} kaydedildi.`
+      showSuccess(message)
+      return { ok: true, message }
+    } catch {
+      setIsCloudSaving(false)
+      const message = 'Toplu kayıt doğrulanamadı. Metin korundu; bulut durumunu kontrol edip yeniden önizle.'
+      showWarning(message)
+      return { ok: false, message }
+    } finally {
+      bulkImportBusyRef.current = false
+    }
   }
 
   const deleteDutyMonth = async () => {
@@ -6163,207 +5553,6 @@ function App() {
 
     setDutyImportIssues([])
     showSuccess(`${formatMonthSelectLabel(dutyMonth)} ayındaki nöbet kayıtları sıfırlandı.`)
-  }
-
-  const importSpecialistWorkLines = async () => {
-    const fallbackYear = today.getFullYear()
-    const parsed = parseSpecialistWorkQuickLines(specialistWorkText, fallbackYear, data.locations)
-    const issueMessages = parsed.issues.map(
-      (issue) => `${issue.lineNumber}. satır: ${issue.message} (${issue.rawLine})`,
-    )
-    const parsedDayKeys = Object.keys(parsed.data).sort()
-
-    if (!parsed.totalNames) {
-      setSpecialistWorkIssues(issueMessages)
-      showWarning(
-        'Geçerli uzman satırı bulunamadı. Örnek: 27 Nisan 2026 - Sami Yarkın Sözüer - Sancaktepe Ameliyathane 1',
-      )
-      return
-    }
-
-    if (issueMessages.length) {
-      setSpecialistWorkIssues([
-        ...issueMessages,
-        'Format uyarısı olduğu için günlük çalışma kayıtları uygulanmadı.',
-      ])
-      showWarning('Format uyarısı var. Güvenlik için günlük çalışma uzman listesi uygulanmadı.')
-      return
-    }
-
-    const approved = window.confirm(
-      `${parsedDayKeys.length} güne ait ${parsed.totalNames} günlük çalışma uzman kaydı mevcut kayıtlarla birleştirilecek. Onaylıyor musun?`,
-    )
-    if (!approved) {
-      setSpecialistWorkIssues(['Günlük çalışma aktarımı onaylanmadı. Kayıt yapılmadı.'])
-      showWarning('Günlük çalışma uzman aktarımı iptal edildi.')
-      return
-    }
-
-    if (!(await createPreChangeBackup('before-specialist-work-import', 'specialist-work-import', true))) {
-      return
-    }
-
-    const nextWorkAssignments = { ...data.specialistWorkAssignments }
-    parsedDayKeys.forEach((dayKey) => {
-      const currentDayMap = cloneSpecialistWorkDayAssignments(nextWorkAssignments[dayKey])
-      Object.entries(parsed.data[dayKey] ?? {}).forEach(([locationId, specialistNames]) => {
-        currentDayMap[locationId] = uniqueSortedNames([
-          ...(currentDayMap[locationId] ?? []),
-          ...specialistNames,
-        ])
-      })
-
-      if (Object.keys(currentDayMap).length) {
-        nextWorkAssignments[dayKey] = currentDayMap
-      } else {
-        delete nextWorkAssignments[dayKey]
-      }
-    })
-
-    const nextPlannerState = {
-      ...data,
-      specialistWorkAssignments: nextWorkAssignments,
-    }
-    setData(nextPlannerState)
-    const persisted = await persistPlannerStateNow(nextPlannerState, 'Günlük çalışma uzman kaydı')
-    if (!persisted) {
-      setSpecialistWorkIssues([
-        'Günlük çalışma uzman kaydı bu cihazda işlendi; ancak online kayıt doğrulanamadı. Metin silinmedi, tekrar kaydedebilirsin.',
-      ])
-      return
-    }
-
-    setSpecialistWorkIssues([])
-    setSpecialistWorkText('')
-    showSuccess(`${parsedDayKeys.length} güne ait ${parsed.totalNames} günlük çalışma uzman kaydı online kaydedildi.`)
-  }
-
-  const importSpecialistDutyLines = async () => {
-    const fallbackYear = today.getFullYear()
-    const parsed = parseSpecialistDutyQuickLines(specialistDutyText, fallbackYear)
-    const issueMessages = parsed.issues.map(
-      (issue) => `${issue.lineNumber}. satır: ${issue.message} (${issue.rawLine})`,
-    )
-    const parsedDayKeys = Object.keys(parsed.data).sort()
-
-    if (!parsed.totalNames) {
-      setSpecialistDutyIssues(issueMessages)
-      showWarning(
-        'Geçerli nöbetçi uzman satırı bulunamadı. Örnek: 1 Nisan 2026 - Sami Yarkın Sözüer - Sancaktepe',
-      )
-      return
-    }
-
-    if (issueMessages.length) {
-      setSpecialistDutyIssues([
-        ...issueMessages,
-        'Format uyarısı olduğu için nöbetçi uzman kayıtları uygulanmadı.',
-      ])
-      showWarning('Format uyarısı var. Güvenlik için nöbetçi uzman listesi uygulanmadı.')
-      return
-    }
-
-    const approved = window.confirm(
-      `${parsedDayKeys.length} güne ait ${parsed.totalNames} nöbetçi uzman kaydı uygulanacak. Bu günlerdeki eski nöbetçi uzman kayıtları yeni listeyle değiştirilsin mi?`,
-    )
-    if (!approved) {
-      setSpecialistDutyIssues(['Nöbetçi uzman aktarımı onaylanmadı. Kayıt yapılmadı.'])
-      showWarning('Nöbetçi uzman aktarımı iptal edildi.')
-      return
-    }
-
-    if (!(await createPreChangeBackup('before-specialist-duty-import', 'specialist-duty-import', true))) {
-      return
-    }
-
-    const nextDutyRoster = { ...data.specialistDutyRoster }
-    parsedDayKeys.forEach((dayKey) => {
-      const normalizedEntries = cloneSpecialistDutyDayAssignments(parsed.data[dayKey])
-      if (normalizedEntries.length) {
-        nextDutyRoster[dayKey] = normalizedEntries
-      } else {
-        delete nextDutyRoster[dayKey]
-      }
-    })
-
-    const nextPlannerState = {
-      ...data,
-      specialistDutyRoster: nextDutyRoster,
-    }
-    setData(nextPlannerState)
-    const persisted = await persistPlannerStateNow(nextPlannerState, 'Nöbetçi uzman kaydı')
-    if (!persisted) {
-      setSpecialistDutyIssues([
-        'Nöbetçi uzman kaydı bu cihazda işlendi; ancak online kayıt doğrulanamadı. Metin silinmedi, tekrar kaydedebilirsin.',
-      ])
-      return
-    }
-
-    setSpecialistDutyIssues([])
-    setSpecialistDutyText('')
-    showSuccess(`${parsedDayKeys.length} güne ait ${parsed.totalNames} nöbetçi uzman kaydı online kaydedildi.`)
-  }
-
-  const importRotatorLines = async () => {
-    const fallbackYear = today.getFullYear()
-    const parsed = parseRotatorQuickLines(rotatorText, fallbackYear)
-    const issueMessages = parsed.issues.map(
-      (issue) => `${issue.lineNumber}. satır: ${issue.message} (${issue.rawLine})`,
-    )
-    const parsedDayKeys = Object.keys(parsed.data).sort()
-
-    if (!parsed.totalNames) {
-      setRotatorIssues(issueMessages)
-      showWarning('Geçerli rotasyoner satırı bulunamadı. Örnek: 27 Nisan 2026 - Tahsin')
-      return
-    }
-
-    if (issueMessages.length) {
-      setRotatorIssues([
-        ...issueMessages,
-        'Format uyarısı olduğu için rotasyoner kayıtları uygulanmadı.',
-      ])
-      showWarning('Format uyarısı var. Güvenlik için rotasyoner listesi uygulanmadı.')
-      return
-    }
-
-    const approved = window.confirm(
-      `${parsedDayKeys.length} güne ait ${parsed.totalNames} rotasyoner kaydı mevcut listeyle birleştirilecek. Onaylıyor musun?`,
-    )
-    if (!approved) {
-      setRotatorIssues(['Rotasyoner aktarımı onaylanmadı. Kayıt yapılmadı.'])
-      showWarning('Rotasyoner aktarımı iptal edildi.')
-      return
-    }
-
-    if (!(await createPreChangeBackup('before-rotator-import', 'rotator-import', true))) {
-      return
-    }
-
-    const nextRotatorRoster = { ...data.rotatorRoster }
-    parsedDayKeys.forEach((dayKey) => {
-      nextRotatorRoster[dayKey] = sortRotatorNames([
-        ...(nextRotatorRoster[dayKey] ?? []),
-        ...(parsed.data[dayKey] ?? []),
-      ])
-    })
-
-    const nextPlannerState = {
-      ...data,
-      rotatorRoster: nextRotatorRoster,
-    }
-    setData(nextPlannerState)
-    const persisted = await persistPlannerStateNow(nextPlannerState, 'Rotasyoner kaydı')
-    if (!persisted) {
-      setRotatorIssues([
-        'Rotasyoner kaydı bu cihazda işlendi; ancak online kayıt doğrulanamadı. Metin silinmedi, tekrar kaydedebilirsin.',
-      ])
-      return
-    }
-
-    setRotatorIssues([])
-    setRotatorText('')
-    showSuccess(`${parsedDayKeys.length} güne ait ${parsed.totalNames} rotasyoner kaydı online kaydedildi.`)
   }
 
   const deleteSpecialistWorkWeek = async () => {
@@ -6649,153 +5838,6 @@ function App() {
         Object.entries(previous).filter(([draftKey]) => !draftKey.startsWith(`${dayKey}-`)),
       ),
     )
-  }
-
-  const importPlannerStatusQuickLines = async () => {
-    const yearFromMonth = Number(plannerMonth.slice(0, 4))
-    const fallbackYear = Number.isNaN(yearFromMonth) ? today.getFullYear() : yearFromMonth
-    const parsed = parsePlannerStatusQuickLines(plannerStatusQuickText, fallbackYear, data.assistants)
-    const issueMessages = parsed.issues.map(
-      (issue) => `${issue.lineNumber}. satır: ${issue.message} (${issue.rawLine})`,
-    )
-
-    if (!parsed.totalEntries) {
-      setPlannerStatusQuickIssues(issueMessages)
-      showWarning('Geçerli izin/rotasyon satırı bulunamadı. Örnek: 15.06.2026 Azmi yıllık izin')
-      return
-    }
-
-    const locationMap = new Map(data.locations.map((location) => [location.id, location]))
-    parsed.entries.forEach((entry) => {
-      const targetLocation = locationMap.get(entry.locationId)
-      if (!targetLocation || targetLocation.kind !== 'leave') {
-        issueMessages.push(`${entry.dayKey}: ${entry.locationLabel} alanı sistemde bulunamadı.`)
-        return
-      }
-      if (!isLocationActiveOnDay(targetLocation, entry.dayKey)) {
-        issueMessages.push(`${entry.dayKey}: ${entry.locationLabel} alanı bu tarihte aktif değil.`)
-        return
-      }
-      if (!isRoomAssignableDay(fromISODate(entry.dayKey))) {
-        issueMessages.push(
-          `${entry.dayKey}: hafta sonu veya tam gün resmi tatilde mazeret/yıllık izin/rotasyon eklenemez.`,
-        )
-        return
-      }
-
-      const previousDayKey = toISODate(addDays(fromISODate(entry.dayKey), -1))
-      const sameDayDuty = data.dutyRoster[entry.dayKey]?.find(
-        (dutyEntry) => dutyEntry.name === entry.assistantName,
-      )
-      const postDuty = data.dutyRoster[previousDayKey]?.find(
-        (dutyEntry) => dutyEntry.name === entry.assistantName,
-      )
-      if (sameDayDuty) {
-        issueMessages.push(
-          `${entry.dayKey}: ${entry.assistantName} aynı gün ${sameDayDuty.site} nöbetçisi olduğu için izin/rotasyona eklenmedi.`,
-        )
-      }
-      if (postDuty) {
-        issueMessages.push(
-          `${entry.dayKey}: ${entry.assistantName} ${postDuty.site} nöbet ertesi olduğu için izin/rotasyona eklenmedi.`,
-        )
-      }
-    })
-
-    if (issueMessages.length) {
-      setPlannerStatusQuickIssues([
-        ...issueMessages,
-        'Uyarı olduğu için hiçbir izin/rotasyon kaydı uygulanmadı.',
-      ])
-      showWarning('İzin/rotasyon hızlı girişinde uyarı var. Güvenlik için kayıt yapılmadı.')
-      return
-    }
-
-    const countsByType = parsed.entries.reduce<Record<string, number>>((counts, entry) => {
-      counts[entry.locationLabel] = (counts[entry.locationLabel] ?? 0) + 1
-      return counts
-    }, {})
-    const summary = Object.entries(countsByType)
-      .map(([label, count]) => `${label}: ${count}`)
-      .join(', ')
-    const approved = window.confirm(
-      `${parsed.totalEntries} izin/rotasyon kaydı uygulanacak (${summary}). Bu kişiler aynı gün varsa oda/diğer izin kayıtlarından çıkarılacak. Onaylıyor musun?`,
-    )
-    if (!approved) {
-      setPlannerStatusQuickIssues(['İzin/rotasyon hızlı girişi onaylanmadı. Kayıt yapılmadı.'])
-      showWarning('İzin/rotasyon hızlı girişi iptal edildi.')
-      return
-    }
-
-    if (!(await createPreChangeBackup('before-planner-status-import', 'planner-status-import', true))) {
-      return
-    }
-
-    const applyEntryToDayAssignments = (
-      dayAssignments: Record<string, string[]> | undefined,
-      entry: PlannerStatusQuickEntry,
-    ): Record<string, string[]> => {
-      const nextDayAssignments = cloneDayLocationAssignments(dayAssignments)
-      Object.keys(nextDayAssignments).forEach((locationId) => {
-        const filtered = (nextDayAssignments[locationId] ?? []).filter(
-          (name) => name !== entry.assistantName,
-        )
-        if (filtered.length) {
-          nextDayAssignments[locationId] = filtered
-        } else {
-          delete nextDayAssignments[locationId]
-        }
-      })
-
-      nextDayAssignments[entry.locationId] = uniqueSortedNames([
-        ...(nextDayAssignments[entry.locationId] ?? []),
-        entry.assistantName,
-      ])
-      return nextDayAssignments
-    }
-
-    const nextManualAssignments = { ...data.manualAssignments }
-    parsed.entries.forEach((entry) => {
-      nextManualAssignments[entry.dayKey] = applyEntryToDayAssignments(
-        nextManualAssignments[entry.dayKey],
-        entry,
-      )
-    })
-
-    const sanitized = sanitizeManualAssignments(nextManualAssignments, data.dutyRoster, data.locations)
-    const nextPlannerState = {
-      ...data,
-      manualAssignments: sanitized.manualAssignments,
-    }
-
-    setData(nextPlannerState)
-    setPlannerDraftAssignments((previous) => {
-      let changed = false
-      const nextDrafts = { ...previous }
-      parsed.entries.forEach((entry) => {
-        if (!plannerEditModes[entry.dayKey]) {
-          return
-        }
-        nextDrafts[entry.dayKey] = applyEntryToDayAssignments(
-          nextDrafts[entry.dayKey] ?? data.manualAssignments[entry.dayKey],
-          entry,
-        )
-        changed = true
-      })
-      return changed ? nextDrafts : previous
-    })
-
-    const persisted = await persistPlannerStateNow(nextPlannerState, 'İzin/rotasyon hızlı girişi')
-    if (!persisted) {
-      setPlannerStatusQuickIssues([
-        'İzin/rotasyon kayıtları bu cihazda işlendi; ancak online kayıt doğrulanamadı. Bulut senkron durumunu kontrol et.',
-      ])
-      return
-    }
-
-    setPlannerStatusQuickIssues([])
-    setPlannerStatusQuickText('')
-    showSuccess(`${parsed.totalEntries} izin/rotasyon kaydı online kaydedildi.`)
   }
 
   const addAssignment = (dayKey: string, locationId: string) => {
@@ -8876,6 +7918,8 @@ function App() {
           <section className="card fade-up delay-2 section-switcher">
             <h2>Admin Modülleri</h2>
             <div className="subpanel-toggle">
+              <button type="button" className={adminSection === 'bulkImport' ? 'active' : ''} onClick={() => selectAdminSection('bulkImport')}>Toplu Veri Girişi</button>
+
               <button
                 type="button"
                 className={adminSection === 'assistants' ? 'active' : ''}
@@ -8934,6 +7978,15 @@ function App() {
               </button>
             </div>
           </section>
+
+          <div hidden={adminSection !== 'bulkImport'}>
+            <BulkImportPanel
+              data={data}
+              rules={bulkImportRules}
+              hasDrafts={ownersEditMode || Object.values(plannerEditModes).some(Boolean)}
+              onApply={applyBulkImport}
+            />
+          </div>
 
           {adminSection === 'assistants' ? (
             <section className="card fade-up delay-2 assistant-section-card">
@@ -9241,7 +8294,7 @@ function App() {
             <section className="card fade-up delay-4">
             <h2>Aylık Nöbet</h2>
             <p className="subtext">
-              Ay seçip nöbetleri satırdan veya günlük kartlardan ekle. Nöbetler her gün yazılır;
+              Ay seçip nöbetleri günlük kartlardan veya Toplu Veri Girişinden ekle. Nöbetler her gün yazılır;
               hafta sonu ve resmi tatiller dahildir.
             </p>
             <div className="specialist-delete-row">
@@ -9267,20 +8320,7 @@ function App() {
               </button>
             </div>
 
-            <p className="subtext">
-              Hızlı satır girişi: <code>26.01 Aslınur (Çekmeköy), Fatih (Sancaktepe)</code> veya{' '}
-              <code>2026-01-26: Aslınur (Feriha Öz); Tuğçe (Sancaktepe)</code>
-            </p>
-            <textarea
-              value={dutyQuickText}
-              onChange={(event) => setDutyQuickText(event.target.value)}
-              placeholder={'26.01 Aslınur (Çekmeköy), Fatih (Sancaktepe)\n27.01 Gamze (Feriha Öz)'}
-            />
-            <div className="form-row">
-              <button type="button" className="secondary" onClick={importDutyQuickLines}>
-                Satırlardan Nöbet Ekle
-              </button>
-            </div>
+            <div className="bulk-import-shortcut"><p>Metinle toplu ekleme için tek giriş ekranını kullan.</p><button type="button" className="secondary" onClick={() => selectAdminSection('bulkImport')}>Toplu Veri Girişini Aç</button></div>
 
             {dutyImportIssues.length ? (
               <article className="import-issue-card">
@@ -9573,44 +8613,7 @@ function App() {
               </p>
             ) : null}
 
-            <article className="specialist-input-card planner-status-quick-card">
-              <h3>İzin / Rotasyon Hızlı Giriş</h3>
-              <p className="subtext">
-                Çok satırlı giriş: <code>15.06.2026 Azmi yıllık izin</code>,{' '}
-                <code>16.06.2026 İlker mazeret izni</code> veya{' '}
-                <code>17.06.2026 Beyza rotasyon</code>. Kayıtlar doğrudan ilgili günlere eklenir.
-              </p>
-              <textarea
-                value={plannerStatusQuickText}
-                onChange={(event) => setPlannerStatusQuickText(event.target.value)}
-                placeholder={
-                  '15.06.2026 Azmi yıllık izin\n' +
-                  '16.06.2026 İlker mazeret izni\n' +
-                  '17.06.2026 Beyza rotasyon'
-                }
-              />
-              <div className="form-row specialist-save-row">
-                <button
-                  type="button"
-                  className="secondary"
-                  disabled={!plannerStatusQuickText.trim()}
-                  onClick={importPlannerStatusQuickLines}
-                >
-                  İzin / Rotasyonları Ekle
-                </button>
-              </div>
-
-              {plannerStatusQuickIssues.length ? (
-                <article className="import-issue-card">
-                  <h3>İzin / Rotasyon Uyarıları</h3>
-                  <ul>
-                    {plannerStatusQuickIssues.map((issue, index) => (
-                      <li key={`planner-status-quick-issue-${index}`}>{issue}</li>
-                    ))}
-                  </ul>
-                </article>
-              ) : null}
-            </article>
+            <div className="bulk-import-shortcut"><p>Metinle toplu ekleme için tek giriş ekranını kullan.</p><button type="button" className="secondary" onClick={() => selectAdminSection('bulkImport')}>Toplu Veri Girişini Aç</button></div>
             </section>
           ) : null}
 
@@ -9619,16 +8622,17 @@ function App() {
               <h2>Uzman ve Rotasyoner Modülü</h2>
               <p className="subtext">
                 Uzmanları kullanıcıya çevirmeden metinsel planlama verisi olarak kaydedebilirsin.
-                1. kutu oda uzmanları (günlük çalışma), 2. kutu nöbetçi uzmanlar, 3. kutu rotasyonerler içindir.
-                Tarih seçimi gerekmez; her satırda yazan tarih esas alınır.
+                Tüm metinleri Toplu Veri Girişi ekranından ekleyebilirsin.
+                Buradan mevcut listeleri hafta veya ay bazında silebilirsin.
               </p>
+
+              <div className="bulk-import-shortcut"><p>Metinle toplu ekleme için tek giriş ekranını kullan.</p><button type="button" className="secondary" onClick={() => selectAdminSection('bulkImport')}>Toplu Veri Girişini Aç</button></div>
 
               <article className="specialist-input-card">
                 <h3>Günlük Çalışma</h3>
                 <p className="subtext">
-                  Yapıştırma formatı: <code>Tarih - Uzman Adı - Alan</code>. Aynı uzman aynı gün farklı
-                  odalara yazılabilir; aynı odada birden fazla uzman da olabilir. Farklı haftaların veya
-                  ayların satırlarını aynı kutuya ekleyebilirsin.
+                  Günlük çalışma kayıtlarını Toplu Veri Girişinden ekle. Aynı uzman birden fazla
+                  alanda, aynı alanda birden fazla uzman bulunabilir.
                 </p>
                 <div className="specialist-delete-row">
                   <select
@@ -9646,25 +8650,7 @@ function App() {
                     Haftayı Sil
                   </button>
                 </div>
-                <textarea
-                  value={specialistWorkText}
-                  onChange={(event) => setSpecialistWorkText(event.target.value)}
-                  placeholder={
-                    '27 Nisan 2026 - Sami Yarkın Sözüer - Sancaktepe Ameliyathane 1\n' +
-                    '27 Nisan 2026 - Murat Öksüz - Çekmeköy Ameliyathane\n' +
-                    '28 Nisan 2026 - Ayşe Demir - Feriha Öz C3 Yoğun Bakım Ünitesi'
-                  }
-                />
-                <div className="form-row specialist-save-row">
-                  <button
-                    type="button"
-                    className="secondary"
-                    disabled={!specialistWorkText.trim()}
-                    onClick={importSpecialistWorkLines}
-                  >
-                    Günlük Çalışmayı Kaydet
-                  </button>
-                </div>
+
 
                 {specialistWorkIssues.length ? (
                   <article className="import-issue-card">
@@ -9681,9 +8667,8 @@ function App() {
               <article className="specialist-input-card">
                 <h3>Nöbetçi Uzmanlar</h3>
                 <p className="subtext">
-                  Yapıştırma formatı: <code>Tarih - Uzman Adı - NöbetYeri</code>. Nöbet yeri:
-                  Sancaktepe, Çekmeköy, Feriha C123, Feriha C456, Feriha G123. Aynı kutuya
-                  aylık/çok günlük liste yapıştırılabilir.
+                  Nöbetçi uzman kayıtlarını Toplu Veri Girişinden ekle. Nöbet yerleri:
+                  Sancaktepe, Çekmeköy, Feriha C123, Feriha C456, Feriha G123.
                 </p>
                 <div className="specialist-delete-row">
                   <select
@@ -9701,27 +8686,7 @@ function App() {
                     Ayı Sil
                   </button>
                 </div>
-                <textarea
-                  value={specialistDutyText}
-                  onChange={(event) => setSpecialistDutyText(event.target.value)}
-                  placeholder={
-                    '1 Nisan 2026 - Sami Yarkın Sözüer - Sancaktepe\n' +
-                    '1 Nisan 2026 - Murat Öksüz - Çekmeköy\n' +
-                    '1 Nisan 2026 - Ayşe Demir - Feriha C123\n' +
-                    '1 Nisan 2026 - Mehmet Kaya - Feriha C456\n' +
-                    '1 Nisan 2026 - Ali Veli - Feriha G123'
-                  }
-                />
-                <div className="form-row specialist-save-row">
-                  <button
-                    type="button"
-                    className="secondary"
-                    disabled={!specialistDutyText.trim()}
-                    onClick={importSpecialistDutyLines}
-                  >
-                    Nöbetçi Uzmanları Kaydet
-                  </button>
-                </div>
+
 
                 {specialistDutyIssues.length ? (
                   <article className="import-issue-card">
@@ -9738,7 +8703,7 @@ function App() {
               <article className="specialist-input-card rotator-input-card">
                 <h3>Rotasyonerler</h3>
                 <p className="subtext">
-                  Yapıştırma formatı: <code>Tarih - Rotasyoner Adı</code>. Bu kişiler kullanıcı/asistan
+                  Rotasyonerleri Toplu Veri Girişinden ekle. Bu kişiler kullanıcı/asistan
                   olarak oluşturulmaz; yalnızca o gün C1-G3, Sancaktepe YBÜ ve Çekmeköy YBÜ alanlarında
                   rotasyoner seçeneği olarak görünür.
                 </p>
@@ -9758,21 +8723,7 @@ function App() {
                     Haftayı Sil
                   </button>
                 </div>
-                <textarea
-                  value={rotatorText}
-                  onChange={(event) => setRotatorText(event.target.value)}
-                  placeholder={'27 Nisan 2026 - Tahsin\n27 Nisan 2026 - İlayda'}
-                />
-                <div className="form-row specialist-save-row">
-                  <button
-                    type="button"
-                    className="secondary"
-                    disabled={!rotatorText.trim()}
-                    onClick={importRotatorLines}
-                  >
-                    Rotasyonerleri Kaydet
-                  </button>
-                </div>
+
 
                 {rotatorIssues.length ? (
                   <article className="import-issue-card">

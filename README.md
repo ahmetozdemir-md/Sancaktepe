@@ -15,6 +15,27 @@ npm run dev
 npm run build
 ```
 
+## Toplu Veri Girişi
+
+Admin panelindeki **Toplu Veri Girişi**, önceki beş metin girişinin ortak ekranıdır.
+ChatGPT çıktısı `TÜR | YYYY-AA-GG | Kişi | Alan / durum` biçiminde hazırlanır;
+`ROTASYONER` satırları yalnız ilk üç sütunu içerir. Tek metinde farklı türler ve tarihler bulunabilir.
+Ekrandaki proje talimatları kopyalanabilir; güncel asistan ve alan referansı ayrıca kopyalanır.
+Talimatların kaynak dosyası `src/bulk-import-instructions.txt` dosyasıdır.
+
+Önizleme tüm satırları ve mevcut kayıtlara etkisini gösterir. Hatalı satır varsa hiçbir kayıt
+uygulanmaz. Asistan nöbeti, uzman çalışma ve rotasyoner kayıtları birleştirilir;
+izin/rotasyon kişinin günlük atamasının yerine geçer; uzman nöbeti yalnız belirtilen günlerin
+tam listesini değiştirir. Açık planlama/alan taslakları toplu kaydı engeller.
+Bulut yapılandırılmışsa kayıt doğrulanmadan uygulama verisi değiştirilmez; bağlantı sorunu
+olursa yapıştırılan metin korunur. Bulut yapılandırılmamış yerel ortamda kayıt yalnız cihazda tutulur.
+
+Aktarım kuralları için testler (Node.js 22.18+):
+
+```bash
+node --test tests/bulkImport.test.mjs
+```
+
 ## Supabase
 
 Online kayıt için `supabase/001_portal_state.sql` dosyasını Supabase SQL Editor'de çalıştır.

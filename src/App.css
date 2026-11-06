@@ -4784,3 +4784,36 @@ code {
     background: #fff7c4 !important;
   }
 }
+.bulk-import-heading { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+.bulk-import-heading h2 { margin-bottom: 0.5rem; }
+.bulk-import-badge { background: var(--mint-soft, #dceee8); color: var(--mint-strong); padding: 0.45rem 0.75rem; border-radius: 999px; font-size: 0.8rem; white-space: nowrap; }
+.bulk-import-guide { margin: 1.2rem 0; padding: 1rem; border: 1px solid rgba(13, 109, 92, 0.2); border-radius: 14px; background: rgba(220, 238, 232, 0.25); }
+.bulk-import-guide summary { cursor: pointer; font-weight: 700; color: var(--ink-900); }
+.bulk-import-guide li { line-height: 1.6; margin: 0.5rem 0; }
+.bulk-import-actions { display: flex; flex-wrap: wrap; gap: 0.65rem; align-items: center; margin: 0.8rem 0; }
+.bulk-import-actions button { width: auto; }
+.bulk-import-label { display: block; font-weight: 700; margin: 1rem 0 0.55rem; }
+.bulk-import-panel textarea { min-height: 220px; line-height: 1.7; font-family: ui-monospace, monospace; font-size: 0.85rem; }
+.bulk-import-instructions { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 400px; overflow: auto; font: inherit; font-size: 0.85rem; line-height: 1.6; user-select: text; }
+.bulk-import-preview { border-top: 1px solid rgba(13, 109, 92, 0.2); margin-top: 1.5rem; padding-top: 1rem; }
+.bulk-import-counts { display: flex; flex-wrap: wrap; gap: 0.6rem; margin: 0.8rem 0 1rem; }
+.bulk-import-counts span { border: 1px solid rgba(13, 109, 92, 0.18); border-radius: 9px; padding: 0.5rem 0.7rem; background: #f5faf7; }
+.bulk-import-counts strong { color: var(--mint-strong); margin-right: 0.25rem; }
+.bulk-import-table-wrap { overflow: auto; max-height: 520px; margin: 1rem 0; border: 1px solid rgba(13, 109, 92, 0.18); border-radius: 10px; }
+.bulk-import-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+.bulk-import-table th, .bulk-import-table td { text-align: left; padding: 0.7rem; border-bottom: 1px solid rgba(13, 109, 92, 0.12); }
+.bulk-import-table th { background: var(--ink-900); color: white; position: sticky; top: 0; }
+.bulk-import-table td:nth-child(3) { white-space: nowrap; }
+.bulk-import-table tr:nth-child(even) { background: rgba(220, 238, 232, 0.2); }
+.bulk-import-effects { background: #fff7e8; border: 1px solid #ebd6ad; border-radius: 12px; padding: 0.9rem 1rem; margin: 1rem 0; }
+.bulk-import-effects h4 { margin: 0; }
+.bulk-import-effects li { margin-top: 0.5rem; line-height: 1.5; }
+.bulk-import-shortcut { display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; padding: 0.8rem 1rem; margin: 1rem 0; border: 1px solid rgba(13, 109, 92, 0.18); border-radius: 12px; background: rgba(220, 238, 232, 0.25); }
+.bulk-import-shortcut p { margin: 0; }
+.bulk-import-shortcut button { width: auto; }
+@media (max-width: 600px) {
+  .bulk-import-heading { align-items: flex-start; }
+  .bulk-import-badge { font-size: 0.7rem; }
+  .bulk-import-actions button, .bulk-import-shortcut button { width: 100%; }
+  .bulk-import-table { min-width: 650px; }
+}
