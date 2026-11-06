@@ -8793,6 +8793,17 @@ function App() {
             <p className="eyebrow">Planlama</p>
             <h1>Çalışma Listesi Portalı</h1>
           </div>
+          {session.role === 'admin' ? (
+            <a
+              className="duty-planner-link"
+              href="http://127.0.0.1:4317/"
+              target="_blank"
+              rel="noopener noreferrer"
+              title="Bu bilgisayardaki nöbet programını yeni sekmede aç"
+            >
+              Nöbet listesi yap <span aria-hidden="true">↗</span>
+            </a>
+          ) : null}
         </div>
 
         <div className="top-controls">

@@ -57,9 +57,37 @@
 
 .topbar-title {
   display: flex;
+  flex-wrap: wrap;
   justify-content: space-between;
   align-items: flex-start;
   gap: 0.6rem;
+}
+
+.duty-planner-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  flex-shrink: 0;
+  min-height: 44px;
+  padding: 0.62rem 0.95rem;
+  border: 1px solid rgba(13, 109, 92, 0.24);
+  border-radius: 12px;
+  background: linear-gradient(135deg, #0a5e52, #12816c);
+  color: #fff;
+  font-weight: 600;
+  font-size: 0.9rem;
+  text-decoration: none;
+  box-shadow: 0 5px 14px rgba(13, 76, 68, 0.12);
+}
+
+.duty-planner-link:hover {
+  background: #0a5e52;
+}
+
+.duty-planner-link:focus-visible {
+  outline: 3px solid var(--amber);
+  outline-offset: 3px;
 }
 
 .mobile-menu-trigger {
