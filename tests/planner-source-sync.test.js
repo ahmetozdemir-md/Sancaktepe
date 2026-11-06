@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { synchronizePlannerSource } from '../src/plannerSourceSync.js';
+import { synchronizePlannerRoster } from '../src/plannerRosterSync.js';
+import { ensureAssistantRegistry, setAssistantDutyEnabled, setAssistantArchived, renameAssistantInPlanner } from '../src/assistantIdentity.js';
 import { validateState } from '../public/nobet-planlayici/state-schema.js';
 
 const options = { fromMonth: '2026-11', currentMonth: '2026-11', rosterPolicy: 'preserve-active' };
@@ -125,13 +127,13 @@ test('future explicit rotations do not invent planner month records', () => {
   assert.equal(rotations(result.state, 'a').at(-1).start, '2026-12-01');
 });
 
-test('advancing the current month freezes the earlier imported rotation even if portal history changes', () => {
+test('corrections to an earlier linked month continue to flow directly from the master app', () => {
   const { draft, portal } = fixture();
   const first = sync(draft, portal).state;
   portal.locationOwnersByMonth['2026-11'] = { f: ['Ahmet Özdemir'] };
   portal.locationOwnersByMonth['2026-12'] = { c: ['Ahmet Özdemir'] };
   const later = sync(first, portal, { currentMonth: '2026-12' });
-  assert.deepEqual(later.state.rotations.filter(row => row.start.startsWith('2026-11')), first.rotations);
+  assert.equal(later.state.rotations.find(row => row.personId === 'a' && row.start.startsWith('2026-11')).site, 'Feriha Öz');
   assert.equal(rotations(later.state, 'a').at(-1).site, 'Çekmeköy');
 });
 
@@ -246,4 +248,37 @@ test('invalid roots and effective dates are rejected instead of silently enablin
   assert.throws(() => sync(draft, portal, { fromMonth: '2026-13' }), /Eşleştirme/u);
   assert.throws(() => synchronizePlannerSource(null, portal, options), /taslağının/u);
   assert.throws(() => synchronizePlannerSource(draft, { ...portal, assistants: null }, options), /uygulamasının/u);
+});
+
+test('stable registry identity propagates a real rename directly into its monthly rotation without changing planning IDs',()=>{
+ const {draft,portal}=fixture();portal.assistantRegistry=ensureAssistantRegistry(portal.assistants,{},draft.people,'2026-11').registry;const renamed=renameAssistantInPlanner(portal,'a','Ahmet Ali Özdemir');const result=sync(draft,renamed);
+ assert.equal(result.state.people.find(p=>p.id==='a').name,'Ahmet Ali Özdemir');assert.equal(result.state.rotations.find(r=>r.personId==='a').site,'Sancaktepe');assert.equal(result.warnings.some(w=>w.code==='missing-source-person'||w.code==='ambiguous-person'),false);assert.deepEqual(result.state.assignments,draft.assignments);assert.equal(result.state.people.length,draft.people.length);assert.equal(validateState(result.state).valid,true);
+});
+test('roster and rotation synchronization agree on a reused old label: new identity owns current rotation while old identity retains past duties',()=>{
+ const {draft,portal}=fixture();draft.people[0].portalIdentityId='old-identity';draft.assignments.push({id:'past-duty',personId:'a',date:'2026-10-02',site:'Sancaktepe',overrides:[]});draft.rotations.push({id:'past-rotation',personId:'a',start:'2026-10-01',end:'2026-10-31',site:'Feriha Öz',unit:'Önceki birim'});
+ portal.assistantRegistry=ensureAssistantRegistry(portal.assistants,{},draft.people,'2026-11').registry;delete portal.assistantRegistry.a;portal.assistantRegistry['new-identity']={name:'Ahmet Özdemir',dutyEnabled:true,dutyHistory:[{from:'2026-11',enabled:true}]};
+ const roster=synchronizePlannerRoster(draft,portal,options);const result=sync(roster.state,portal);
+ assert.equal(result.state.people.find(p=>p.id==='new-identity').portalIdentityId,'new-identity');assert.deepEqual(result.state.assignments,draft.assignments);assert.deepEqual(result.state.rotations.find(r=>r.id==='past-rotation'),draft.rotations.find(r=>r.id==='past-rotation'));assert.equal(result.state.rotations.some(r=>r.personId==='new-identity'&&r.start==='2026-11-01'&&r.site==='Sancaktepe'),true);assert.equal(result.state.rotations.some(r=>r.personId==='a'&&r.start.startsWith('2026-11')),false);assert.equal(result.warnings.some(w=>w.code==='ambiguous-person'),false);assert.equal(validateState(result.state).valid,true,validateState(result.state).errors.join('\n'));
+});
+test('future monthly flags and dated archive permit November rotation and exclude December without false identity warnings',()=>{
+ const {draft,portal}=fixture();portal.assistantRegistry=ensureAssistantRegistry(portal.assistants,{},draft.people,'2026-11').registry;portal.assistantRegistry=setAssistantArchived(portal.assistantRegistry,'a',true,'2026-12');draft.months['2026-12']={completedAt:null};portal.locationOwnersByMonth['2026-12']={f:['Ahmet Özdemir']};portal.postDutyPoolByMonth['2026-12']=['İsa'];
+ const roster=synchronizePlannerRoster(draft,portal,options);const result=sync(roster.state,portal,{currentMonth:'2026-12'});
+ assert.equal(result.state.rotations.some(r=>r.personId==='a'&&r.sourceMonth==='2026-11'),true);assert.equal(result.state.rotations.some(r=>r.personId==='a'&&r.sourceMonth==='2026-12'),false);assert.equal(result.warnings.some(w=>w.code==='unlinked-source-person'||w.code==='ambiguous-person'),false);assert.deepEqual(result.state.assignments,draft.assignments);
+});
+test('a newly enabled future shared identity receives only that future month rotation',()=>{
+ const {draft,portal}=fixture();portal.assistantRegistry=ensureAssistantRegistry(portal.assistants,{},draft.people,'2026-11').registry;const extra=Object.entries(portal.assistantRegistry).find(([,p])=>p.name==='Yeni Rotasyoner')[0];portal.assistantRegistry=setAssistantDutyEnabled(portal.assistantRegistry,extra,true,'2026-12');draft.months['2026-12']={completedAt:null};portal.locationOwnersByMonth['2026-12']={c:['Yeni Rotasyoner']};portal.postDutyPoolByMonth['2026-12']=[];
+ const roster=synchronizePlannerRoster(draft,portal,options);const result=sync(roster.state,portal);
+ assert.equal(result.state.rotations.some(r=>r.personId===extra&&r.sourceMonth==='2026-11'),false);assert.equal(result.state.rotations.some(r=>r.personId===extra&&r.sourceMonth==='2026-12'&&r.site==='Çekmeköy'),true);assert.equal(result.warnings.some(w=>w.code==='unlinked-source-person'),false);assert.equal(validateState(result.state).valid,true,validateState(result.state).errors.join('\n'));
+});
+test('legacy exact-name fallback ignores inactive homonyms while retaining ambiguous active-person protection',()=>{
+ const {draft,portal}=fixture();draft.people.push({...draft.people[0],id:'same-old-label',until:'2026-11-01'});const result=sync(draft,portal);
+ assert.equal(result.state.rotations.some(r=>r.personId==='a'&&r.sourceMonth==='2026-11'),true);assert.equal(result.state.rotations.some(r=>r.personId==='same-old-label'),false);assert.equal(result.warnings.some(w=>w.code==='ambiguous-person'),false);
+ draft.people.at(-1).until=null;const ambiguous=sync(draft,portal);assert.equal(ambiguous.state.rotations.some(r=>r.site==='Sancaktepe'),false);assert.equal(ambiguous.warnings.some(w=>w.code==='ambiguous-person'),true);
+});
+test('empty registry remains a safe legacy bridge even when an earlier private copy already has identity metadata',()=>{
+ const {draft,portal}=fixture();draft.people[0].portalIdentityId='a';portal.assistantRegistry={};const result=sync(draft,portal);assert.equal(result.state.rotations.some(r=>r.personId==='a'&&r.sourceMonth==='2026-11'),true);assert.deepEqual(result.warnings,[]);
+});
+test('contradictory explicit identity links never rename or transfer a person by a later registry key',()=>{
+ const {draft,portal}=fixture();draft.people[0].portalIdentityId='z-actual';portal.assistants=['Ahmet Özdemir','Başka Kişi','Üçüncü Kişi','İsa'];portal.locationOwnersByMonth['2026-11'].s=['Ahmet Özdemir'];portal.assistantRegistry={a:{name:'Başka Kişi',dutyEnabled:true,dutyHistory:[{from:'2026-11',enabled:true}]},'z-actual':{name:'Ahmet Özdemir',dutyEnabled:true,dutyHistory:[{from:'2026-11',enabled:true}]},'zz-conflict':{name:'Üçüncü Kişi',dutyEnabled:true,plannerPersonId:'a',dutyHistory:[{from:'2026-11',enabled:true}]}};
+ const result=sync(draft,portal);assert.equal(result.state.people.find(p=>p.id==='a').name,'Ahmet Özdemir');assert.equal(result.state.rotations.some(r=>r.personId==='a'&&r.sourceMonth==='2026-11'),false);assert.ok(result.warnings.some(w=>w.code==='unlinked-source-person'));
 });

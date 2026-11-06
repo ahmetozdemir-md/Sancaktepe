@@ -1,5 +1,5 @@
 import { isPostCallRotation, isPostCallUnit } from './rotations.js';
-import { personGroupId } from './person-history.js';
+import { personGroupId, personRosterEnabled, groupActiveInMonth } from './person-history.js';
 
 /** Shared structural validation for saves and imported backups. No warning is a save blocker. */
 export function validateState(state) {
@@ -46,12 +46,36 @@ export function validateState(state) {
     const path = `Kıdem ${row.id}`;
     if (!Number.isSafeInteger(row.order) || row.order < 1) add(path, 'Sıra pozitif tam sayı olmalıdır.');
     if (!month(row.from) || !(row.until === null || (month(row.until) && row.until > row.from))) add(path, 'Geçerlilik ayları hatalı.');
+    if (row.rankHistory !== undefined) {
+      if (!Array.isArray(row.rankHistory)) add(path, 'Kıdem sıra geçmişi liste olmalıdır.');
+      else {
+        let previousMonth = '';
+        for (const entry of row.rankHistory) {
+          if (!object(entry) || !month(entry.from) || !Number.isSafeInteger(entry.rank) || entry.rank < 1
+            || entry.from < row.from || row.until !== null && entry.from >= row.until && !groupActiveInMonth(state, row, entry.from) || entry.from <= previousMonth) {
+            add(path, 'Kıdem sıra geçmişi geçerli, tekil ve sıralı aylar içermelidir.');
+          }
+          previousMonth = entry?.from ?? previousMonth;
+        }
+      }
+    }
+
   }
   for (const row of rows.people) {
     const path = `Kişi ${row.id}`;
     if (!text(row.name)) add(path, 'Ad boş olamaz.');
     ref(row.groupId, 'groups', path);
     if (!date(row.from) || !(row.until === null || (date(row.until) && row.until > row.from))) add(path, 'Geçerlilik tarihleri hatalı.');
+    if (row.rosterHistory !== undefined) {
+      if (!Array.isArray(row.rosterHistory)) add(path, 'Nöbet katılım geçmişi liste olmalıdır.');
+      else {
+        let previousMonth = '';
+        for (const entry of row.rosterHistory) {
+          if (!object(entry) || !month(entry.from) || typeof entry.enabled !== 'boolean' || entry.from <= previousMonth) add(path, 'Nöbet katılım geçmişi geçerli, tekil ve sıralı aylar içermelidir.');
+          previousMonth = entry?.from ?? previousMonth;
+        }
+      }
+    }
     if (row.groupHistory !== undefined) {
       if (!Array.isArray(row.groupHistory)) add(path, 'Kıdem geçmişi liste olmalıdır.');
       else {
@@ -163,11 +187,11 @@ export function validateState(state) {
     if (!date(row.date) || !sites.has(row.site)) add(path, 'Tarih veya hastane hatalı.');
     if (!Array.isArray(row.overrides)) add(path, 'Onaylanan uyarılar liste olmalıdır.');
     const person = people.get(row.personId);
-    if (person && date(row.date) && (row.date < person.from || (person.until !== null && row.date >= person.until))) add(path, 'Kişi bu tarihte aktif değil.');
+    if (person && date(row.date) && (row.date < person.from || (person.until !== null && row.date >= person.until && personRosterEnabled(person, row.date.slice(0, 7)) === null))) add(path, 'Kişi bu tarihte aktif değil.');
     const group = person && groups.get(personGroupId(person, row.date?.slice(0, 7)));
     if (group && date(row.date)) {
       const dutyMonth = row.date.slice(0, 7);
-      if (dutyMonth < group.from || (group.until !== null && dutyMonth >= group.until)) add(path, 'Kişinin kıdem grubu bu ayda aktif değil.');
+      if (dutyMonth < group.from || (group.until !== null && dutyMonth >= group.until && personRosterEnabled(person, dutyMonth) === null)) add(path, 'Kişinin kıdem grubu bu ayda aktif değil.');
     }
     if (!personDates.has(row.personId)) personDates.set(row.personId, []);
     if (date(row.date)) personDates.get(row.personId).push(row.date);

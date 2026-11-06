@@ -1,5 +1,4 @@
 /* Monthly clinical capability flags and daily coverage. No role is inferred from a name or rank. */
-import { personGroupId } from './person-history.js';
 const SITES = ['Sancaktepe', 'Feriha Öz', 'Çekmeköy'];
 const EMPTY = { triangle: false, square: false, circle: false, companion: false };
 const DEFAULTS = {
@@ -36,7 +35,7 @@ export function capabilitiesFor(state, personId, month) {
   const active = row => !row.through || month <= row.through;
   const personal = latest(begun.filter(row => row.personId === personId));
   return personal && !personal.inherit && active(personal) ? normalizeCapabilities(personal)
-    : groupCapabilitiesFor(state, personGroupId(person, month), month);
+    : groupCapabilitiesFor(state, person.groupId, month);
 }
 
 /** Return an independent settings object, with defaults for fields absent from old backups. */

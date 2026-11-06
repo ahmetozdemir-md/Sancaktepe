@@ -5,6 +5,7 @@ import { planAutoWeekend } from './weekend-pair.js';
 import { capabilitiesFor, groupCapabilitiesFor, normalizeCapabilities, getPlanningSettings } from './capabilities.js';
 import { buildRequestPrompt } from './request-prompt.js';
 import { comparePeopleBySeniority, sortPeopleBySeniority } from './person-order.js';
+import { personGroupId, personRosterEnabled } from './person-history.js';
 import { POST_CALL_UNIT, POST_CALL_OPTION, isPostCallRotation, isPostCallUnit, rotationLabel } from './rotations.js';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
@@ -127,19 +128,20 @@ export async function handleCapabilityChange(element, ctx) {
 }
 
 function renderPeople(state, month) {
-  const groups = activeGroups(state, month);
+  const managed = state.portalSource?.registryManaged === true;
   const people = sortPeopleBySeniority(state, month, activePeople(state, month));
+  const groups = activeGroups(state, month).filter(group => !managed || people.some(person => person.groupId === group.id));
   const cards = groups.map(group => {
     const members = people.filter(person => person.groupId === group.id);
     const target = latestTarget(state, group.id, null, month);
-    return `<section class="panel"><div class="section-head"><div><h3>${rankOf(state, group.id, month)}. kıdem <span class="pill">${members.length} kişi</span></h3><p class="muted">${target ? `Hedef: ${targetSummary(target)}` : 'Nöbet hedefi henüz girilmedi'}</p>${capabilityControls(groupCapabilitiesFor(state, group.id, month), { groupId: group.id, name: `${rankOf(state, group.id, month)}. kıdem` })}</div><div>${button('Yetkinlik', 'mg-capabilities', `data-group-id="${esc(group.id)}"`)} ${button('Kıdem hedefi', 'mg-target', `data-group-id="${esc(group.id)}"`)} ${button('Kıdemi mezun et', 'mg-retire-group', `data-id="${esc(group.id)}"`)}</div></div><div class="group-grid">${members.map(person => {
+    return `<section class="panel"><div class="section-head"><div><h3>${rankOf(state, group.id, month)}. kıdem <span class="pill">${members.length} kişi</span></h3><p class="muted">${target ? `Hedef: ${targetSummary(target)}` : 'Nöbet hedefi henüz girilmedi'}</p>${capabilityControls(groupCapabilitiesFor(state, group.id, month), { groupId: group.id, name: `${rankOf(state, group.id, month)}. kıdem` })}</div><div>${button('Yetkinlik', 'mg-capabilities', `data-group-id="${esc(group.id)}"`)} ${button('Kıdem hedefi', 'mg-target', `data-group-id="${esc(group.id)}"`)} ${managed ? '' : button('Kıdemi mezun et', 'mg-retire-group', `data-id="${esc(group.id)}"`)}</div></div><div class="group-grid">${members.map(person => {
       const own = latestTarget(state, null, person.id, month);
       const effective = targetFor(state, person.id, month);
-      return `<div class="person-row">${capabilityControls(capabilitiesFor(state, person.id, month), { personId: person.id, name: person.name })}<div><strong>${esc(person.name)}</strong><div class="muted" title="${effective ? hasFullMonthTargetExemption(state, person.id, month) ? 'Muafiyet hedefi' : own && !own.inherit ? 'Kişisel hedef' : 'Kıdem hedefi' : ''}">${effective ? compactTarget(effective) : 'Hedef bekliyor'}</div></div><div class="person-actions">${button('⋯', 'mg-capabilities', `data-person-id="${esc(person.id)}" title="${esc(person.name)} yetkinlik ayrıntıları" aria-label="${esc(person.name)} yetkinlik ayrıntıları"`)} ${button('Hedef', 'mg-target', `data-person-id="${esc(person.id)}"`)} ${button('Arşivle', 'mg-retire-person', `data-id="${esc(person.id)}"`)}</div></div>`;
+      return `<div class="person-row">${capabilityControls(capabilitiesFor(state, person.id, month), { personId: person.id, name: person.name })}<div><strong>${esc(person.name)}</strong><div class="muted" title="${effective ? hasFullMonthTargetExemption(state, person.id, month) ? 'Muafiyet hedefi' : own && !own.inherit ? 'Kişisel hedef' : 'Kıdem hedefi' : ''}">${effective ? compactTarget(effective) : 'Hedef bekliyor'}</div></div><div class="person-actions">${button('⋯', 'mg-capabilities', `data-person-id="${esc(person.id)}" title="${esc(person.name)} yetkinlik ayrıntıları" aria-label="${esc(person.name)} yetkinlik ayrıntıları"`)} ${button('Hedef', 'mg-target', `data-person-id="${esc(person.id)}"`)} ${managed ? '' : button('Arşivle', 'mg-retire-person', `data-id="${esc(person.id)}"`)}</div></div>`;
     }).join('') || empty('Bu kıdemde henüz kişi yok.')}</div></section>`;
   }).join('');
-  const archived = sortPeopleBySeniority(state, month, state.people.filter(person => person.until && person.until <= `${month}-01`));
-  return `${heading('Asistanlar ve hedefler', `${month} için ${people.length} aktif kişi · ${groups.length} kıdem. Hedefler seçtiğiniz aydan itibaren geçerli olur.`, `${bulkButton('people')} ${button('Kıdem ekle', 'mg-add-group')} ${button('Kişi ekle', 'mg-add-person', '', true)}`)}${cards}${archived.length ? `<details class="panel"><summary>Arşivdeki ${archived.length} kişi</summary><p class="muted">${archived.map(person => `${esc(person.name)} (${pretty(person.until)} itibarıyla)`).join(' · ')}</p></details>` : ''}`;
+  const archived = sortPeopleBySeniority(state, month, state.people.filter(person => !people.some(active => active.id === person.id) && (personRosterEnabled(person, month) === false || person.until && person.until <= `${month}-01`)));
+  return `${heading('Asistanlar ve hedefler', `${month} için ${people.length} aktif kişi · ${groups.length} kıdem. Hedefler seçtiğiniz aydan itibaren geçerli olur.`, managed ? '' : `${bulkButton('people')} ${button('Kıdem ekle', 'mg-add-group')} ${button('Kişi ekle', 'mg-add-person', '', true)}`)}${cards}${archived.length ? `<details class="panel"><summary>Arşivdeki ${archived.length} kişi</summary><p class="muted">${archived.map(person => `${esc(person.name)}${person.until ? ` (${pretty(person.until)} itibarıyla)` : ' (nöbete dahil değil)'}`).join(' · ')}</p></details>` : ''}`;
 }
 
 function recordRows(state, month, rows, collection) {
@@ -356,9 +358,9 @@ function addGroupDialog(ctx) {
 
 function retireDialog(ctx, id, entireGroup) {
   const state = ctx.state, month = ctx.month, boundary = `${month}-01`;
-  const group = entireGroup ? state.groups.find(item => item.id === id) : state.groups.find(item => item.id === state.people.find(person => person.id === id)?.groupId);
+  const group = entireGroup ? state.groups.find(item => item.id === id) : state.groups.find(item => item.id === personGroupId(state.people.find(person => person.id === id), month));
   if (!group) return fail(ctx, 'Kıdem bulunamadı.');
-  const members = sortPeopleBySeniority(state, month, state.people.filter(person => entireGroup ? person.groupId === id && (!person.until || person.until > boundary) : person.id === id));
+  const members = sortPeopleBySeniority(state, month, state.people.filter(person => entireGroup ? personGroupId(person, month) === id && activePeople(state, month).some(active => active.id === person.id) : person.id === id));
   const ids = new Set(members.map(person => person.id));
   const affected = state.assignments.filter(item => ids.has(item.personId) && item.date >= boundary);
   const name = entireGroup ? `${rankOf(state, id, month)}. kıdem` : members[0]?.name;
@@ -375,7 +377,7 @@ function retireDialog(ctx, id, entireGroup) {
         && !(record.kind === 'together' && record.personIds.some(personId => removedIds.has(personId))));
       next.targets = next.targets.filter(target => !removedIds.has(target.personId));
       if (next.capabilities) next.capabilities = next.capabilities.filter(record => !removedIds.has(record.personId));
-      const remaining = next.people.some(person => person.groupId === group.id && (!person.until || person.until > boundary));
+      const remaining = next.people.some(person => (personGroupId(person, month) === group.id || person.groupId === group.id) && (!person.until || person.until > boundary));
       if (!remaining) {
         const nextGroup = next.groups.find(item => item.id === group.id);
         if (nextGroup.from < month) nextGroup.until = month;
@@ -603,6 +605,10 @@ function importDialog(ctx, kind, initialText = '') {
 
 export async function handleManagement(action, element, ctx) {
   if (!action.startsWith('mg-')) return false;
+  if (ctx.state.portalSource?.registryManaged === true && (['mg-add-person', 'mg-add-group', 'mg-retire-group', 'mg-retire-person'].includes(action) || action === 'mg-import' && element.dataset.kind === 'people')) {
+    ctx.toast('Kişileri ve nöbete katılımı Asistan uygulamasından yönet. Değişiklikler otomatik alınır.');
+    return true;
+  }
   if (sourceRotations(ctx.state, ctx.month) && (element.dataset.kind === 'rotation' || element.dataset.collection === 'rotations' || action === 'mg-bulk-rotations')) {
     ctx.toast('Rotasyonları Asistan uygulamasında düzenle. Değişiklikler otomatik alınır.');
     return true;

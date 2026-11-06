@@ -4825,3 +4825,8 @@ code {
   .bulk-record-grid .specialist-delete-row button { width: 100%; }
   .bulk-manual-controls button { flex: 1; }
 }
+.portal-read-status { display: inline-flex; align-items: center; gap: 8px; color: var(--muted, #6b817a); font-size: 11px; }
+.portal-read-status.has-error { color: #a96114; }
+.portal-read-status button { padding: 3px 7px; font-size: 11px; line-height: 1.3; background: transparent; border: 1px solid currentColor; border-radius: 7px; color: inherit; box-shadow: none; }
+
+.registry-month-control{display:flex;align-items:center;gap:10px;margin:14px 0;font-size:13px;color:var(--muted)}.registry-month-control input{width:160px}.assistant-chip.assistant-identity-card{display:block;padding:10px 12px;cursor:default}.assistant-identity-card .assistant-identity-controls{margin-top:6px}

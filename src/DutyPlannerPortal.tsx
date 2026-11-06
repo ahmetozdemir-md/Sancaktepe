@@ -4,6 +4,7 @@ import {
   publishPlanner,
   readPlanner,
   readPlannerBackup,
+  readPlannerRoomChanges,
   readPublishedPortal,
   savePlanner,
   type PublishedPortalPayload,
@@ -11,6 +12,7 @@ import {
 } from './dutyPlannerCloud'
 import {
   createPublicationPreview,
+  normalizePublicationName,
   type PublicationDraft,
   type PublicationPortal,
   type PublicationPreview,
@@ -53,6 +55,7 @@ export default function DutyPlannerPortal({ onClose, onPublished }: Props) {
   const mounted = useRef(false)
   const [publication, setPublication] = useState<PendingPublication | null>(null)
   const [publishing, setPublishing] = useState(false)
+  const [restoreRoomChangeIds, setRestoreRoomChangeIds] = useState<string[]>([])
   const [frameStatus, setFrameStatus] = useState<FrameStatus>({ dirty: false, busy: false, month: '' })
   const [notice, setNotice] = useState('')
 
@@ -120,19 +123,22 @@ export default function DutyPlannerPortal({ onClose, onPublished }: Props) {
                 const draft = await readPlanner()
                 if (draft.revision !== request.payload.revision) throw problem('Nöbet taslağı değişti. Güncel taslağı yükleyip yeniden yayınla.', 409)
                 validDraft(draft.state)
-                const portal = await readPublishedPortal()
+                const [portal, roomChanges] = await Promise.all([
+                  readPublishedPortal(), readPlannerRoomChanges(request.payload.month),
+                ])
                 const audit = auditMonth(draft.state, request.payload.month)
                 const preview = createPublicationPreview(
                   draft.state as unknown as PublicationDraft,
                   portal.payload.plannerState as unknown as PublicationPortal,
                   request.payload.month,
-                  { warnings: audit.filter(item => item.severity !== 'error') },
+                  { warnings: audit.filter(item => item.severity !== 'error'), roomChanges },
                 )
                 const errors = audit.filter(item => item.severity === 'error')
                 if (errors.length) { preview.errors.push(...errors); preview.canPublish = false }
                 if (!mounted.current) throw problem('Planlayıcı kapatıldı.', 400)
                 const pending = { request, source, preview, revision: draft.revision, portalRevision: portal.updatedAt }
                 publicationRef.current = pending
+                setRestoreRoomChangeIds([])
                 setPublication(pending)
                 setNotice('')
                 return // Confirmation or cancellation sends the correlated response.
@@ -194,6 +200,7 @@ export default function DutyPlannerPortal({ onClose, onPublished }: Props) {
         revision: pending.revision,
         portalRevision: pending.portalRevision,
         monthRoster: pending.preview.monthRoster,
+        restoreRoomChangeIds,
       })
       reply(pending.request, pending.source, { ok: true, data: { month: pending.preview.month, publishedAt: result.publishedAt, message: 'Nöbet listesi Asistan sistemine yayınlandı.' } })
       publicationRef.current = null
@@ -243,11 +250,18 @@ export default function DutyPlannerPortal({ onClose, onPublished }: Props) {
               <div><dt>Eklenen</dt><dd>{publication.preview.addedCount}</dd></div>
               <div><dt>Kaldırılan</dt><dd>{publication.preview.removedCount}</dd></div>
             </dl>
-            {!publication.preview.hasChanges ? <p className="duty-publish-muted">Yayınlanmış listeyle aynı; değişecek atama yok.</p> : null}
+            {!publication.preview.hasChanges && !restoreRoomChangeIds.length ? <p className="duty-publish-muted">Yayınlanmış listeyle aynı; değişecek atama yok.</p> : null}
             {publication.preview.errors.length ? <section className="duty-publish-errors"><h3>Önce bunları düzelt</h3><ul>{publication.preview.errors.map((item, index) => <li key={`${item.code}-${index}`}>{item.message}</li>)}</ul></section> : null}
             {publication.preview.removedRoomAssignments.length ? <section className="duty-publish-removals">
               <h3>Nöbet ertesi nedeniyle kaldırılacak çalışma yeri atamaları ({publication.preview.removedRoomAssignments.length})</h3>
               <div className="duty-publish-table"><table><thead><tr><th>Tarih</th><th>Asistan</th><th>Çalışma yeri</th></tr></thead><tbody>{publication.preview.removedRoomAssignments.map((item, index) => <tr key={`${item.date}-${item.locationId}-${item.name}-${index}`}><td>{dayLabel(item.date)}</td><td>{item.name}</td><td>{item.site ? `${item.site} · ` : ''}{item.locationName}</td></tr>)}</tbody></table></div>
+            </section> : null}
+            {publication.preview.restorableRoomAssignments.length ? <section className="duty-publish-restorations">
+              <h3>İptal edilen nöbetlerden sonra geri konulabilecek çalışma atamaları</h3>
+              <p>Yalnız seçtiklerin geri konulur. Sonradan düzenlenen günler bu listede yer almaz.</p>
+              <div className="duty-publish-table"><table><thead><tr><th>Geri koy</th><th>Tarih</th><th>Asistan</th><th>Çalışma yeri</th></tr></thead><tbody>{publication.preview.restorableRoomAssignments.map(item => <tr key={item.id}><td><input type="checkbox" aria-label={`${item.name} · ${dayLabel(item.date)} · ${item.locationName} geri koy`} disabled={publishing} checked={restoreRoomChangeIds.includes(item.id)} onChange={event => setRestoreRoomChangeIds(previous => event.target.checked
+                ? [...previous.filter(id => { const other = publication.preview.restorableRoomAssignments.find(row => row.id === id); return !other || other.date !== item.date || normalizePublicationName(other.name) !== normalizePublicationName(item.name) }), item.id]
+                : previous.filter(id => id !== item.id))} /></td><td>{dayLabel(item.date)}</td><td>{item.name}</td><td>{item.site ? `${item.site} · ` : ''}{item.locationName}</td></tr>)}</tbody></table></div>
             </section> : null}
             {publication.preview.warnings.length ? <details className="duty-publish-warnings"><summary>Kontrol notları ({publication.preview.warnings.length})</summary><ul>{publication.preview.warnings.map((item, index) => <li key={`${item.code}-${index}`}>{item.message}</li>)}</ul></details> : null}
           </div>

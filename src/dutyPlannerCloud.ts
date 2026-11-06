@@ -4,6 +4,7 @@ import type { PublicationDraft, PublicationPortal, PublishedDuty } from './month
 import { synchronizePlannerSource, type PlannerSourcePortal } from './plannerSourceSync.js'
 import { synchronizePersonRanks } from '../public/nobet-planlayici/person-history.js'
 import { createSourceRevisionTracker, invalidateSourceCompletion, sourceSignature } from './sourceSyncSafety.js'
+import { synchronizePlannerRoster } from './plannerRosterSync.js'
 
 const sourceRevisions = createSourceRevisionTracker()
 
@@ -70,7 +71,7 @@ async function readStoredPlanner() {
 
 /** Fetch only staff and monthly rotations, leaving large daily schedules out of refreshes. */
 async function readRotationSource() {
-  const fields = ['assistants', 'assistantRanks', 'locations', 'locationOwnersByMonth', 'postDutyPoolByMonth']
+  const fields = ['assistants', 'assistantRanks', 'assistantRegistry', 'locations', 'locationOwnersByMonth', 'postDutyPoolByMonth']
   const { data, error } = await client().from(REMOTE_STATE_TABLE)
     .select(fields.map(field => `${field}:payload->plannerState->${field}`).join(','))
     .eq('id', REMOTE_STATE_ROW_ID).maybeSingle()
@@ -89,11 +90,11 @@ function synchronize(state: RichPlannerState, portal: PlannerSourcePortal): Rich
   const source = state.portalSource as { fromMonth?: string } | undefined
   const fromMonth = typeof source?.fromMonth === 'string' && /^\d{4}-(0[1-9]|1[0-2])$/.test(source.fromMonth) ? source.fromMonth : currentMonth
   const options = { fromMonth, currentMonth, rosterPolicy: 'preserve-active' as const }
-  const rotations = synchronizePlannerSource(state, portal, options)
-  const ranks = synchronizePersonRanks(rotations.state, portal, options)
-  const cutoffMonth = fromMonth > currentMonth ? fromMonth : currentMonth
-  const result = invalidateSourceCompletion(state, ranks.state, cutoffMonth) as RichPlannerState
-  result.portalSource = { ...(result.portalSource as object), currentMonth, warnings: [...rotations.warnings, ...ranks.warnings] }
+  const roster = synchronizePlannerRoster(state, portal, options)
+  const ranks = synchronizePersonRanks(roster.state, portal, options)
+  const rotations = synchronizePlannerSource(ranks.state, portal, options)
+  const result = invalidateSourceCompletion(state, rotations.state, fromMonth) as RichPlannerState
+  result.portalSource = { ...(result.portalSource as object), currentMonth, warnings: [...roster.warnings, ...rotations.warnings, ...ranks.warnings] }
   return checkPlannerState(result)
 }
 
@@ -157,15 +158,29 @@ export async function readPublishedPortal() {
   return { payload: data.payload as PublishedPortalPayload, updatedAt: data.updated_at }
 }
 
+export async function readPlannerRoomChanges(month: string) {
+  const { data, error } = await client().from('duty_planner_room_changes')
+    .select('id,publication_month,date,duty_date,name,location_id,site,room_before,day_after,invalidated_at,restored_at')
+    .eq('publication_month', month).is('invalidated_at', null).is('restored_at', null)
+  if (error) fail(error)
+  return (data ?? []).map(row => ({ id: row.id as string, month: row.publication_month as string,
+    date: row.date as string, dutyDate: row.duty_date as string, name: row.name as string,
+    locationId: row.location_id as string, site: row.site as string,
+    roomBefore: row.room_before as string[], dayAfter: row.day_after as Record<string, string[]>,
+    invalidatedAt: row.invalidated_at as string | null, restoredAt: row.restored_at as string | null,
+  }))
+}
+
 export async function publishPlanner(input: {
-  month: string; revision: number; portalRevision: string; monthRoster: Record<string, PublishedDuty[]>
+  month: string; revision: number; portalRevision: string; monthRoster: Record<string, PublishedDuty[]>; restoreRoomChangeIds?: string[]
 }): Promise<PlannerPublication> {
   if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(input.month)) throw new PlannerCloudError('Geçerli bir ay seçin.', 422)
-  const { data, error } = await client().rpc('publish_duty_planner', {
+  const { data, error } = await client().rpc('publish_duty_planner_v2', {
     p_month: input.month,
     p_draft_revision: revision(input.revision),
     p_portal_revision: input.portalRevision,
     p_month_duties: input.monthRoster,
+    p_restore_ids: input.restoreRoomChangeIds ?? [],
   })
   if (error) fail(error)
   if (!data?.payload?.plannerState || typeof data.portalRevision !== 'string' || typeof data.publishedAt !== 'string') throw new PlannerCloudError('Yayın sonucu doğrulanamadı. Güncel listeyi tekrar açın.', 503)

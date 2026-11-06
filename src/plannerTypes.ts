@@ -60,6 +60,7 @@ export interface WorkLocation {
 }
 
 export interface PlannerState {
+  assistantRegistry?: import('./assistantIdentity.js').AssistantRegistry
   assistants: string[]
   assistantRanks: AssistantRanks
   locations: WorkLocation[]

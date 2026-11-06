@@ -1,4 +1,4 @@
-import { personGroupId } from './person-history.js';
+import { personGroupId, personDutyActive } from './person-history.js';
 
 export const sourceValueSignature = value => JSON.stringify(value, (_key, item) =>
   item && typeof item === 'object' && !Array.isArray(item)
@@ -14,18 +14,17 @@ export function istanbulMonth(now = new Date()) {
   return `${parts.find(part => part.type === 'year').value}-${parts.find(part => part.type === 'month').value}`;
 }
 
-export function plannerSourceCutoff(server, now = new Date()) {
+export function plannerSourceCutoff(server) {
   const source = server?.portalSource;
   const from = validMonth(source?.fromMonth) ? source.fromMonth : '2026-11';
-  const current = validMonth(source?.currentMonth) ? source.currentMonth : istanbulMonth(now);
-  return `${from > current ? from : current}-01`;
+  return `${from}-01`;
 }
 
 /**
  * A save reply may arrive after another local edit. Adopt only fields owned by Asistan;
  * assignments, targets, membership, lifetimes and the pending local edit remain local.
  */
-export function mergePlannerSourceFields(local, server, now = new Date()) {
+export function mergePlannerSourceFields(local, server) {
   const result = copy(local);
   if (server?.portalSource?.version !== 1) return result;
   const people = new Map((server.people ?? []).map(person => [person.id, person]));
@@ -33,16 +32,26 @@ export function mergePlannerSourceFields(local, server, now = new Date()) {
     const canonical = people.get(person.id);
     if (!canonical) return person;
     person.name = canonical.name;
+    for (const key of ['portalIdentityId', 'rosterHistory']) {
+      if (Object.hasOwn(canonical, key)) person[key] = copy(canonical[key]);
+      else delete person[key];
+    }
     if (Object.hasOwn(canonical, 'groupHistory')) person.groupHistory = copy(canonical.groupHistory);
     else delete person.groupHistory;
     return person;
   });
+  const personIds = new Set(result.people.map(person => person.id));
+  if (server.portalSource.registryManaged) for (const person of server.people ?? []) if (!personIds.has(person.id)) result.people.push(copy(person));
   const groupIds = new Set(result.groups.map(group => group.id));
-  for (const group of server.groups ?? []) if (!groupIds.has(group.id)) {
-    result.groups.push(copy(group));
-    groupIds.add(group.id);
+  for (const group of server.groups ?? []) {
+    if (!groupIds.has(group.id)) { result.groups.push(copy(group));groupIds.add(group.id); }
+    else {
+      const current = result.groups.find(item => item.id === group.id);
+      if (Object.hasOwn(group, 'rankHistory')) current.rankHistory = copy(group.rankHistory);
+      else delete current.rankHistory;
+    }
   }
-  const cutoff = plannerSourceCutoff(server, now);
+  const cutoff = plannerSourceCutoff(server);
   const previousDay = new Date(Date.parse(`${cutoff}T00:00:00Z`) - 86400000).toISOString().slice(0, 10);
   const future = (server.rotations ?? []).filter(row => row.end >= cutoff)
     .map(row => ({ ...copy(row), start: row.start < cutoff ? cutoff : row.start }));
@@ -79,7 +88,8 @@ function monthPlanSource(state, month) {
     rotations: state.rotations.filter(row => row.start <= last && row.end >= first)
       .map(row => ({personId:row.personId,start:row.start < first ? first : row.start,end:row.end > last ? last : row.end,site:row.site,unit:row.unit}))
       .sort((a,b)=>sourceValueSignature(a).localeCompare(sourceValueSignature(b))),
-    groups: state.people.map(person => [person.id,personGroupId(person,month)]).sort((a,b)=>a[0].localeCompare(b[0])),
+    groups: state.people.filter(person => (person.from ?? '0001-01-01') <= last)
+      .map(person => [person.id,personGroupId(person,month),personDutyActive(person,first),personDutyActive(person,last)]).sort((a,b)=>a[0].localeCompare(b[0])),
   };
 }
 export function invalidateSourceCompletion(before, after, cutoffMonth) {

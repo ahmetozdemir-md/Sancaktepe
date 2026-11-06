@@ -251,3 +251,154 @@ test('invalid month, dates, sites and missing references cannot silently publish
   assert.equal(createPublicationPreview({}, portal, '2026-11').canPublish, false);
   assert.equal(createPublicationPreview(draft, {}, '2026-11').canPublish, false);
 });
+
+function recoveryFixture() {
+  const { draft, portal } = fixture();
+  draft.assignments = draft.assignments.filter(row => row.personId === 'ahmet');
+  const first = createPublicationPreview(draft, portal, '2026-11');
+  const published = applyPublication(portal, first, draft);
+  const removed = first.removedRoomAssignments.find(row => row.name === 'Ahmet Özdemir');
+  const change = { id: 'change-1', month: '2026-11', ...removed,
+    roomBefore: structuredClone(portal.manualAssignments[removed.date][removed.locationId]),
+    dayAfter: structuredClone(published.manualAssignments[removed.date]), invalidatedAt: null, restoredAt: null };
+  return { draft: { ...draft, assignments: [] }, portal: published, change };
+}
+
+test('a cancelled published duty offers a recorded old room but never restores without selection', () => {
+  const { draft, portal, change } = recoveryFixture();
+  const before = structuredClone(portal);
+  const preview = createPublicationPreview(draft, portal, '2026-11', { roomChanges: [change] });
+  assert.equal(preview.canPublish, true);
+  assert.equal(preview.restorableRoomAssignments.length, 1);
+  assert.equal(preview.restoredRoomAssignments.length, 0);
+  assert.equal(preview.nextManualAssignments['2026-11-03'].room.includes(change.name), false);
+  assert.deepEqual(portal, before);
+});
+
+test('only explicitly selected safe recovery is applied and caller edits to projected room data are ignored', () => {
+  const { draft, portal, change } = recoveryFixture();
+  const preview = createPublicationPreview(draft, portal, '2026-11', { roomChanges: [change], restoreRoomChangeIds: [change.id] });
+  assert.equal(preview.canPublish, true);
+  assert.equal(preview.restoredRoomAssignments.length, 1);
+  preview.nextManualAssignments['2026-11-03'].room = ['Injected'];
+  const applied = applyPublication(portal, preview, draft);
+  assert.deepEqual(applied.manualAssignments['2026-11-03'].room, ['Deniz', 'İsa', 'Ahmet Özdemir']);
+  assert.deepEqual(applied.specialistDutyRoster, portal.specialistDutyRoster);
+  assert.deepEqual(applied.dutyRoster['2026-12-03'], portal.dutyRoster['2026-12-03']);
+});
+
+test('recovery refuses stale manual-day snapshots and retired or already restored journal records', () => {
+  for (const mutate of [
+    ({ portal }) => { portal.manualAssignments['2026-11-03'].room.push('Other'); },
+    ({ change }) => { change.invalidatedAt = '2026-11-06T12:00:00Z'; },
+    ({ change }) => { change.restoredAt = '2026-11-06T12:00:00Z'; },
+  ]) {
+    const f = recoveryFixture(); mutate(f);
+    assert.equal(createPublicationPreview(f.draft, f.portal, '2026-11', { roomChanges: [f.change] }).restorableRoomAssignments.length, 0);
+  }
+});
+
+test('recovery refuses leave, another room or status placement even when a journal snapshot matches', () => {
+  for (const location of ['leave', 'room-two', 'post']) {
+    const { draft, portal, change } = recoveryFixture();
+    portal.manualAssignments['2026-11-03'][location] = [change.name];
+    change.dayAfter = structuredClone(portal.manualAssignments['2026-11-03']);
+    assert.equal(createPublicationPreview(draft, portal, '2026-11', { roomChanges: [change] }).restorableRoomAssignments.length, 0);
+  }
+});
+
+test('recovery refuses new same-day duty and a remaining previous-day duty at any hospital', () => {
+  for (const date of ['2026-11-02', '2026-11-03']) {
+    const { draft, portal, change } = recoveryFixture();
+    draft.assignments = [{ personId: 'ahmet', date, site: 'Çekmeköy' }];
+    assert.equal(createPublicationPreview(draft, portal, '2026-11', { roomChanges: [change] }).restorableRoomAssignments.length, 0);
+  }
+});
+
+test('recovery respects closed, not-yet-open, moved and non-normal rooms and excludes weekends', () => {
+  for (const mutate of [
+    f => { f.portal.locations[0].activeUntil = '2026-11-03'; },
+    f => { f.portal.locations[0].activeFrom = '2026-11-04'; },
+    f => { f.portal.locations[0].site = 'Feriha Öz'; },
+    f => { f.portal.locations[0].kind = 'leave'; },
+    f => { f.change.date = '2026-11-08'; f.change.dutyDate = '2026-11-07'; f.portal.manualAssignments[f.change.date] = f.change.dayAfter; },
+  ]) {
+    const f = recoveryFixture(); mutate(f);
+    assert.equal(createPublicationPreview(f.draft, f.portal, '2026-11', { roomChanges: [f.change] }).restorableRoomAssignments.length, 0);
+  }
+});
+
+test('recovery never invents provenance and rejects unknown, duplicate or stale selection IDs', () => {
+  const { draft, portal, change } = recoveryFixture();
+  assert.equal(createPublicationPreview(draft, portal, '2026-11').restorableRoomAssignments.length, 0);
+  for (const ids of [['unknown'], [change.id, change.id]]) {
+    const preview = createPublicationPreview(draft, portal, '2026-11', { roomChanges: [change], restoreRoomChangeIds: ids });
+    assert.equal(preview.canPublish, false);
+    assert.ok(preview.errors.some(row => row.code === 'invalid-room-restoration'));
+  }
+});
+
+test('two old rooms can be offered as alternatives but the same person cannot restore into both', () => {
+  const { draft, portal, change } = recoveryFixture();
+  portal.locations.push({ id: 'other-room', kind: 'normal', site: 'Sancaktepe', name: 'Diğer oda' });
+  const second = { ...change, id: 'change-2', locationId: 'other-room' };
+  const preview = createPublicationPreview(draft, portal, '2026-11', { roomChanges: [change, second], restoreRoomChangeIds: [change.id, second.id] });
+  assert.equal(preview.restorableRoomAssignments.length, 2);
+  assert.equal(preview.canPublish, false);
+  assert.ok(preview.errors.some(row => row.code === 'duplicate-room-restoration'));
+});
+
+test('recovery is month-scoped, name-canonical and indifferent to jsonb key ordering', () => {
+  const { draft, portal, change } = recoveryFixture();
+  change.name = '  ahmet   özdemir '; change.roomBefore = ['Ahmet Özdemir'];
+  change.dayAfter = Object.fromEntries(Object.entries(change.dayAfter).reverse());
+  const preview = createPublicationPreview(draft, portal, '2026-11', { roomChanges: [change, { ...change, id: 'other', month: '2026-10' }] });
+  assert.equal(preview.restorableRoomAssignments.length, 1);
+  assert.equal(preview.restorableRoomAssignments[0].name, 'Ahmet Özdemir');
+});
+
+test('known annual/excused planner leave blocks room recovery while duty exemption alone does not', () => {
+  for (const type of ['annual', 'excused', 'exempt']) {
+    const { draft, portal, change } = recoveryFixture();
+    draft.absences = [{ personId: 'ahmet', type, start: '2026-11-03', end: '2026-11-03' }];
+    const preview = createPublicationPreview(draft, portal, '2026-11', { roomChanges: [change] });
+    assert.equal(preview.restorableRoomAssignments.length, type === 'exempt' ? 1 : 0);
+  }
+});
+
+test('explicit master re-inclusion can publish a formerly archived assistant and cohort without rewriting history', () => {
+  const { draft, portal } = fixture();
+  draft.assignments = draft.assignments.filter(row => row.personId === 'ahmet');
+  draft.people[0].until = '2026-11-01';
+  draft.people[0].rosterHistory = [{ from: '2026-11', enabled: true }];
+  draft.groups[0].until = '2026-11';
+  const before = structuredClone(draft);
+  const preview = createPublicationPreview(draft, portal, '2026-11');
+  assert.equal(preview.canPublish, true, JSON.stringify(preview.errors));
+  assert.equal(preview.monthRoster['2026-11-02'][0].name, 'Ahmet Özdemir');
+  assert.deepEqual(draft, before);
+  assert.equal(preview.draftSnapshot.people[0].until, '2026-11-01');
+  assert.equal(preview.draftSnapshot.groups[0].until, '2026-11');
+});
+
+test('master disabling preserves stored duties but blocks publishing until the conflict is resolved', () => {
+  const { draft, portal } = fixture();
+  draft.people[0].rosterHistory = [{ from: '2026-11', enabled: false }];
+  const before = structuredClone(draft);
+  const preview = createPublicationPreview(draft, portal, '2026-11');
+  assert.equal(preview.canPublish, false);
+  assert.ok(preview.errors.some(row => row.code === 'inactive-person' && row.personId === 'ahmet'));
+  assert.deepEqual(draft, before);
+  assert.ok(draft.assignments.some(row => row.personId === 'ahmet' && row.date === '2026-11-02'));
+  assert.throws(() => applyPublication(portal, preview, draft), /Yayınlanamayan/);
+});
+
+test('a future master roster change does not retroactively disable the earlier publication month', () => {
+  const { draft, portal } = fixture();
+  draft.people[0].rosterHistory = [{ from: '2026-12', enabled: false }];
+  assert.equal(createPublicationPreview(draft, portal, '2026-11').canPublish, true);
+  draft.assignments = [{ personId: 'ahmet', date: '2026-12-07', site: 'Sancaktepe' }];
+  const december = createPublicationPreview(draft, portal, '2026-12');
+  assert.equal(december.canPublish, false);
+  assert.ok(december.errors.some(row => row.code === 'inactive-person' && row.personId === 'ahmet'));
+});

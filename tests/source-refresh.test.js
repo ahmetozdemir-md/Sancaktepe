@@ -82,10 +82,10 @@ test('a removed canonical group history cannot survive as a stale source overrid
   assert.equal(Object.hasOwn(mergePlannerSourceFields(local, server).people[0], 'groupHistory'), false);
 });
 
-test('cutoff uses the later source/current month and an Istanbul fallback at the UTC boundary', () => {
+test('linked past months stay managed across Istanbul month boundaries', () => {
   const now = new Date('2026-11-30T21:30:00Z');
   assert.equal(istanbulMonth(now), '2026-12');
-  assert.equal(plannerSourceCutoff({ portalSource: { fromMonth: '2026-11' } }, now), '2026-12-01');
+  assert.equal(plannerSourceCutoff({ portalSource: { fromMonth: '2026-11' } }, now), '2026-11-01');
   assert.equal(plannerSourceCutoff({ portalSource: { fromMonth: '2027-02', currentMonth: '2026-12' } }, now), '2027-02-01');
   assert.equal(plannerSourceCutoff({ portalSource: { fromMonth: '2026-11', currentMonth: '2026-11' } }, now), '2026-11-01');
 });

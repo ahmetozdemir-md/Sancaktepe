@@ -1,6 +1,7 @@
 export interface PlannerSourceWarning { code: string; message: string; personId?: string; month?: string; start?: string; end?: string }
 export interface PlannerSourceOptions { fromMonth: string; currentMonth: string; rosterPolicy: 'preserve-active' | 'portal-all' }
 export interface PlannerSourcePortal {
+  assistantRegistry?: import('./assistantIdentity.js').AssistantRegistry;
   assistants: string[];
   assistantRanks?: Record<string, number>;
   locations: Array<{ id: string; kind: string; site?: string; name?: string; activeFrom?: string; activeUntil?: string | null }>;

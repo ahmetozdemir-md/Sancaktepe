@@ -1,6 +1,7 @@
 /** Read-only Asistan master data projected into the rich planner's existing identities. */
 import { normalizePublicationName } from './month-publication.js';
-import { personGroupId } from '../public/nobet-planlayici/person-history.js';
+import { personGroupId, personDutyActive, groupActiveInMonth } from '../public/nobet-planlayici/person-history.js';
+import { assistantDutyEnabled, validateAssistantRegistry } from './assistantIdentity.js';
 import { isPostCallUnit } from '../public/nobet-planlayici/rotations.js';
 
 const SITES = new Set(['Sancaktepe', 'Feriha Öz', 'Çekmeköy']);
@@ -54,10 +55,9 @@ function subtractRanges(row, ranges) {
   });
   return pieces.map((piece, index) => ({ ...row, ...piece, id: index === 0 ? row.id : `${row.id}~${piece.start}` }));
 }
-function activeOnDay(person, groups, selectedDay) {
+function activeOnDay(person, groups, selectedDay, state) {
   const selectedMonth = selectedDay.slice(0, 7), group = groups.get(personGroupId(person, selectedMonth));
-  return person.from <= selectedDay && (!person.until || selectedDay < person.until)
-    && !!group && group.from <= selectedMonth && (!group.until || selectedMonth < group.until);
+  return personDutyActive(person, selectedDay) && !!group && groupActiveInMonth(state, group, selectedMonth);
 }
 
 /**
@@ -76,31 +76,8 @@ export function synchronizePlannerSource(draft, portal, options) {
     const item = { code, message, ...details }, key = signature(item);
     if (!warningKeys.has(key)) { warningKeys.add(key); warnings.push(item); }
   };
-  const cutoffMonth = options.fromMonth > options.currentMonth ? options.fromMonth : options.currentMonth;
+  const cutoffMonth = options.fromMonth;
   const cutoff = `${cutoffMonth}-01`;
-  const portalNames = indexNames(portal.assistants, value => value), draftNames = indexNames(state.people, value => value.name);
-  const resolved = new Map(), groups = new Map(state.groups.map(group => [group.id, group]));
-  for (const [key, people] of draftNames) {
-    const names = portalNames.get(key) ?? [];
-    if (!names.length && datesIn(bounds(cutoffMonth)).some(selectedDay => activeOnDay(people[0], groups, selectedDay))) {
-      warn('missing-source-person', `${people[0].name}: uygulamanın kişi listesinde aynı adla bulunamadı. İsim değiştiyse mevcut kişiyle eşleştirilmesi gerekiyor; otomatik tahmin yapılmadı.`, { personId: people[0].id });
-    }
-    if (people.length !== 1 || names.length > 1) {
-      if (names.length) warn('ambiguous-person', `${people[0].name}: aynı isim birden fazla kayda karşılık geliyor; eşleştirilmedi.`, { personId: people[0].id });
-      continue;
-    }
-    if (names.length === 1) { people[0].name = cleanName(names[0]); resolved.set(key, people[0]); }
-  }
-  const resolve = (name, selectedMonth) => {
-    if (!text(name)) { warn('invalid-source-person', `${selectedMonth}: rotasyonda geçerli bir asistan adı yok.`, { month: selectedMonth }); return null; }
-    const key = normalizePublicationName(name), names = portalNames.get(key) ?? [];
-    if (names.length !== 1) {
-      warn(names.length ? 'ambiguous-person' : 'unknown-source-person', `${selectedMonth}: ${cleanName(name)} uygulamanın kişi listesinde tekil olarak bulunamadı; rotasyonu alınmadı.`, { month: selectedMonth });
-      return null;
-    }
-    // The portal includes rotators and historical staff; preserve-active never adds/reactivates them.
-    return resolved.get(key) ?? null;
-  };
   const ownersByMonth = object(portal.locationOwnersByMonth) ? portal.locationOwnersByMonth : {};
   const poolByMonth = object(portal.postDutyPoolByMonth) ? portal.postDutyPoolByMonth : {};
   const sourceMonths = [...new Set([...Object.keys(ownersByMonth), ...Object.keys(poolByMonth)])]
@@ -108,6 +85,69 @@ export function synchronizePlannerSource(draft, portal, options) {
   const managedMonths = [...new Set([...Object.keys(state.months), ...sourceMonths])]
     .filter(value => month(value) && value >= cutoffMonth).sort();
   const replaceRanges = mergedRanges(managedMonths.map(bounds));
+  const portalNames = indexNames(portal.assistants, value => value), groups = new Map(state.groups.map(group => [group.id, group]));
+  const registry = portal.assistantRegistry ?? {};
+  if (portal.assistantRegistry !== undefined) {
+    const valid = validateAssistantRegistry(registry);
+    if (!valid.valid) throw new TypeError(valid.errors.join(' · '));
+  }
+  const identitiesByName = indexNames(Object.entries(registry), ([, entry]) => entry.name);
+  const linked = new Map(), reserved = new Map();
+  for (const person of state.people) {
+    if (Object.keys(registry).length && person.portalIdentityId) reserved.set(person.id, person.portalIdentityId);
+    for (const [identityId, entry] of Object.entries(registry)) if (person.id === identityId || person.id === entry.plannerPersonId) {
+      const previous = reserved.get(person.id);
+      reserved.set(person.id, reserved.has(person.id) && previous !== identityId ? false : identityId);
+    }
+  }
+  for (const [identityId, entry] of Object.entries(registry)) {
+    const candidates = state.people.filter(person => reserved.get(person.id) === identityId);
+    linked.set(identityId, candidates);
+    const sourceNames = portalNames.get(normalizePublicationName(entry.name)) ?? [];
+    if (candidates.length === 1 && sourceNames.length === 1) candidates[0].name = cleanName(sourceNames[0]);
+  }
+  const draftNames = indexNames(state.people, value => value.name);
+  const activeInMonth = (person, selectedMonth) => datesIn(bounds(selectedMonth)).some(selectedDay => activeOnDay(person, groups, selectedDay, state));
+  for (const [key, people] of draftNames) {
+    const names = portalNames.get(key) ?? [];
+    if (!names.length) for (const person of people) {
+      if (managedMonths.some(selectedMonth => activeInMonth(person, selectedMonth))) warn('missing-source-person', `${person.name}: uygulamanın kişi listesinde aynı adla bulunamadı. İsim değiştiyse mevcut kişiyle eşleştirilmesi gerekiyor; otomatik tahmin yapılmadı.`, { personId: person.id });
+    }
+    if (people.length === 1 && names.length === 1 && !reserved.has(people[0].id)) people[0].name = cleanName(names[0]);
+  }
+  const resolved = new Map();
+  const resolve = (name, selectedMonth) => {
+    if (!text(name)) { warn('invalid-source-person', `${selectedMonth}: rotasyonda geçerli bir asistan adı yok.`, { month: selectedMonth }); return null; }
+    const key = normalizePublicationName(name), cacheKey = `${selectedMonth}:${key}`;
+    if (resolved.has(cacheKey)) return resolved.get(cacheKey);
+    const finish = value => { resolved.set(cacheKey, value); return value; };
+    const names = portalNames.get(key) ?? [];
+    if (names.length !== 1) {
+      warn(names.length ? 'ambiguous-person' : 'unknown-source-person', `${selectedMonth}: ${cleanName(name)} uygulamanın kişi listesinde tekil olarak bulunamadı; rotasyonu alınmadı.`, { month: selectedMonth });
+      return finish(null);
+    }
+    const identities = identitiesByName.get(key) ?? [];
+    if (identities.length > 1) {
+      warn('ambiguous-person', `${selectedMonth}: ${names[0]} birden fazla ortak kimliğe bağlı; rotasyonu alınmadı.`, { month: selectedMonth });return finish(null);
+    }
+    if (identities.length === 1) {
+      const [identityId, entry] = identities[0];
+      if (assistantDutyEnabled(entry, selectedMonth) === false) return finish(null);
+      const exact = linked.get(identityId) ?? [];
+      if (exact.length > 1) { warn('ambiguous-person', `${names[0]}: ortak kimlik birden fazla nöbet kişisine bağlı; rotasyonu alınmadı.`, { month: selectedMonth });return finish(null); }
+      if (exact.length === 1) return finish(activeInMonth(exact[0], selectedMonth) ? exact[0] : null);
+      // A name is only a legacy bridge for an otherwise unbound, uniquely active person.
+      const fallback = (draftNames.get(key) ?? []).filter(person => !reserved.has(person.id) && activeInMonth(person, selectedMonth));
+      if (fallback.length === 1) { fallback[0].name = cleanName(names[0]);return finish(fallback[0]); }
+      if (fallback.length > 1) warn('ambiguous-person', `${names[0]}: aynı ayda birden fazla aktif nöbet kişisine karşılık geliyor; rotasyonu alınmadı.`, { month: selectedMonth });
+      else if (assistantDutyEnabled(entry, selectedMonth) === true) warn('unlinked-source-person', `${names[0]}: ortak kişi kaydı nöbet kişisiyle eşleşmedi; rotasyonu alınmadı.`, { month: selectedMonth });
+      return finish(null);
+    }
+    const fallback = (draftNames.get(key) ?? []).filter(person => !reserved.has(person.id) && activeInMonth(person, selectedMonth));
+    if (fallback.length === 1) { fallback[0].name = cleanName(names[0]);return finish(fallback[0]); }
+    if (fallback.length > 1) warn('ambiguous-person', `${names[0]}: aynı ayda birden fazla aktif nöbet kişisine karşılık geliyor; rotasyonu alınmadı.`, { month: selectedMonth });
+    return finish(null);
+  };
   const locationsById = new Map();
   for (const location of portal.locations.filter(object)) locationsById.set(location.id, [...(locationsById.get(location.id) ?? []), location]);
   const generated = [];
@@ -141,7 +181,7 @@ export function synchronizePlannerSource(draft, portal, options) {
     for (const person of state.people) {
       const claims = claimsByPerson.get(person.id) ?? [], segments = [], conflicts = [];
       for (const selectedDay of datesIn(range)) {
-        if (!activeOnDay(person, groups, selectedDay)) continue;
+        if (!activeOnDay(person, groups, selectedDay, state)) continue;
         const active = claims.filter(claim => claim.start <= selectedDay && selectedDay <= claim.end);
         if (!active.length) continue;
         const sites = [...new Set(active.map(claim => claim.site))];
@@ -172,5 +212,6 @@ export function synchronizePlannerSource(draft, portal, options) {
   generated.sort((a, b) => a.start.localeCompare(b.start) || a.personId.localeCompare(b.personId) || a.end.localeCompare(b.end));
   state.rotations = [...retained, ...generated];
   state.portalSource = { ...(object(state.portalSource) ? state.portalSource : {}), version: 1, fromMonth: options.fromMonth, rosterPolicy: options.rosterPolicy };
+  warnings.sort((a,b)=>(a.month??'').localeCompare(b.month??'')||(a.personId??'').localeCompare(b.personId??'')||a.code.localeCompare(b.code)||(a.start??'').localeCompare(b.start??'')||a.message.localeCompare(b.message,'tr'));
   return { state, changed: signature(state) !== signature(draft), warnings };
 }

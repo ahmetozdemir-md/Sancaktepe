@@ -21,6 +21,9 @@
 .duty-publish-content ul { margin: 8px 0 0; padding-left: 20px; line-height: 1.65; }
 .duty-publish-content li + li { margin-top: 5px; }
 .duty-publish-removals { margin: 16px 0; padding: 12px; border: 1px solid #e7d5a4; border-radius: 9px; background: #fff8e7; }
+.duty-publish-restorations { margin: 16px 0; padding: 12px; border: 1px solid #bed7c7; border-radius: 9px; background: #f0f8f1; }
+.duty-publish-restorations p { color: #557464; font-size: 12px; }
+.duty-publish-restorations input[type="checkbox"] { width: 18px; height: 18px; accent-color: #176e59; }
 .duty-publish-table { max-height: 240px; overflow: auto; }
 .duty-publish-table table { border-collapse: collapse; width: 100%; font-size: 12px; }
 .duty-publish-table th, .duty-publish-table td { border-bottom: 1px solid #eadfbf; padding: 7px 5px; text-align: left; vertical-align: top; }

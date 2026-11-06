@@ -1,5 +1,5 @@
 /** Pure adapter from the rich duty-planner draft to the published Asistan roster. */
-import { personGroupId } from '../public/nobet-planlayici/person-history.js';
+import { personGroupId, personDutyActive, groupActiveInMonth } from '../public/nobet-planlayici/person-history.js';
 const SITES = ['Sancaktepe', 'Feriha Öz', 'Çekmeköy'];
 const DAY = 86400000;
 const object = value => value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -26,7 +26,42 @@ function compareEntries(ranks = {}) {
 }
 
 function draftSnapshot(draft) {
-  return copy({ people: draft.people, groups: draft.groups, assignments: draft.assignments });
+  return copy({ people: draft.people, groups: draft.groups, assignments: draft.assignments, ...(Array.isArray(draft.absences) ? { absences: draft.absences } : {}) });
+}
+
+/** Only recorded removals with untouched daily placements can be offered back. */
+export function getRestorableRoomAssignments(portal, nextDutyRoster, month, roomChanges = [], draft = null) {
+  const locations = new Map((portal.locations ?? []).filter(object).map(row => [row.id, row]));
+  const names = new Map();
+  for (const name of portal.assistants ?? []) {
+    const key = normalizePublicationName(name);
+    names.set(key, [...(names.get(key) ?? []), name]);
+  }
+  const result = [], seen = new Set();
+  for (const row of Array.isArray(roomChanges) ? roomChanges : []) {
+    if (!object(row) || !text(row.id) || seen.has(row.id) || row.month !== month || row.invalidatedAt || row.restoredAt
+      || !validDate(row.date) || !validDate(row.dutyDate) || addDays(row.dutyDate, 1) !== row.date
+      || !row.dutyDate.startsWith(`${month}-`) || !text(row.name) || !text(row.locationId)
+      || !Array.isArray(row.roomBefore) || !row.roomBefore.every(text) || !object(row.dayAfter)) continue;
+    const location = locations.get(row.locationId), key = normalizePublicationName(row.name), currentNames = names.get(key) ?? [];
+    const personIds = new Set((draft?.people ?? []).filter(person => normalizePublicationName(person.name) === key).map(person => person.id));
+    if ((draft?.absences ?? []).some(absence => personIds.has(absence.personId) && ['annual', 'excused'].includes(absence.type) && absence.start <= row.date && absence.end >= row.date)) continue;
+    const weekday = new Date(`${row.date}T00:00:00Z`).getUTCDay();
+    if (currentNames.length !== 1 || location?.kind !== 'normal' || location.site !== row.site || weekday === 0 || weekday === 6
+      || (location.activeFrom && (!validDate(location.activeFrom) || location.activeFrom > row.date))
+      || (location.activeUntil && (!validDate(location.activeUntil) || location.activeUntil <= row.date))
+      || !row.roomBefore.some(name => normalizePublicationName(name) === key)) continue;
+    const currentDay = portal.manualAssignments[row.date];
+    if (!object(currentDay) || signature(currentDay) !== signature(row.dayAfter)) continue;
+    if (Object.values(currentDay).some(assigned => !Array.isArray(assigned) || !assigned.every(text)
+      || assigned.some(name => normalizePublicationName(name) === key))) continue;
+    if ([row.date, addDays(row.date, -1)].some(date => !Array.isArray(nextDutyRoster[date] ?? [])
+      || (nextDutyRoster[date] ?? []).some(duty => normalizePublicationName(duty?.name) === key))) continue;
+    seen.add(row.id);
+    result.push({ id: row.id, date: row.date, dutyDate: row.dutyDate, name: currentNames[0], locationId: row.locationId,
+      locationName: String(location.name ?? row.locationId), site: String(location.site ?? '') });
+  }
+  return result.sort((a, b) => a.date.localeCompare(b.date) || a.name.localeCompare(b.name, 'tr') || a.locationId.localeCompare(b.locationId));
 }
 
 /**
@@ -38,7 +73,8 @@ export function createPublicationPreview(draft, portal, month, options = {}) {
   const issue = (code, message, details = {}) => errors.push({ code, message, ...details });
   const result = {
     month, count: 0, changedDays: [], addedCount: 0, removedCount: 0,
-    removedRoomAssignments: [], warnings, errors, canPublish: false, hasChanges: false,
+    removedRoomAssignments: [], restorableRoomAssignments: [], restoredRoomAssignments: [], warnings, errors, canPublish: false, hasChanges: false,
+    roomChangesSnapshot: copy(Array.isArray(options.roomChanges) ? options.roomChanges : []), restoreRoomChangeIds: [], recoverySignature: '',
     monthRoster: {}, nextDutyRoster: {}, nextManualAssignments: {},
     portalSignature: signature(portal), draftSignature: '', draftSnapshot: null,
   };
@@ -90,9 +126,9 @@ export function createPublicationPreview(draft, portal, month, options = {}) {
       issue('invalid-assignment', 'Nöbetin tarihi veya hastanesi geçerli değil.', { date, personId }); continue;
     }
     const person = people.get(personId), group = person && groups.get(personGroupId(person, month));
-    if (!person || !group || !validDate(person.from) || person.from > date
-      || (person.until != null && (!validDate(person.until) || person.until <= date))
-      || typeof group.from !== 'string' || group.from > month || (group.until != null && group.until <= month)) {
+    if (!person || !group || !validDate(person.from) || !personDutyActive(person, date)
+      || (person.until != null && !validDate(person.until))
+      || typeof group.from !== 'string' || !groupActiveInMonth(draft, group, month)) {
       issue('inactive-person', `${person?.name ?? personId ?? 'Bilinmeyen kişi'} bu nöbet tarihinde aktif değil.`, { date, personId }); continue;
     }
     const key = normalizePublicationName(person.name), names = portalNames.get(key) ?? [];
@@ -169,8 +205,27 @@ export function createPublicationPreview(draft, portal, month, options = {}) {
       });
     }
   }
+  result.restorableRoomAssignments = getRestorableRoomAssignments(portal, result.nextDutyRoster, month, result.roomChangesSnapshot, draft);
+  const restoreIds = options.restoreRoomChangeIds ?? [];
+  if (!Array.isArray(restoreIds) || !restoreIds.every(text) || new Set(restoreIds).size !== restoreIds.length) {
+    issue('invalid-room-restoration', 'Geri konulacak çalışma atamalarını yeniden seçin.');
+  } else {
+    const available = new Map(result.restorableRoomAssignments.map(row => [row.id, row])), chosenDates = new Set();
+    for (const id of restoreIds) {
+      const row = available.get(id);
+      if (!row) { issue('invalid-room-restoration', 'Eski çalışma ataması artık güvenli biçimde geri konulamıyor. Önizlemeyi yenileyin.'); continue; }
+      const key = `${row.date}:${normalizePublicationName(row.name)}`;
+      if (chosenDates.has(key)) { issue('duplicate-room-restoration', `${row.name}: ${row.date} için yalnız bir çalışma yeri seçilebilir.`); continue; }
+      chosenDates.add(key);
+      result.restoreRoomChangeIds.push(id);
+      const day = result.nextManualAssignments[row.date] ??= {};
+      day[row.locationId] = [...(day[row.locationId] ?? []), row.name];
+      result.restoredRoomAssignments.push(row);
+    }
+  }
+  result.recoverySignature = signature({ roomChanges: result.roomChangesSnapshot, restoreIds: result.restoreRoomChangeIds });
   if (!selected.length && result.removedCount) warnings.push({ code: 'empty-month', message: 'Taslak boş: seçili ayın yayımlanmış nöbetleri temizlenecek.' });
-  result.hasChanges = result.changedDays.length > 0 || result.removedRoomAssignments.length > 0;
+  result.hasChanges = result.changedDays.length > 0 || result.removedRoomAssignments.length > 0 || result.restoredRoomAssignments.length > 0;
   result.canPublish = errors.length === 0;
   return result;
 }
@@ -182,7 +237,8 @@ export function applyPublication(portal, preview, currentDraft = null) {
   if (signature(portal) !== preview.portalSignature) throw new Error('Asistan sistemi önizlemeden sonra değişti. Yeniden önizleyip yayınlayın.');
   if (currentDraft && signature(draftSnapshot(currentDraft)) !== signature(preview.draftSnapshot)) throw new Error('Nöbet taslağı önizlemeden sonra değişti. Yeniden önizleyip yayınlayın.');
   // Recompute from the confirmed draft; do not trust caller-modified nextDutyRoster fields.
-  const checked = createPublicationPreview(preview.draftSnapshot, portal, preview.month);
+  if (signature({ roomChanges: preview.roomChangesSnapshot ?? [], restoreIds: preview.restoreRoomChangeIds ?? [] }) !== preview.recoverySignature) throw new Error('Geri dönüş önizlemesi değişti. Yeniden önizleyip yayınlayın.');
+  const checked = createPublicationPreview(preview.draftSnapshot, portal, preview.month, { roomChanges: preview.roomChangesSnapshot, restoreRoomChangeIds: preview.restoreRoomChangeIds });
   if (!checked.canPublish) throw new Error(checked.errors.map(item => item.message).join('\n'));
   return { ...copy(portal), dutyRoster: checked.nextDutyRoster, manualAssignments: checked.nextManualAssignments };
 }

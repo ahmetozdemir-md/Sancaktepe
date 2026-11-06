@@ -1,6 +1,6 @@
 /* Shared scheduling rules. Dates use UTC calendar arithmetic, never local DST. */
 import { coverageIssues, rulesEnabled, siteCoverage } from './capabilities.js';
-import { personAtMonth, personGroupId } from './person-history.js';
+import { personAtMonth, personGroupId, groupRankAt, personRosterEnabled, personDutyActive, groupActiveInMonth } from './person-history.js';
 const DAY = 86_400_000;
 const SITES = ['Sancaktepe', 'Feriha Öz', 'Çekmeköy'];
 
@@ -71,21 +71,21 @@ export function initialState() {
 
 export function activeGroups(state, month) {
   return (state.groups ?? [])
-    .filter(group => group.from <= month && (!group.until || month < group.until))
-    .slice().sort((a, b) => a.order - b.order || a.id.localeCompare(b.id));
+    .filter(group => groupActiveInMonth(state, group, month))
+    .slice().sort((a, b) => groupRankAt(a, month, a.order) - groupRankAt(b, month, b.order) || a.order - b.order || a.id.localeCompare(b.id));
 }
 
 export function activePeople(state, month) {
   const days = daysInMonth(month);
   const groups = new Set(activeGroups(state, month).map(group => group.id));
   return (state.people ?? []).filter(person => groups.has(personGroupId(person, month))
-    && person.from <= days.at(-1) && (!person.until || person.until > days[0]))
+    && person.from <= days.at(-1) && (personRosterEnabled(person, month) ?? (!person.until || person.until > days[0])))
     .map(person => personAtMonth(person, month));
 }
 
 export function rankOf(state, groupId, month) {
-  const index = activeGroups(state, month).findIndex(group => group.id === groupId);
-  return index < 0 ? 0 : index + 1;
+  const groups = activeGroups(state, month), index = groups.findIndex(group => group.id === groupId);
+  return index < 0 ? 0 : groupRankAt(groups[index], month, index + 1);
 }
 
 export function hasFullMonthTargetExemption(state, personId, month) {
@@ -114,10 +114,10 @@ export function targetFor(state, personId, month) {
   const begun = (state.targets ?? []).filter(item => item.from <= month);
   const latest = list => list.reduce((result, item) => !result || item.from >= result.from ? item : result, null);
   const active = item => !item.through || month <= item.through;
-  // An expired personal override returns to the current group target, never to an older personal override.
+  // Display seniority follows the portal; inherited planning settings stay with the original group until edited manually.
   const personal = latest(begun.filter(item => item.personId === personId));
   const target = personal && !personal.inherit && active(personal) ? personal
-    : latest(begun.filter(item => !item.personId && item.groupId === personGroupId(person, month) && active(item)));
+    : latest(begun.filter(item => !item.personId && item.groupId === person.groupId && active(item)));
   return target ? { weekday: target.weekday, weekend: target.weekend } : null;
 }
 
@@ -219,7 +219,7 @@ export function validateAssignment(state, assignment, ignoreId = null) {
   }
   if (!SITES.includes(site)) error('invalid-site', 'Geçerli bir hastane seçin.');
   const person = (state.people ?? []).find(item => item.id === personId);
-  if (!person || person.from > date || (person.until && date >= person.until)
+  if (!personDutyActive(person, date)
     || !activeGroups(state, date.slice(0, 7)).some(group => group.id === personGroupId(person, date.slice(0, 7)))) {
     error('inactive', 'Bu kişi seçilen tarihte aktif asistan listesinde değil.');
     return { errors, warnings };

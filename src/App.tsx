@@ -22,9 +22,13 @@ import type {
   WorkLocation,
   PlannerState,
 } from './plannerTypes'
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import './App.css'
 import type { PublishedPortalPayload } from './dutyPlannerCloud'
+import { readPortalState, readPortalRevision, isPortalAccessError, type PortalCloudSnapshot } from './portalCloudAccess'
+import { canStartPortalRefresh, canAdoptPortalRefresh, type PortalRefreshContext } from './portalRefreshGuard.js'
+import { AssistantIdentityControls } from './AssistantRegistryPanel'
+import { assistantDutyEnabled, assistantIdentityForName, ensureAssistantRegistry, renameAssistantInPlanner, renameAssistantBindings, setAssistantDutyEnabled, setAssistantArchived } from './assistantIdentity.js'
 import {
   isCloudWriteEnabled,
   isSupabaseAdminAuthRequired,
@@ -2179,6 +2183,7 @@ function sanitizePlannerState(parsed: Partial<PlannerState>, fallback: PlannerSt
   return {
     assistants,
     assistantRanks,
+    assistantRegistry: ensureAssistantRegistry(assistants, parsed.assistantRegistry, undefined, currentMonthISO).registry,
     locations,
     locationOwners: normalizedLocationOwners,
     locationOwnersByMonth: normalizedLocationOwnersByMonth,
@@ -2459,12 +2464,15 @@ function App() {
   const [assistantAccessPassword, setAssistantAccessPassword] = useState('')
   const [assistantAccessChecking, setAssistantAccessChecking] = useState(false)
   const [assistantAccessRemembered, setAssistantAccessRemembered] = useState(false)
+  const [registryMonth, setRegistryMonth] = useState(() => new Intl.DateTimeFormat('sv-SE', { timeZone: 'Europe/Istanbul', year: 'numeric', month: '2-digit' }).format(new Date()))
   const [assistantAccessBlockedUntil, setAssistantAccessBlockedUntil] = useState(0)
   const [assistantPasswordNew, setAssistantPasswordNew] = useState('')
   const [assistantPasswordConfirm, setAssistantPasswordConfirm] = useState('')
   const [assistantPasswordSaving, setAssistantPasswordSaving] = useState(false)
   const assistantLoginManuallyClearedRef = useRef(false)
-  const [data, setData] = useState<PlannerState>(() => safeReadState())
+  const portalEditVersionRef = useRef(0)
+  const [data, setDataState] = useState<PlannerState>(() => safeReadState())
+  const setData = useCallback<typeof setDataState>((update) => { portalEditVersionRef.current++; setDataState(update) }, [])
   const latestDataRef = useRef(data)
   const bulkImportBusyRef = useRef(false)
   const [bulkRecordBusy, setBulkRecordBusy] = useState(false)
@@ -2472,7 +2480,8 @@ function App() {
   const [libraryAdminOpened, setLibraryAdminOpened] = useState(false)
   const onLibraryBusyChange = useCallback((busy: boolean) => { libraryBusyRef.current = busy }, [])
   useEffect(() => { latestDataRef.current = data }, [data])
-  const [userBindings, setUserBindings] = useState<Record<string, string>>(() => safeReadUserBindings())
+  const [userBindings, setUserBindingsState] = useState<Record<string, string>>(() => safeReadUserBindings())
+  const setUserBindings = useCallback<typeof setUserBindingsState>((update) => { portalEditVersionRef.current++; setUserBindingsState(update) }, [])
   const [notice, setNotice] = useState<Notice | null>(null)
   const [cloudState, setCloudState] = useState<'checking' | 'ready' | 'offline' | 'error'>(
     isSupabaseConfigured ? 'checking' : 'offline',
@@ -2482,7 +2491,16 @@ function App() {
       ? 'Bulut bağlantısı kontrol ediliyor...'
       : 'Bulut kaydı kapalı',
   )
-  const [isCloudSaving, setIsCloudSaving] = useState(false)
+  const [isCloudSaving, setIsCloudSavingState] = useState(false)
+  const cloudSavingRef = useRef(false)
+  const setIsCloudSaving = useCallback((saving: boolean) => { cloudSavingRef.current = saving; setIsCloudSavingState(saving) }, [])
+  const [portalHasSnapshot, setPortalHasSnapshot] = useState(false)
+  const [portalReadPending, setPortalReadPending] = useState(false)
+  const [portalLastCheckedAt, setPortalLastCheckedAt] = useState<string | null>(null)
+  const [portalRefreshError, setPortalRefreshError] = useState('')
+  const [portalRefreshNonce, setPortalRefreshNonce] = useState(0)
+  const portalRefreshPromise = useRef<Promise<boolean> | null>(null)
+  const portalAuthExpiredRef = useRef(false)
   const [cloudLastSavedAt, setCloudLastSavedAt] = useState<string | null>(null)
   const cloudHydratedRef = useRef(false)
   const cloudPayloadRef = useRef('')
@@ -2509,7 +2527,8 @@ function App() {
   const [newLocationName, setNewLocationName] = useState('')
 
   const [ownersMonth, setOwnersMonth] = useState(currentMonthISO)
-  const [ownersEditMode, setOwnersEditMode] = useState(false)
+  const [ownersEditMode, setOwnersEditModeState] = useState(false)
+  const setOwnersEditMode = useCallback<typeof setOwnersEditModeState>((update) => { portalEditVersionRef.current++; setOwnersEditModeState(update) }, [])
   const [ownersWorking, setOwnersWorking] = useState<LocationOwners>({})
   const [postDutyPoolWorking, setPostDutyPoolWorking] = useState<string[]>([])
   const [postDutyPoolDraft, setPostDutyPoolDraft] = useState('')
@@ -2560,7 +2579,8 @@ function App() {
   const [plannerDraftAssignments, setPlannerDraftAssignments] = useState<ManualAssignments>({})
   const [plannerDraftRotatorAssignments, setPlannerDraftRotatorAssignments] =
     useState<RotatorAssignments>({})
-  const [plannerEditModes, setPlannerEditModes] = useState<Record<string, boolean>>({})
+  const [plannerEditModes, setPlannerEditModesState] = useState<Record<string, boolean>>({})
+  const setPlannerEditModes = useCallback<typeof setPlannerEditModesState>((update) => { portalEditVersionRef.current++; setPlannerEditModesState(update) }, [])
   const [rotatorDrafts, setRotatorDrafts] = useState<Record<string, string>>({})
 
   useEffect(() => {
@@ -2896,6 +2916,86 @@ function App() {
   )
   const isSecureCloudWriteUnlocked = !isSupabaseAdminAuthRequired || isAdminCloudAuthVerified
 
+  const portalAccessMode = isAdminCloudAuthVerified ? 'admin' : assistantAccessRemembered ? 'assistant' : ''
+  const portalViewRef = useRef<PortalRefreshContext>({ accessMode: '', role: '', hydrated: false, revision: null, payload: '', savedPayload: '', editVersion: 0, visible: true, saving: false, dutyPlannerOpen: false, ownersEditMode: false, plannerEditing: false, bulkBusy: false, libraryBusy: false })
+  useLayoutEffect(() => {
+    portalViewRef.current = { accessMode: portalAccessMode, role: session?.role ?? '', hydrated: cloudHydratedRef.current, revision: cloudRevisionRef.current, payload: cloudPayload, savedPayload: cloudPayloadRef.current, editVersion: portalEditVersionRef.current, visible: true, saving: isCloudSaving, dutyPlannerOpen, ownersEditMode, plannerEditing: Object.values(plannerEditModes).some(Boolean), bulkBusy: bulkImportBusyRef.current, libraryBusy: libraryBusyRef.current }
+  }, [portalAccessMode, session, cloudPayload, isCloudSaving, dutyPlannerOpen, ownersEditMode, plannerEditModes])
+  const portalRefreshContext = useCallback((): PortalRefreshContext => ({
+    ...portalViewRef.current, hydrated: cloudHydratedRef.current, revision: cloudRevisionRef.current,
+    savedPayload: cloudPayloadRef.current, editVersion: portalEditVersionRef.current,
+    saving: cloudSavingRef.current, bulkBusy: bulkImportBusyRef.current, libraryBusy: libraryBusyRef.current,
+    visible: document.visibilityState === 'visible',
+  }), [])
+  const applyPortalSnapshot = useCallback((snapshot: PortalCloudSnapshot<RemotePortalPayload>) => {
+    const payload = snapshot.payload
+    if (!payload.plannerState || typeof payload.plannerState !== 'object') throw new Error('Çevrimiçi liste kaydı okunamadı. Yerel kayıtla değiştirilmedi.')
+    const nextPlannerState = sanitizePlannerState(payload.plannerState as Partial<PlannerState>, buildFallbackState())
+    const nextBindings = sanitizeUserBindings(payload.userBindings)
+    cloudPayloadRef.current = JSON.stringify(buildRemotePayload(nextPlannerState, nextBindings))
+    cloudRevisionRef.current = snapshot.updatedAt
+    cloudHydratedRef.current = true
+    cloudCanWriteRef.current = isCloudWriteEnabled && adminCloudWriteUnlockedRef.current && portalViewRef.current.role === 'admin'
+    latestDataRef.current = nextPlannerState
+    setDataState(nextPlannerState)
+    setUserBindingsState(nextBindings)
+    setPortalHasSnapshot(true)
+    setCloudLastSavedAt(snapshot.updatedAt)
+    setCloudState('ready')
+    setCloudStateText(isCloudWriteEnabled ? adminCloudWriteUnlockedRef.current ? 'Bulut kaydı aktif.' : CLOUD_AUTH_LOCKED_TEXT : CLOUD_READ_ONLY_TEXT)
+  }, [])
+  const refreshPublishedPortal = useCallback(async (initial = false): Promise<boolean> => {
+    if (portalRefreshPromise.current) {
+      const result = await portalRefreshPromise.current
+      if (cloudHydratedRef.current || !portalRefreshContext().accessMode) return result
+    }
+    const start = portalRefreshContext()
+    if (!isSupabaseConfigured || !canStartPortalRefresh(start)) return false
+    const token = start.accessMode === 'assistant' ? safeReadAssistantAccessToken() : ''
+    if (!start.hydrated) { setPortalReadPending(true); setCloudState('checking'); setCloudStateText('Çevrimiçi liste yükleniyor…') }
+    const run = async () => {
+      try {
+        if (start.hydrated && !initial) {
+          const revision = await readPortalRevision(token)
+          if (!canAdoptPortalRefresh(start, portalRefreshContext())) return false
+          if (revision?.updatedAt === start.revision) {
+            setPortalLastCheckedAt(new Date().toISOString()); setPortalRefreshError('')
+            setCloudState('ready')
+            setCloudStateText(isCloudWriteEnabled ? adminCloudWriteUnlockedRef.current ? 'Bulut kaydı aktif.' : CLOUD_AUTH_LOCKED_TEXT : CLOUD_READ_ONLY_TEXT)
+            return true
+          }
+        }
+        const snapshot = await readPortalState<RemotePortalPayload>(token)
+        if (!canAdoptPortalRefresh(start, portalRefreshContext())) return false
+        if (!snapshot) throw new Error('Çevrimiçi liste bulunamadı. Yerel örnek veriyle değiştirilmedi.')
+        applyPortalSnapshot(snapshot)
+        setPortalLastCheckedAt(new Date().toISOString())
+        setPortalRefreshError('')
+        return true
+      } catch (error) {
+        const current = portalRefreshContext()
+        if (start.accessMode !== current.accessMode || token !== (current.accessMode === 'assistant' ? safeReadAssistantAccessToken() : '')) return false
+        const message = error instanceof Error ? error.message : 'Liste yenilenemedi.'
+        setPortalRefreshError(message)
+        if (isPortalAccessError(error)) {
+          cloudCanWriteRef.current = false
+          setCloudState('error'); setCloudStateText('Liste erişimi için yeniden giriş gerekli.')
+          if (start.accessMode === 'assistant') {
+            storeAssistantAccessToken(''); setAssistantAccessRemembered(false); setSession(null); setLoginView('assistant-password'); setAssistantUserPickerOpen(false)
+            setNotice({ type: 'warn', text: 'Cihaz doğrulaması sona erdi. Güncel asistan şifresiyle yeniden giriş yap.' })
+          } else {
+            portalAuthExpiredRef.current = true
+            adminCloudWriteUnlockedRef.current = false; setIsAdminCloudAuthVerified(false); setAdminCloudAuthStatus('signed-out'); setAdminCloudAuthMessage('Admin oturumunu yeniden doğrula. Kaydedilmemiş düzenlemelerin korunuyor.')
+          }
+        } else if (!current.hydrated) { setCloudState('error'); setCloudStateText(message) }
+        return false
+      } finally { setPortalReadPending(false); portalRefreshPromise.current = null }
+    }
+    const pending = run()
+    portalRefreshPromise.current = pending
+    return pending
+  }, [applyPortalSnapshot, portalRefreshContext])
+
   const handleDutyPlannerPublished = useCallback((payload: PublishedPortalPayload, revision: string) => {
     const nextPlannerState = payload.plannerState as PlannerState
     const nextBindings = sanitizeUserBindings(payload.userBindings)
@@ -2905,8 +3005,12 @@ function App() {
     cloudCanWriteRef.current = isCloudWriteEnabled && adminCloudWriteUnlockedRef.current
     if (cloudSaveTimerRef.current) clearTimeout(cloudSaveTimerRef.current)
     cloudSaveTimerRef.current = null
-    setData(nextPlannerState)
-    setUserBindings(nextBindings)
+    latestDataRef.current = nextPlannerState
+    setDataState(nextPlannerState)
+    setUserBindingsState(nextBindings)
+    setPortalHasSnapshot(true)
+    setPortalLastCheckedAt(new Date().toISOString())
+    setPortalRefreshError('')
     setCloudLastSavedAt(revision)
     setCloudState('ready')
     setCloudStateText(isCloudWriteEnabled ? 'Bulut kaydı aktif.' : CLOUD_READ_ONLY_TEXT)
@@ -2914,6 +3018,7 @@ function App() {
 
   const closeDutyPlanner = useCallback(() => {
     setDutyPlannerOpen(false)
+    setPortalRefreshNonce(value => value + 1)
     const url = new URL(window.location.href)
     url.searchParams.delete('module')
     window.history.replaceState(null, '', `${url.pathname}${url.search}${url.hash}`)
@@ -3032,6 +3137,7 @@ function App() {
       setIsAdminCloudAuthVerified(true)
       setAdminCloudAuthStatus('signed-in')
       setAdminCloudAuthMessage('Güvenli admin oturumu aktif.')
+      if (portalAuthExpiredRef.current) { portalAuthExpiredRef.current = false; setCloudState('ready') }
       if (email) {
         setAdminCloudAuthEmail(email)
       }
@@ -3131,129 +3237,34 @@ function App() {
   }, [activePlannerDay, plannerMonth])
 
   useEffect(() => {
-    let cancelled = false
-
-    const loadCloudState = async () => {
-      if (!isSupabaseConfigured || !supabase) {
-        cloudHydratedRef.current = true
-        cloudCanWriteRef.current = false
-        setCloudState('offline')
-        setCloudStateText('Bulut kaydı kapalı (Supabase ayarı eksik).')
-        return
-      }
-
-      setCloudState('checking')
-      setCloudStateText('Bulut verisi yükleniyor...')
-
-      const { data: row, error } = await supabase
-        .from(REMOTE_STATE_TABLE)
-        .select('payload, updated_at')
-        .eq('id', REMOTE_STATE_ROW_ID)
-        .maybeSingle()
-
-      if (cancelled) {
-        return
-      }
-
-      if (error) {
-        cloudHydratedRef.current = true
-        cloudCanWriteRef.current = false
-        setCloudState('error')
-        setCloudStateText(CLOUD_SAFE_GUARD_TEXT)
-        return
-      }
-
-      const fallback = buildFallbackState()
-      const currentSnapshot = {
-        plannerState: data,
-        userBindings,
-      }
-
-      if (row?.payload && typeof row.payload === 'object') {
-        const payload = row.payload as RemotePortalPayload
-        const nextPlannerState =
-          payload.plannerState && typeof payload.plannerState === 'object'
-            ? sanitizePlannerState(payload.plannerState as Partial<PlannerState>, fallback)
-            : data
-        const nextUserBindings = sanitizeUserBindings(payload.userBindings)
-
-        const syncedPayload = JSON.stringify({
-          plannerState: nextPlannerState,
-          userBindings: nextUserBindings,
-        })
-
-        cloudPayloadRef.current = syncedPayload
-        cloudHydratedRef.current = true
-        cloudCanWriteRef.current = isCloudWriteEnabled && adminCloudWriteUnlockedRef.current
-        cloudRevisionRef.current = typeof row.updated_at === 'string' && row.updated_at ? row.updated_at : null
-        setData(nextPlannerState)
-        setUserBindings(nextUserBindings)
-        setCloudState('ready')
-        setCloudStateText(
-          !isCloudWriteEnabled
-            ? CLOUD_READ_ONLY_TEXT
-            : adminCloudWriteUnlockedRef.current
-              ? 'Bulut kaydı aktif.'
-              : CLOUD_AUTH_LOCKED_TEXT,
-        )
-        if (typeof row.updated_at === 'string' && row.updated_at) {
-          setCloudLastSavedAt(row.updated_at)
-        }
-        return
-      }
-
-      if (!isCloudWriteEnabled || !adminCloudWriteUnlockedRef.current) {
-        cloudPayloadRef.current = JSON.stringify(currentSnapshot)
-        cloudHydratedRef.current = true
-        cloudCanWriteRef.current = false
-        cloudRevisionRef.current = null
-        setCloudState('ready')
-        setCloudStateText(isCloudWriteEnabled ? CLOUD_AUTH_LOCKED_TEXT : CLOUD_READ_ONLY_TEXT)
-        return
-      }
-
-      const seedTimestamp = new Date().toISOString()
-      const { error: seedError } = await supabase.from(REMOTE_STATE_TABLE).upsert(
-        {
-          id: REMOTE_STATE_ROW_ID,
-          payload: currentSnapshot,
-          updated_at: seedTimestamp,
-        },
-        { onConflict: 'id' },
-      )
-
-      if (cancelled) {
-        return
-      }
-
-      if (seedError) {
-        cloudHydratedRef.current = true
-        cloudCanWriteRef.current = false
-        setCloudState('error')
-        setCloudStateText('Bulut tablosu hazır değil veya yazılamıyor. SQL kurulumunu tamamlayıp yenile.')
-        return
-      }
-
-      cloudPayloadRef.current = JSON.stringify(currentSnapshot)
-      cloudHydratedRef.current = true
-      cloudCanWriteRef.current = true
-      cloudRevisionRef.current = seedTimestamp
-      setCloudState('ready')
-      setCloudStateText(isCloudWriteEnabled ? 'Bulut kaydı aktif.' : CLOUD_READ_ONLY_TEXT)
-      setCloudLastSavedAt(seedTimestamp)
+    if (!isSupabaseConfigured) {
+      cloudHydratedRef.current = true; cloudCanWriteRef.current = false
+      setCloudState('offline'); setCloudStateText('Bulut kaydı kapalı (Supabase ayarı eksik).')
+      return
     }
-
-    void loadCloudState()
-
-    return () => {
-      cancelled = true
+    if (!portalAccessMode) {
+      cloudCanWriteRef.current = false
+      if (!cloudHydratedRef.current) { setCloudState('checking'); setCloudStateText('Liste için giriş gerekli.') }
+      return
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+    const refresh = () => { void refreshPublishedPortal(!cloudHydratedRef.current) }
+    refresh()
+    const timer = window.setInterval(refresh, 30_000)
+    window.addEventListener('focus', refresh)
+    const visible = () => { if (document.visibilityState === 'visible') refresh() }
+    document.addEventListener('visibilitychange', visible)
+    return () => { window.clearInterval(timer); window.removeEventListener('focus', refresh); document.removeEventListener('visibilitychange', visible) }
+  }, [portalAccessMode, portalRefreshNonce, refreshPublishedPortal])
+
+  useEffect(() => {
+    if (session?.role !== 'admin') cloudCanWriteRef.current = false
+    else if (portalHasSnapshot && isSecureCloudWriteUnlocked && cloudState === 'ready') cloudCanWriteRef.current = isCloudWriteEnabled && adminCloudWriteUnlockedRef.current
+  }, [session, portalHasSnapshot, isSecureCloudWriteUnlocked, cloudState])
 
   useEffect(() => {
     if (
       dutyPlannerOpen ||
+      session?.role !== 'admin' ||
       !isSupabaseConfigured ||
       !supabase ||
       !cloudHydratedRef.current ||
@@ -3368,7 +3379,7 @@ function App() {
         cloudSaveTimerRef.current = null
       }
     }
-  }, [cloudPayload, dutyPlannerOpen])
+  }, [cloudPayload, dutyPlannerOpen, isAdminCloudAuthVerified, session, cloudState, setIsCloudSaving])
 
   useEffect(() => {
     if (
@@ -3427,7 +3438,7 @@ function App() {
       }
       return next
     })
-  }, [data.assistants])
+  }, [data.assistants, setUserBindings])
 
   useEffect(() => {
     if (loginView !== 'assistant' && assistantUserPickerOpen) {
@@ -3436,7 +3447,7 @@ function App() {
   }, [assistantUserPickerOpen, loginView])
 
   useEffect(() => {
-    if (dutyPlannerOpen) return
+    if (dutyPlannerOpen || !cloudHydratedRef.current || portalRefreshPromise.current || latestDataRef.current.weekStartISO === currentWeekStartISO) return
     setData((previous) =>
       previous.weekStartISO === currentWeekStartISO
         ? previous
@@ -3445,7 +3456,7 @@ function App() {
             weekStartISO: currentWeekStartISO,
           },
     )
-  }, [currentWeekStartISO, dutyPlannerOpen])
+  }, [currentWeekStartISO, dutyPlannerOpen, cloudLastSavedAt, portalReadPending, portalLastCheckedAt, setData])
 
   useEffect(() => {
     if (!session) {
@@ -3948,6 +3959,7 @@ function App() {
         setIsAdminCloudAuthVerified(true)
         setAdminCloudAuthStatus('signed-in')
         setAdminCloudAuthMessage('Güvenli admin oturumu aktif.')
+        if (portalAuthExpiredRef.current) { portalAuthExpiredRef.current = false; setCloudState('ready') }
         setAdminCloudAuthEmail(email)
       }
     }
@@ -4047,11 +4059,6 @@ function App() {
 
     const selectedAssistantName = matchedAssistantAccount.assistantName
     const selectedUsername = matchedAssistantAccount.username
-
-    setUserBindings((previous) => ({
-      ...previous,
-      [selectedUsername]: selectedAssistantName,
-    }))
 
     setSession({
       role: 'assistant',
@@ -5125,11 +5132,16 @@ function App() {
         [candidate]: toSafeSeniorityLevel(assistantRankInput, 1),
       })
 
+      const registry = ensureAssistantRegistry(nextAssistants, previous.assistantRegistry, undefined, currentMonthISO).registry
+      const identity = assistantIdentityForName(registry, candidate)
+      const nextRegistry = identity?.archived ? setAssistantArchived(registry, identity.id, false, currentMonthISO) : registry
+
       showSuccess(`${candidate} ${assistantRankInput}. kıdem olarak eklendi.`)
       return {
         ...previous,
         assistants: nextAssistants,
         assistantRanks: nextAssistantRanks,
+        assistantRegistry: nextRegistry,
       }
     })
 
@@ -5352,6 +5364,8 @@ function App() {
     }
 
     setData((previous) => {
+      const registry = ensureAssistantRegistry(previous.assistants, previous.assistantRegistry, undefined, currentMonthISO).registry
+      const identity = assistantIdentityForName(registry, name)
       const remainingAssistants = previous.assistants.filter((assistant) => assistant !== name)
       const nextAssistantRanks = compactAssistantRanks(
         remainingAssistants,
@@ -5387,6 +5401,7 @@ function App() {
       return {
         ...previous,
         assistants: remainingAssistants,
+        assistantRegistry: identity ? setAssistantArchived(registry, identity.id, true, currentMonthISO) : registry,
         assistantRanks: nextAssistantRanks,
         locationOwners: nextOwners,
         locationOwnersByMonth: nextOwnersByMonth,
@@ -5401,6 +5416,24 @@ function App() {
         Object.entries(previous).filter(([, assistantName]) => assistantName !== name),
       ),
     )
+  }
+
+  const changeAssistantDuty = (identityId: string, enabled: boolean) => {
+    const registry = ensureAssistantRegistry(data.assistants, data.assistantRegistry, undefined, currentMonthISO).registry
+    const nextRegistry = setAssistantDutyEnabled(registry, identityId, enabled, registryMonth)
+    setData(previous => ({ ...previous, assistantRegistry: nextRegistry }))
+    showSuccess(`${registry[identityId].name} · ${registryMonth} için ${enabled ? 'nöbete dahil edildi' : 'nöbet listesinden çıkarıldı'}. Önceki kayıtlar korundu.`)
+  }
+
+  const renameSharedAssistant = async (identityId: string, name: string) => {
+    if (!(await createPreChangeBackup('before-assistant-rename', 'assistant-rename'))) throw new Error('İsim değişikliği öncesinde yedek alınamadı.')
+    const current = latestDataRef.current
+    const oldName = current.assistantRegistry?.[identityId]?.name
+    if (!oldName) throw new Error('Kişi kaydı yenilendi. Tekrar dene.')
+    const next = renameAssistantInPlanner(current, identityId, name)
+    setData(next)
+    setUserBindings(previous => renameAssistantBindings(previous, oldName, name))
+    showSuccess('İsim, geçmiş kayıtlar ve nöbet programındaki kişi kimliği korunarak güncellendi.')
   }
 
   const addDutyPerson = (dayKey: string) => {
@@ -7702,7 +7735,10 @@ function App() {
             </div>
           ) : null}
 
-          {loginView === 'assistant' ? (
+          {loginView === 'assistant' && isSupabaseConfigured && (!portalHasSnapshot || portalReadPending) ? (
+            <div className="assistant-device-status" role="status"><p>{portalRefreshError || 'Güncel asistan listesi yükleniyor…'}</p><button type="button" className="secondary" onClick={() => { void refreshPublishedPortal(true) }}>Yeniden dene</button></div>
+          ) : null}
+          {loginView === 'assistant' && (!isSupabaseConfigured || portalHasSnapshot && !portalReadPending) ? (
             <>
               <div className="assistant-device-status">
                 <div>
@@ -7822,11 +7858,16 @@ function App() {
     )
   }
 
-  if (session.role === 'admin' && dutyPlannerOpen) {
-    if (!isSecureCloudWriteUnlocked || cloudState !== 'ready' || isCloudSaving) {
-      return <section className="page-shell card"><h1>Nöbet planlayıcı</h1><p>{cloudState === 'error' ? cloudStateText : 'Çevrimiçi kayıtlar ve admin girişi kontrol ediliyor…'}</p><button type="button" onClick={closeDutyPlanner}>Çalışma listesine dön</button></section>
-    }
+  if (session.role === 'admin' && dutyPlannerOpen && portalHasSnapshot) {
+    // Keep the frame and any pending planner edits mounted during background/auth changes.
     return <Suspense fallback={<section className="page-shell card"><p>Nöbet planlayıcı açılıyor…</p></section>}><DutyPlannerPortal onClose={closeDutyPlanner} onPublished={handleDutyPlannerPublished} /></Suspense>
+  }
+
+  if (isSupabaseConfigured && (!portalHasSnapshot || !portalAccessMode || session.role === 'admin' && !isSecureCloudWriteUnlocked)) {
+    return <section className="page-shell card" aria-live="polite"><h1>Çalışma listesi</h1><p>{portalRefreshError || (!portalAccessMode ? 'Liste için girişini yeniden doğrulamalısın.' : 'Çevrimiçi liste yükleniyor…')}</p><div className="login-actions"><button type="button" onClick={() => { void refreshPublishedPortal(true) }}>Yeniden dene</button>{session.role === 'admin' ? <button type="button" className="secondary" onClick={() => { setSession(null); setLoginView('admin') }}>Admin girişini yenile</button> : null}{portalHasSnapshot && session.role === 'admin' ? <button type="button" className="secondary" onClick={() => {
+      const url = URL.createObjectURL(new Blob([JSON.stringify(buildRemotePayload(data, userBindings), null, 2)], { type: 'application/json' }))
+      const link = document.createElement('a'); link.href = url; link.download = 'calisma-listesi-kaydedilmemis-yedek.json'; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000)
+    }}>Yerel düzenlemeyi yedekle</button> : null}</div><p className="hint-text">Kaydedilmemiş düzenlemelerin bu pencerede korunur.</p>{appFooter}</section>
   }
 
   if (session.role === 'admin' && plannerWeeklyExportOpen) {
@@ -7942,6 +7983,10 @@ function App() {
         </div>
 
         <div className="top-controls">
+          {isSupabaseConfigured ? <div className={`portal-read-status${portalRefreshError ? ' has-error' : ''}`} role="status" title={portalRefreshError || 'Yayınlanan liste açıkken otomatik kontrol edilir.'}>
+            <span>{portalRefreshError ? 'Yenileme bekliyor' : portalLastCheckedAt ? `Son kontrol: ${new Date(portalLastCheckedAt).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })}` : 'Liste kontrol ediliyor…'}</span>
+            <button type="button" onClick={() => { void refreshPublishedPortal().then(ok => { if (!ok && !canStartPortalRefresh(portalRefreshContext())) setPortalRefreshError('Açık düzenleme veya kayıt tamamlandığında liste yeniden kontrol edilecek.') }) }} aria-label="Yayınlanan listeyi yeniden kontrol et">Yenile</button>
+          </div> : null}
           {session.role === 'admin' ? (
             <>
               <div className="session-role">
@@ -8268,7 +8313,7 @@ function App() {
                 <span className="assistant-count-pill">{data.assistants.length} kişi</span>
               </div>
               <p className="subtext">
-                Eklerken kıdem seçilir. Üst kıdem boş kalırsa alt kıdemler otomatik bir üst kıdeme taşınır.
+                Eklerken kıdem seçilir. Nöbete dahil olanları ay bazında seçebilirsin; önceki kayıtlar korunur.
               </p>
 
               <div className="form-row assistant-add-row">
@@ -8293,6 +8338,7 @@ function App() {
               </div>
 
               <p className="hint-text">Asistan çıkarma işlemi Toplu Veri Girişi → Kayıt Yönetimi bölümündedir.</p>
+              <label className="registry-month-control"><span>Nöbet listesi ayı</span><input type="month" value={registryMonth} onInput={event => { if (isValidMonthISO(event.currentTarget.value)) setRegistryMonth(event.currentTarget.value) }} onChange={event => { if (isValidMonthISO(event.target.value)) setRegistryMonth(event.target.value) }} /></label>
               {assistantsBySeniority.map((group) => (
                 <section key={`assistant-rank-group-${group.level}`} className="assistant-rank-group">
                   <header className="assistant-rank-head">
@@ -8301,11 +8347,13 @@ function App() {
                   </header>
                   {group.names.length ? (
                     <div className="assistant-chip-grid">
-                      {group.names.map((assistant) => (
-                        <div key={assistant} className="assistant-chip assistant-chip-static">
-                          <span className="assistant-chip-name">{assistant}</span>
-                        </div>
-                      ))}
+                      {group.names.map((assistant) => {
+                        const identity = assistantIdentityForName(data.assistantRegistry ?? {}, assistant)
+                        return <article key={identity?.id ?? assistant} className="assistant-chip assistant-identity-card">
+                          <strong className="assistant-chip-name">{assistant}</strong>
+                          {identity ? <AssistantIdentityControls id={identity.id} name={assistant} dutyEnabled={assistantDutyEnabled(identity, registryMonth) ?? false} archived={identity.archived} disabled={!isSecureCloudWriteUnlocked || isCloudSaving || cloudState !== 'ready' || ownersEditMode || Object.values(plannerEditModes).some(Boolean)} onDutyChange={changeAssistantDuty} onRename={renameSharedAssistant} /> : <span>Kişi kaydı bekleniyor…</span>}
+                        </article>
+                      })}
                     </div>
                   ) : (
                     <span className="empty">Bu kıdemde kişi yok</span>
@@ -8748,13 +8796,15 @@ function App() {
 
                   <div className="day-tools">
                     {!isDayEditable ? (
+                      <>{/* eslint-disable react-hooks/refs -- Native click handler invokes the tracked state setter only after a click. */}
                       <button
                         type="button"
                         className="secondary"
-                        onClick={() => startPlannerDayEdit(day.key)}
+                        onClick={() => { startPlannerDayEdit(day.key) }}
                       >
                         Değiştir
                       </button>
+                      {/* eslint-enable react-hooks/refs */}</>
                     ) : null}
                     {isDayEditable ? (
                       <button
