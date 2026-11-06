@@ -629,7 +629,7 @@ h4 {
 }
 
 .subpanel-toggle.observer-toggle {
-  grid-template-columns: repeat(3, minmax(100px, 1fr));
+  grid-template-columns: repeat(4, minmax(100px, 1fr));
 }
 
 .subpanel-toggle button {
@@ -3907,7 +3907,7 @@ code {
 
   .subpanel-toggle.observer-toggle {
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     overflow: visible;
     gap: 0.45rem;
     padding-bottom: 0;
@@ -4206,7 +4206,7 @@ code {
 
   .subpanel-toggle.observer-toggle {
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     overflow: visible;
     gap: 0.45rem;
     padding-bottom: 0;

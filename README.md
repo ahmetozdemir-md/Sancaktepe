@@ -41,6 +41,32 @@ node --test tests/bulkImport.test.mjs
 Online kayıt için `supabase/001_portal_state.sql` dosyasını Supabase SQL Editor'de çalıştır.
 Otomatik/manüel yedek geçmişi için `supabase/002_portal_state_history.sql` dosyasının da çalışmış olması gerekir.
 
+## Duyurular ve Rehberler
+
+Uzman/asistan panelinin dördüncü sekmesinde yayınlanan içerikler kartlar halinde görünür.
+Başlık, açıklama ve kategori aranabilir; duyuru/rehber, kategori ve cihazda tutulan yıldızlılar
+ile filtrelenebilir. Sabitlenen içerikler üstte, duyurular kendi içinde güncelden eskiye sıralanır.
+
+Admin panelindeki aynı adlı sekmede metin, düzenlenebilir tablo, PNG/JPG/WebP ve PDF
+bölümleri eklenir. Excel/Sheets'ten başlık satırı dahil tablo yapıştırılabilir. Bölüm sırası,
+önizleme, taslak/yayınlama ve arşivden taslağa geri alma desteklenir. Dosya sınırı 8 MB'dır;
+görseller özgün çözünürlükte saklanır ve büyütülebilir. Klinik içerik otomatik oluşturulmaz.
+
+Güvenli admin kurulumundan sonra `supabase/009_portal_library.sql` uygulanır. İçerikler
+`portal_library_items` tablosunda, dosyalar özel `portal-library` deposunda saklanır;
+çalışma listesi ve onun yedeklerinden bağımsızdır. Mevcut yetkili Supabase admin oturumu
+kullanılır. Yerel admin girişinde Supabase oturumu yoksa bu sekme yetkili hesapla giriş ister.
+Taslaklar/arşivler yalnız admine açıktır; okuyucular yayınlanmış içeriklerin dosyaları için
+bir saatlik imzalı bağlantı alır. Yayından kaldırınca yeni bağlantı üretilemez; daha önce
+üretilen bağlantılar süreleri dolana kadar geçerli olabilir. Eski dosyalar geri alma ve
+eşzamanlı düzenlemelerde veri kaybını önlemek için otomatik silinmez.
+
+Supabase tanımlanmayan geliştirme ortamında içerikler ve dosyalar IndexedDB'de tutulur;
+bu durum ekranda belirtilir. Aynı içeriğin başka oturumdan değiştirilmesi, eski sürümün
+üzerine yazılmasını engeller. `tests/library.test.mjs` alan kurallarını;
+`tests/library-db.sql` gerçek veritabanında RLS, dosya erişimi ve sürüm kontrolünü test eder.
+SQL testi sentetik verileri tek işlemde kullanır, sonunda `ROLLBACK` yapar.
+
 ## Güvenli Admin Modu
 
 Anon key tarayıcıda göründüğü için üretimde yazma yetkisini anon kullanıcıdan almak gerekir.

@@ -48,10 +48,13 @@ import AssistantMonthlyTableView, {
   type AssistantMonthlyCalendarDayData,
 } from './AssistantMonthlyTableView'
 
+const LibraryPanel = lazy(() => import('./library/LibraryPanel'))
+
 type PanelMode = 'admin' | 'observer'
 type AdminSection =
   | 'assistants'
   | 'bulkImport'
+  | 'library'
   | 'locations'
   | 'duty'
   | 'planner'
@@ -59,7 +62,7 @@ type AdminSection =
   | 'backups'
   | 'loginEvents'
   | 'password'
-type ObserverSection = 'myPanel' | 'personWeek' | 'dailyMap'
+type ObserverSection = 'myPanel' | 'personWeek' | 'dailyMap' | 'library'
 type LoginView = 'choose' | 'admin' | 'assistant-password' | 'assistant'
 type AssistantAccessTarget = 'assistant' | 'specialist'
 type ObserverWeekDetailView = 'specialist' | 'assistant' | 'room' | 'duty'
@@ -2465,6 +2468,9 @@ function App() {
   const [data, setData] = useState<PlannerState>(() => safeReadState())
   const latestDataRef = useRef(data)
   const bulkImportBusyRef = useRef(false)
+  const libraryBusyRef = useRef(false)
+  const [libraryAdminOpened, setLibraryAdminOpened] = useState(false)
+  const onLibraryBusyChange = useCallback((busy: boolean) => { libraryBusyRef.current = busy }, [])
   useEffect(() => { latestDataRef.current = data }, [data])
   const [userBindings, setUserBindings] = useState<Record<string, string>>(() => safeReadUserBindings())
   const [notice, setNotice] = useState<Notice | null>(null)
@@ -4053,11 +4059,13 @@ function App() {
   }
 
   const logout = () => {
+    if (libraryBusyRef.current) { showWarning('İçerik kaydı tamamlandıktan sonra çıkış yapabilirsin.'); return }
     if (bulkImportBusyRef.current) {
       showWarning('Toplu kayıt tamamlandıktan sonra çıkış yapabilirsin.')
       return
     }
-    if (isSupabaseAdminAuthRequired && session?.role === 'admin' && supabase) {
+    setLibraryAdminOpened(false)
+    if (session?.role === 'admin' && supabase) {
       void supabase.auth.signOut()
     }
     setSession(null)
@@ -4087,10 +4095,12 @@ function App() {
   }
 
   const selectAdminSection = (section: AdminSection) => {
+    if (libraryBusyRef.current) { showWarning('İçerik kaydı devam ediyor; tamamlanmasını bekle.'); return }
     if (bulkImportBusyRef.current) {
       showWarning('Toplu kayıt devam ediyor; tamamlanmasını bekle.')
       return
     }
+    if (section === 'library') setLibraryAdminOpened(true)
     setAdminSection(section)
     if (section === 'backups') {
       void refreshBackups()
@@ -8009,6 +8019,9 @@ function App() {
               >
                 Uzman ve Rotasyoner
               </button>
+              <button type="button" className={adminSection === 'library' ? 'active' : ''} onClick={() => selectAdminSection('library')}>
+                Duyurular ve Rehberler
+              </button>
               <button
                 type="button"
                 className={adminSection === 'backups' ? 'active' : ''}
@@ -8032,6 +8045,12 @@ function App() {
               </button>
             </div>
           </section>
+
+          {libraryAdminOpened ? <div hidden={adminSection !== 'library'}>
+            <Suspense fallback={<section className="card" role="status">İçerikler yükleniyor…</section>}>
+              <LibraryPanel admin active={adminSection === 'library'} onBusyChange={onLibraryBusyChange} />
+            </Suspense>
+          </div> : null}
 
           <div hidden={adminSection !== 'bulkImport'}>
             <BulkImportPanel
@@ -9101,8 +9120,15 @@ function App() {
               >
                 Günlük Harita
               </button>
+              <button type="button" className={observerSection === 'library' ? 'active' : ''} onClick={() => selectObserverSection('library')}>
+                Duyurular ve Rehberler
+              </button>
             </div>
           </section>
+
+          {observerSection === 'library' ? <Suspense fallback={<section className="card" role="status">İçerikler yükleniyor…</section>}>
+            <LibraryPanel />
+          </Suspense> : null}
 
           {observerSection === 'myPanel' ? (
             <section className="card fade-up delay-2">
