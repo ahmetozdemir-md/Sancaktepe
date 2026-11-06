@@ -46,8 +46,8 @@ Otomatik/manüel yedek geçmişi için `supabase/002_portal_state_history.sql` d
 ## Duyurular ve Rehberler
 
 Uzman/asistan panelinin dördüncü sekmesinde yayınlanan içerikler kartlar halinde görünür.
-Başlık, açıklama ve kategori aranabilir; duyuru/rehber, kategori ve cihazda tutulan yıldızlılar
-ile filtrelenebilir. Sabitlenen içerikler üstte, duyurular kendi içinde güncelden eskiye sıralanır.
+Duyuru/rehber türü ve cihazda tutulan yıldızlılar ile filtrelenebilir. Arama, kategori
+alanları ve başlık sayaçları gösterilmez; admin içerik formunda da kategori istenmez. Sabitlenen içerikler üstte, duyurular kendi içinde güncelden eskiye sıralanır.
 
 Admin panelindeki aynı adlı sekmede metin, düzenlenebilir tablo, PNG/JPG/WebP ve PDF
 bölümleri eklenir. Excel/Sheets'ten başlık satırı dahil tablo yapıştırılabilir. Bölüm sırası,
