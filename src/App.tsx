@@ -58,7 +58,6 @@ type AdminSection =
   | 'locations'
   | 'duty'
   | 'planner'
-  | 'specialists'
   | 'backups'
   | 'loginEvents'
   | 'password'
@@ -5613,6 +5612,21 @@ function App() {
     showSuccess(`${formatMonthSelectLabel(dutyMonth)} ayındaki nöbet kayıtları sıfırlandı.`)
   }
 
+  const runBulkRecordChange = async (change: () => Promise<void>) => {
+    if (bulkImportBusyRef.current || isCloudSaving) {
+      showWarning('Devam eden kayıt işlemi tamamlandıktan sonra tekrar dene.')
+      return
+    }
+    bulkImportBusyRef.current = true
+    try {
+      await change()
+    } catch {
+      showWarning('İşlem tamamlanamadı. Bulut senkron durumunu kontrol edip yeniden dene.')
+    } finally {
+      bulkImportBusyRef.current = false
+    }
+  }
+
   const deleteSpecialistWorkWeek = async () => {
     const weekStart = weekStartFromDayKey(specialistWorkDeleteWeek)
     const dayKeys = buildWeek(weekStart).map((day) => day.key)
@@ -8012,13 +8026,6 @@ function App() {
               >
                 Planlama
               </button>
-              <button
-                type="button"
-                className={adminSection === 'specialists' ? 'active' : ''}
-                onClick={() => selectAdminSection('specialists')}
-              >
-                Uzman ve Rotasyoner
-              </button>
               <button type="button" className={adminSection === 'library' ? 'active' : ''} onClick={() => selectAdminSection('library')}>
                 Duyurular ve Rehberler
               </button>
@@ -8060,6 +8067,126 @@ function App() {
               onApply={applyBulkImport}
             />
           </div>
+
+          {adminSection === 'bulkImport' ? (
+            <section className="card fade-up delay-5 specialist-admin-card">
+              <h2>Uzman ve Rotasyoner Kayıt Yönetimi</h2>
+              <p className="subtext">
+                Uzmanları kullanıcıya çevirmeden metinsel planlama verisi olarak kaydedebilirsin.
+                Yeni kayıtları yukarıdaki toplu giriş alanından ekleyebilirsin.
+                Buradan mevcut listeleri hafta veya ay bazında silebilirsin.
+              </p>
+
+              <article className="specialist-input-card">
+                <h3>Günlük Çalışma</h3>
+                <p className="subtext">
+                  Günlük çalışma kayıtlarını Toplu Veri Girişinden ekle. Aynı uzman birden fazla
+                  alanda, aynı alanda birden fazla uzman bulunabilir.
+                </p>
+                <div className="specialist-delete-row">
+                  <select
+                    aria-label="Silinecek günlük çalışma uzman haftası"
+                    value={specialistWorkDeleteWeek}
+                    onChange={(event) => setSpecialistWorkDeleteWeek(event.target.value)}
+                  >
+                    {specialistWorkWeekOptions.map((option) => (
+                      <option key={`specialist-work-delete-week-${option.value}`} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                  <button type="button" className="danger-soft-button" onClick={() => void runBulkRecordChange(deleteSpecialistWorkWeek)}>
+                    Haftayı Sil
+                  </button>
+                </div>
+
+
+                {specialistWorkIssues.length ? (
+                  <article className="import-issue-card">
+                    <h3>Günlük Çalışma Uyarıları</h3>
+                    <ul>
+                      {specialistWorkIssues.map((issue, index) => (
+                        <li key={`specialist-work-issue-${index}`}>{issue}</li>
+                      ))}
+                    </ul>
+                  </article>
+                ) : null}
+              </article>
+
+              <article className="specialist-input-card">
+                <h3>Nöbetçi Uzmanlar</h3>
+                <p className="subtext">
+                  Nöbetçi uzman kayıtlarını Toplu Veri Girişinden ekle. Nöbet yerleri:
+                  Sancaktepe, Çekmeköy, Feriha C123, Feriha C456, Feriha G123.
+                </p>
+                <div className="specialist-delete-row">
+                  <select
+                    aria-label="Silinecek nöbetçi uzman ayı"
+                    value={specialistDutyDeleteMonth}
+                    onChange={(event) => setSpecialistDutyDeleteMonth(event.target.value)}
+                  >
+                    {specialistDutyMonthOptions.map((option) => (
+                      <option key={`specialist-duty-delete-month-${option.value}`} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                  <button type="button" className="danger-soft-button" onClick={() => void runBulkRecordChange(deleteSpecialistDutyMonth)}>
+                    Ayı Sil
+                  </button>
+                </div>
+
+
+                {specialistDutyIssues.length ? (
+                  <article className="import-issue-card">
+                    <h3>Nöbetçi Uzman Uyarıları</h3>
+                    <ul>
+                      {specialistDutyIssues.map((issue, index) => (
+                        <li key={`specialist-duty-issue-${index}`}>{issue}</li>
+                      ))}
+                    </ul>
+                  </article>
+                ) : null}
+              </article>
+
+              <article className="specialist-input-card rotator-input-card">
+                <h3>Rotasyonerler</h3>
+                <p className="subtext">
+                  Rotasyonerleri Toplu Veri Girişinden ekle. Bu kişiler kullanıcı/asistan
+                  olarak oluşturulmaz; yalnızca o gün C1-G3, Sancaktepe YBÜ ve Çekmeköy YBÜ alanlarında
+                  rotasyoner seçeneği olarak görünür.
+                </p>
+                <div className="specialist-delete-row">
+                  <select
+                    aria-label="Silinecek rotasyoner haftası"
+                    value={rotatorDeleteWeek}
+                    onChange={(event) => setRotatorDeleteWeek(event.target.value)}
+                  >
+                    {rotatorWeekOptions.map((option) => (
+                      <option key={`rotator-delete-week-${option.value}`} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                  <button type="button" className="danger-soft-button" onClick={() => void runBulkRecordChange(deleteRotatorWeek)}>
+                    Haftayı Sil
+                  </button>
+                </div>
+
+
+                {rotatorIssues.length ? (
+                  <article className="import-issue-card">
+                    <h3>Rotasyoner Uyarıları</h3>
+                    <ul>
+                      {rotatorIssues.map((issue, index) => (
+                        <li key={`rotator-issue-${index}`}>{issue}</li>
+                      ))}
+                    </ul>
+                  </article>
+                ) : null}
+              </article>
+            </section>
+          ) : null}
 
           {adminSection === 'assistants' ? (
             <section className="card fade-up delay-2 assistant-section-card">
@@ -8687,128 +8814,6 @@ function App() {
             ) : null}
 
             <div className="bulk-import-shortcut"><p>Metinle toplu ekleme için tek giriş ekranını kullan.</p><button type="button" className="secondary" onClick={() => selectAdminSection('bulkImport')}>Toplu Veri Girişini Aç</button></div>
-            </section>
-          ) : null}
-
-          {adminSection === 'specialists' ? (
-            <section className="card fade-up delay-5 specialist-admin-card">
-              <h2>Uzman ve Rotasyoner Modülü</h2>
-              <p className="subtext">
-                Uzmanları kullanıcıya çevirmeden metinsel planlama verisi olarak kaydedebilirsin.
-                Tüm metinleri Toplu Veri Girişi ekranından ekleyebilirsin.
-                Buradan mevcut listeleri hafta veya ay bazında silebilirsin.
-              </p>
-
-              <div className="bulk-import-shortcut"><p>Metinle toplu ekleme için tek giriş ekranını kullan.</p><button type="button" className="secondary" onClick={() => selectAdminSection('bulkImport')}>Toplu Veri Girişini Aç</button></div>
-
-              <article className="specialist-input-card">
-                <h3>Günlük Çalışma</h3>
-                <p className="subtext">
-                  Günlük çalışma kayıtlarını Toplu Veri Girişinden ekle. Aynı uzman birden fazla
-                  alanda, aynı alanda birden fazla uzman bulunabilir.
-                </p>
-                <div className="specialist-delete-row">
-                  <select
-                    aria-label="Silinecek günlük çalışma uzman haftası"
-                    value={specialistWorkDeleteWeek}
-                    onChange={(event) => setSpecialistWorkDeleteWeek(event.target.value)}
-                  >
-                    {specialistWorkWeekOptions.map((option) => (
-                      <option key={`specialist-work-delete-week-${option.value}`} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
-                  <button type="button" className="danger-soft-button" onClick={deleteSpecialistWorkWeek}>
-                    Haftayı Sil
-                  </button>
-                </div>
-
-
-                {specialistWorkIssues.length ? (
-                  <article className="import-issue-card">
-                    <h3>Günlük Çalışma Uyarıları</h3>
-                    <ul>
-                      {specialistWorkIssues.map((issue, index) => (
-                        <li key={`specialist-work-issue-${index}`}>{issue}</li>
-                      ))}
-                    </ul>
-                  </article>
-                ) : null}
-              </article>
-
-              <article className="specialist-input-card">
-                <h3>Nöbetçi Uzmanlar</h3>
-                <p className="subtext">
-                  Nöbetçi uzman kayıtlarını Toplu Veri Girişinden ekle. Nöbet yerleri:
-                  Sancaktepe, Çekmeköy, Feriha C123, Feriha C456, Feriha G123.
-                </p>
-                <div className="specialist-delete-row">
-                  <select
-                    aria-label="Silinecek nöbetçi uzman ayı"
-                    value={specialistDutyDeleteMonth}
-                    onChange={(event) => setSpecialistDutyDeleteMonth(event.target.value)}
-                  >
-                    {specialistDutyMonthOptions.map((option) => (
-                      <option key={`specialist-duty-delete-month-${option.value}`} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
-                  <button type="button" className="danger-soft-button" onClick={deleteSpecialistDutyMonth}>
-                    Ayı Sil
-                  </button>
-                </div>
-
-
-                {specialistDutyIssues.length ? (
-                  <article className="import-issue-card">
-                    <h3>Nöbetçi Uzman Uyarıları</h3>
-                    <ul>
-                      {specialistDutyIssues.map((issue, index) => (
-                        <li key={`specialist-duty-issue-${index}`}>{issue}</li>
-                      ))}
-                    </ul>
-                  </article>
-                ) : null}
-              </article>
-
-              <article className="specialist-input-card rotator-input-card">
-                <h3>Rotasyonerler</h3>
-                <p className="subtext">
-                  Rotasyonerleri Toplu Veri Girişinden ekle. Bu kişiler kullanıcı/asistan
-                  olarak oluşturulmaz; yalnızca o gün C1-G3, Sancaktepe YBÜ ve Çekmeköy YBÜ alanlarında
-                  rotasyoner seçeneği olarak görünür.
-                </p>
-                <div className="specialist-delete-row">
-                  <select
-                    aria-label="Silinecek rotasyoner haftası"
-                    value={rotatorDeleteWeek}
-                    onChange={(event) => setRotatorDeleteWeek(event.target.value)}
-                  >
-                    {rotatorWeekOptions.map((option) => (
-                      <option key={`rotator-delete-week-${option.value}`} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
-                  <button type="button" className="danger-soft-button" onClick={deleteRotatorWeek}>
-                    Haftayı Sil
-                  </button>
-                </div>
-
-
-                {rotatorIssues.length ? (
-                  <article className="import-issue-card">
-                    <h3>Rotasyoner Uyarıları</h3>
-                    <ul>
-                      {rotatorIssues.map((issue, index) => (
-                        <li key={`rotator-issue-${index}`}>{issue}</li>
-                      ))}
-                    </ul>
-                  </article>
-                ) : null}
-              </article>
             </section>
           ) : null}
 
