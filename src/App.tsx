@@ -1,4 +1,5 @@
 import BulkImportPanel from './BulkImportPanel'
+import { resolveSpecialistWorkLocations } from './workLocationMatching'
 import { prepareBulkImport, type ImportRules } from './bulkImport'
 import type {
   LocationKind,
@@ -1066,79 +1067,6 @@ function normalizeTrToken(value: string): string {
     .replace(/ö/g, 'o')
     .replace(/ü/g, 'u')
     .replace(/ç/g, 'c')
-}
-
-function buildLocationLookupTokens(location: WorkLocation): Set<string> {
-  const tokenSet = new Set<string>()
-  const siteToken = normalizeLooseToken(location.site)
-  const nameToken = normalizeLooseToken(location.name)
-
-  if (nameToken) {
-    tokenSet.add(nameToken)
-  }
-  if (siteToken && nameToken) {
-    tokenSet.add(`${siteToken} ${nameToken}`)
-  }
-
-  const numericRoomMatch = location.name.match(/ameliyathane\s*(\d+)/iu)
-  if (numericRoomMatch && siteToken) {
-    tokenSet.add(`${siteToken} ameliyathane ${numericRoomMatch[1]}`)
-  }
-
-  const codeMatch = location.name.match(/^(C\d+|G\d+)/iu)
-  if (codeMatch && siteToken) {
-    tokenSet.add(`${siteToken} ${normalizeLooseToken(codeMatch[1])}`)
-  }
-
-  return tokenSet
-}
-
-function resolveSpecialistWorkLocation(
-  locations: WorkLocation[],
-  dayKey: string,
-  rawArea: string,
-): { location: WorkLocation | null; reason?: string } {
-  const normalizedArea = normalizeLooseToken(rawArea)
-  if (!normalizedArea) {
-    return { location: null, reason: 'Alan bilgisi boş.' }
-  }
-
-  const normalLocations = locations.filter((location) => location.kind === 'normal')
-  const activeNormals = normalLocations.filter((location) => isLocationActiveOnDay(location, dayKey))
-  const searchPool = activeNormals.length ? activeNormals : normalLocations
-
-  const exactMatches = searchPool.filter((location) =>
-    buildLocationLookupTokens(location).has(normalizedArea),
-  )
-  if (exactMatches.length === 1) {
-    return { location: exactMatches[0] }
-  }
-  if (exactMatches.length > 1) {
-    return {
-      location: null,
-      reason: `"${rawArea}" birden fazla alana eşleşti. Lütfen hastane adını da yaz.`,
-    }
-  }
-
-  const fuzzyMatches = searchPool.filter((location) => {
-    const tokens = [...buildLocationLookupTokens(location)]
-    return tokens.some(
-      (token) =>
-        token.includes(normalizedArea) ||
-        (normalizedArea.length > 5 && normalizedArea.includes(token)),
-    )
-  })
-  if (fuzzyMatches.length === 1) {
-    return { location: fuzzyMatches[0] }
-  }
-  if (fuzzyMatches.length > 1) {
-    return {
-      location: null,
-      reason: `"${rawArea}" belirsiz eşleşti. Lütfen daha net alan adı yaz.`,
-    }
-  }
-
-  return { location: null, reason: `"${rawArea}" için eşleşen alan bulunamadı.` }
 }
 
 function getSpecialistsForLocation(state: PlannerState, dayKey: string, locationId: string): string[] {
@@ -5536,11 +5464,10 @@ function App() {
     normalizeName: normalizeAssistantName,
     dutySite: normalizeDutySite,
     specialistDutySite: normalizeSpecialistDutySite,
-    workLocation: (day, value) => {
-      const resolved = resolveSpecialistWorkLocation(data.locations, day, value)
+    workLocations: (day, value) => {
+      const resolved = resolveSpecialistWorkLocations(data.locations, day, value)
       return {
-        id: resolved.location?.id,
-        label: resolved.location ? `${resolved.location.site} ${resolved.location.name}` : undefined,
+        locations: resolved.locations.map((location) => ({ id: location.id, label: `${location.site} ${location.name}` })),
         reason: resolved.reason,
       }
     },

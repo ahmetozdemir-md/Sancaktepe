@@ -22,11 +22,18 @@ export default function BulkImportPanel({ data, rules, hasDrafts, onApply }: Pro
   const reference = [
     'KLİNİK ATLAS — GÜNCEL ASİSTAN / ALAN REFERANSI',
     `Alınma tarihi: ${new Date().toLocaleDateString('tr-TR')}`,
-    '\nKayıtlı asistanlar:',
+    '\nASISTAN_NOBET ve IZIN_ROTASYON için kayıtlı asistanlar:',
     ...data.assistants.map((name) => `- ${name}`),
     '\nUzman çalışma alanları (başlangıç dahil, bitiş hariç):',
     ...data.locations.filter((location) => location.kind === 'normal').map((location) =>
       `- ${location.site} ${location.name}${location.activeFrom ? `; başlangıç: ${location.activeFrom}` : ''}${location.activeUntil ? `; bitiş: ${location.activeUntil}` : ''}`),
+    '\nASISTAN_NOBET yerleri: Sancaktepe | Çekmeköy | Feriha Öz',
+    'UZMAN_NOBET yerleri: Sancaktepe | Çekmeköy | Feriha C123 | Feriha C456 | Feriha G123',
+    'IZIN_ROTASYON durumları: Yıllık İzin | Mazeret İzni | Rotasyon',
+    'ROTASYONER: tarih ve ad; alan veya hastane sütunu yok.',
+    '\nGörselde hastane üst başlığını altındaki oda/sütun başlıklarına uygula. Her kişi-tarih-oda eşleşmesini ayrı satır yaz.',
+    'Örnek: Sancaktepe başlığındaki 7 + 8 → Sancaktepe Ameliyathane 7 ve Sancaktepe Ameliyathane 8 için iki ayrı UZMAN_CALISMA satırı.',
+    'Kısaltmayı yalnız bu referansta tek bir alana karşılık geliyorsa aç. Yeni alan, kişi veya nöbet grubu uydurma.',
   ].join('\n')
 
   const copy = async (value: string, label: string) => {
@@ -72,9 +79,10 @@ export default function BulkImportPanel({ data, rules, hasDrafts, onApply }: Pro
       <details className="bulk-import-guide">
         <summary>ChatGPT projesini bir kez hazırla</summary>
         <ol>
-          <li>ChatGPT’de tek bir proje aç. “Proje Talimatlarını Kopyala” ile aldığın metni projenin talimatlarına ekle.</li>
+          <li>ChatGPT’de tek proje kullan. “Proje Talimatlarını Kopyala” ile güncel metni al; projenin eski talimatlarının yerine koy.</li>
           <li>“Güncel Referansı Kopyala” ile asistan ve alan listesini projeye gönder. Bu listeler değiştiğinde referansı yenile.</li>
-          <li>Çalışma listelerini aynı projeye gönder. Gelen çıktının tamamını aşağıdaki alana yapıştır.</li>
+          <li>Görseli veya dosyayı aynı projeye gönder. Hastane/oda başlıkları ile ay ve yıl görünür olsun. ChatGPT belirsiz bir hücre sorarsa açıklığa kavuştur.</li>
+          <li>Gelen çıktının tamamını aşağıya yapıştır. Önizlemede tarih, kişi ve alan eşleşmelerini kontrol edip kaydet.</li>
         </ol>
         <div className="bulk-import-actions">
           <button type="button" className="secondary" onClick={() => void copy(instructions, 'Proje talimatları')}>Proje Talimatlarını Kopyala</button>
@@ -89,7 +97,7 @@ export default function BulkImportPanel({ data, rules, hasDrafts, onApply }: Pro
         placeholder={'ASISTAN_NOBET | 2026-11-09 | Aslınur | Çekmeköy\nIZIN_ROTASYON | 2026-11-09 | Azmi | Yıllık İzin\nUZMAN_CALISMA | 2026-11-09 | Sami Yarkın Sözüer | Sancaktepe Ameliyathane 1\nUZMAN_NOBET | 2026-11-09 | Murat Öksüz | Çekmeköy\nROTASYONER | 2026-11-09 | Tahsin'} />
       <div className="bulk-import-actions">
         <button type="button" className="secondary" disabled={busy || !text.trim()} onClick={() => { setPreview({ result: prepareBulkImport(text, data, rules), text, baseState: data }); setMessage('') }}>Kontrol Et ve Önizle</button>
-        <span className="hint-text">Kaydetmeden önce tüm kayıtları inceleyebilirsin.</span>
+        <span className="hint-text">Birden fazla oda içeren uzman çalışma satırı, önizlemede her oda için ayrı kayıt olur.</span>
       </div>
       {message ? <p className="notice" role="status">{message}</p> : null}
       {hasDrafts ? <p className="notice warning">Planlamada veya alanlarda açık taslak var. Toplu kayıt için önce taslağı kaydet veya iptal et.</p> : null}
@@ -100,11 +108,11 @@ export default function BulkImportPanel({ data, rules, hasDrafts, onApply }: Pro
           const count = result.rows.filter((row) => row.kind === kind).length
           return count ? <span key={kind}><strong>{count}</strong> {label}</span> : null
         })}</div>
-        {result.duplicateCount ? <p className="hint-text">{result.duplicateCount} aynı satır tekrarı tek kayıt olarak alındı.</p> : null}
+        {result.duplicateCount ? <p className="hint-text">{result.duplicateCount} yinelenen kayıt tekilleştirildi.</p> : null}
         {result.issues.length ? <div className="import-issue-card" role="alert"><h3>{result.issues.length} sorun — kayıt yapılmadı</h3><ul>{result.issues.map((issue) => <li key={issue}>{issue}</li>)}</ul></div> : null}
         {result.rows.length ? <div className="bulk-import-table-wrap" tabIndex={0} role="region" aria-label="Aktarılacak kayıtlar"><table className="bulk-import-table">
-          <thead><tr><th scope="col">Satır</th><th scope="col">Tür</th><th scope="col">Tarih</th><th scope="col">Kişi</th><th scope="col">Alan / durum</th></tr></thead>
-          <tbody>{result.rows.map((row) => <tr key={row.line}><td>{row.line}</td><td>{IMPORT_LABELS[row.kind]}</td><td>{row.day}</td><td>{row.name}</td><td>{row.value || 'Günlük rotasyoner havuzu'}</td></tr>)}</tbody>
+          <thead><tr><th scope="col">Kaynak satır</th><th scope="col">Tür</th><th scope="col">Tarih</th><th scope="col">Kişi</th><th scope="col">Alan / durum</th></tr></thead>
+          <tbody>{result.rows.map((row) => <tr key={`${row.line}-${row.locationId ?? row.value}`}><td>{row.line}</td><td>{IMPORT_LABELS[row.kind]}</td><td>{row.day}</td><td>{row.name}</td><td>{row.value || 'Günlük rotasyoner havuzu'}</td></tr>)}</tbody>
         </table></div> : null}
         <p className="hint-text">Asistan nöbeti, uzman çalışma ve rotasyoner kayıtları mevcut listeyle birleşir. İzin / rotasyon, kişinin o günkü atamasını değiştirir. Uzman nöbeti ilgili günün tam listesini değiştirir.</p>
         {result.effects.length ? <div className="bulk-import-effects"><h4>Mevcut kayıtlara etkisi</h4><ul>{result.effects.map((effect) => <li key={effect}>{effect}</li>)}</ul></div> : null}

@@ -23,7 +23,7 @@ export interface ImportRules {
   normalizeName: (value: string) => string
   dutySite: (value: string) => DutySite | null
   specialistDutySite: (value: string) => SpecialistDutySite | null
-  workLocation: (day: string, value: string) => { id?: string; label?: string; reason?: string }
+  workLocations: (day: string, value: string) => { locations?: { id: string; label: string }[]; reason?: string }
   statusLocation: (value: string) => { id: string; label: string } | null
   statusDayError: (day: string, locationId: string) => string | null
 }
@@ -89,6 +89,7 @@ export function prepareBulkImport(text: string, state: PlannerState, rules: Impo
       row.name = match.name
     }
     if (!row.name) { fail('Kişi adı boş veya geçersiz.'); return }
+    let expandedRows = [row]
     if (kind === 'ASISTAN_NOBET') {
       const site = rules.dutySite(rawValue)
       if (!site) { fail(`Asistan nöbet yeri geçersiz (${rawValue}).`); return }
@@ -98,10 +99,9 @@ export function prepareBulkImport(text: string, state: PlannerState, rules: Impo
       if (!site) { fail(`Uzman nöbet yeri geçersiz (${rawValue}).`); return }
       row.value = site
     } else if (kind === 'UZMAN_CALISMA') {
-      const location = rules.workLocation(day, rawValue)
-      if (!location.id) { fail(location.reason ?? 'Çalışma alanı eşleşmedi.'); return }
-      row.locationId = location.id
-      row.value = location.label ?? rawValue
+      const resolved = rules.workLocations(day, rawValue)
+      if (resolved.reason || !resolved.locations?.length) { fail(resolved.reason ?? 'Çalışma alanı eşleşmedi.'); return }
+      expandedRows = resolved.locations.map((location) => ({ ...row, locationId: location.id, value: location.label }))
     } else if (kind === 'IZIN_ROTASYON') {
       const location = rules.statusLocation(rawValue)
       if (!location) { fail('İzin türü: Yıllık İzin, Mazeret İzni veya Rotasyon olmalı.'); return }
@@ -110,10 +110,12 @@ export function prepareBulkImport(text: string, state: PlannerState, rules: Impo
       const error = rules.statusDayError(day, location.id)
       if (error) { fail(error); return }
     }
-    const key = JSON.stringify([kind, day, row.name, row.locationId ?? row.value])
-    if (seen.has(key)) { duplicateCount++; return }
-    seen.add(key)
-    rows.push(row)
+    expandedRows.forEach((expanded) => {
+      const key = JSON.stringify([kind, day, expanded.name, expanded.locationId ?? expanded.value])
+      if (seen.has(key)) { duplicateCount++; return }
+      seen.add(key)
+      rows.push(expanded)
+    })
   })
   if (fenceOpen) issues.push('Kod bloğu kapanmamış. ChatGPT çıktısının tamamını kopyala.')
   if (!rows.length && !issues.length) issues.push('Önizleme için en az bir kayıt yapıştır.')

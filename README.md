@@ -26,7 +26,15 @@ düzenleme için kullanılmaya devam eder.
 ChatGPT çıktısı `TÜR | YYYY-AA-GG | Kişi | Alan / durum` biçiminde hazırlanır;
 `ROTASYONER` satırları yalnız ilk üç sütunu içerir. Tek metinde farklı türler ve tarihler bulunabilir.
 Ekrandaki proje talimatları kopyalanabilir; güncel asistan ve alan referansı ayrıca kopyalanır.
-Talimatların kaynak dosyası `src/bulk-import-instructions.txt` dosyasıdır.
+Talimatların kaynak dosyası `src/bulk-import-instructions.txt` dosyasıdır. Güncel talimatlar
+beş tür için görsel/başlık okuma, kısaltma, örnek çıktı ve belirsizlik kurallarını içerir.
+ChatGPT projesindeki eski talimat metni yeni metinle değiştirilmelidir.
+
+Uzman çalışmada `Sancaktepe Ameliyathane 7 + Sancaktepe Ameliyathane 8` veya
+`Sancaktepe Ameliyathane 7 + 8` gibi birleşik alanlar önizlemede ayrı kayıtlara açılır.
+Kaynak satır numarası korunur, tekrarlar tekilleştirilir. Eşleştirme yalnız o tarihte aktif
+alanlarda yapılır; belirsiz/eksik alan tüm aktarımı durdurur. Oda numarası veya hastane
+alt metin benzerliğiyle başka alana eşleştirilmez.
 
 Önizleme tüm satırları ve mevcut kayıtlara etkisini gösterir. Hatalı satır varsa hiçbir kayıt
 uygulanmaz. Asistan nöbeti, uzman çalışma ve rotasyoner kayıtları birleştirilir;
@@ -38,7 +46,7 @@ olursa yapıştırılan metin korunur. Bulut yapılandırılmamış yerel ortamd
 Aktarım kuralları için testler (Node.js 22.18+):
 
 ```bash
-node --test tests/bulkImport.test.mjs
+node --test tests/bulkImport.test.mjs tests/workLocationMatching.test.mjs
 ```
 
 ## Supabase

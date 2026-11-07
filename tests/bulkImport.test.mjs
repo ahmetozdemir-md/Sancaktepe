@@ -18,7 +18,7 @@ const rules = {
   normalizeName: (name) => name.trim(),
   dutySite: (site) => ['Sancaktepe', 'Feriha Öz', 'Çekmeköy'].includes(site) ? site : null,
   specialistDutySite: (site) => ['Sancaktepe', 'Çekmeköy', 'Feriha C123', 'Feriha C456', 'Feriha G123'].includes(site) ? site : null,
-  workLocation: (_day, value) => value === 'Sancaktepe Ameliyathane 1' ? { id: 'room', label: value } : { reason: 'Alan bulunamadı.' },
+  workLocations: (_day, value) => value === 'Sancaktepe Ameliyathane 1' ? { locations: [{ id: 'room', label: value }] } : { reason: 'Alan bulunamadı.' },
   statusLocation: (value) => ({ 'Yıllık İzin': { id: 'annual', label: value }, Rotasyon: { id: 'rotation', label: value } })[value] ?? null,
   statusDayError: (day) => [0, 6].includes(new Date(day+'T12:00:00Z').getUTCDay()) ? 'Çalışma günü değil.' : null,
 }
@@ -59,7 +59,7 @@ test('unknown assistants, ambiguous names, inactive or unknown rooms are rejecte
   assert.equal(parse('ASISTAN_NOBET | 2026-11-09 | Kayıtsız | Sancaktepe').nextState, null)
   assert.equal(parse('UZMAN_CALISMA | 2026-11-09 | Bir | Kayıtsız Alan').nextState, null)
   assert.equal(parse(mixed, state(), { resolveAssistant: () => ({ name: null, reason: 'Birden fazla kişi' }) }).nextState, null)
-  assert.equal(parse(mixed, state(), { workLocation: () => ({ reason: 'Alan artık aktif değil' }) }).nextState, null)
+  assert.equal(parse(mixed, state(), { workLocations: () => ({ reason: 'Alan artık aktif değil' }) }).nextState, null)
 })
 test('invalid hospital and incomplete Feriha specialist group are rejected', () => {
   assert.equal(parse('ASISTAN_NOBET | 2026-11-09 | Azmi | Feriha C123').nextState, null)
@@ -126,7 +126,27 @@ test('specialist duty replaces only represented days and previews deleted names'
 })
 test('same specialist may work in multiple rooms but cannot have two duty sites', () => {
   assert.equal(parse('UZMAN_NOBET | 2026-11-09 | Bir | Sancaktepe\nUZMAN_NOBET | 2026-11-09 | Bir | Çekmeköy').nextState, null)
-  const result = parse('UZMAN_CALISMA | 2026-11-09 | Bir | A\nUZMAN_CALISMA | 2026-11-09 | Bir | B', state(), { workLocation: (_day,value) => ({ id:value,label:value }) })
+  const result = parse('UZMAN_CALISMA | 2026-11-09 | Bir | A\nUZMAN_CALISMA | 2026-11-09 | Bir | B', state(), { workLocations: (_day,value) => ({ locations: [{ id:value,label:value }] }) })
   assert.deepEqual(result.nextState.specialistWorkAssignments['2026-11-09'], { A:['Bir'],B:['Bir'] })
 })
 test('truncated code block is rejected', () => assert.equal(parse('```text\n'+mixed).nextState, null))
+
+test('combined specialist work expands into separate preview rows, deduplicates, and stays idempotent', () => {
+  const text = 'UZMAN_CALISMA | 2026-11-09 | Uzman Bir | A + B + A\nUZMAN_CALISMA | 2026-11-09 | Uzman Bir | B'
+  const custom = { workLocations: (_day, value) => ({ locations: value.split(' + ').map((id) => ({ id, label: `Alan ${id}` })) }) }
+  const result = parse(text, deepFreeze(state()), custom)
+  assert.deepEqual(result.issues, [])
+  assert.equal(result.duplicateCount, 2)
+  assert.deepEqual(result.rows.map(({ line, locationId, value }) => ({ line, locationId, value })), [
+    { line: 1, locationId: 'A', value: 'Alan A' }, { line: 1, locationId: 'B', value: 'Alan B' },
+  ])
+  assert.deepEqual(result.nextState.specialistWorkAssignments['2026-11-09'], { A: ['Uzman Bir'], B: ['Uzman Bir'] })
+  assert.deepEqual(parse(text, result.nextState, custom).nextState, result.nextState)
+})
+
+test('a failed combined area blocks the entire batch even alongside valid records', () => {
+  const result = parse(mixed, deepFreeze(state()), { workLocations: () => ({ locations: [{ id: 'room', label: 'Oda' }], reason: 'İkinci oda bulunamadı.' }) })
+  assert.equal(result.nextState, null)
+  assert.equal(result.rows.some((row) => row.kind === 'UZMAN_CALISMA'), false)
+  assert.match(result.issues[0], /3\. satır: İkinci oda/)
+})
