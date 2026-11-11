@@ -29,6 +29,7 @@ import type { PublishedPortalPayload } from './dutyPlannerCloud'
 import { readPortalState, readPortalRevision, isPortalAccessError, type PortalCloudSnapshot } from './portalCloudAccess'
 import { canStartPortalRefresh, canAdoptPortalRefresh, type PortalRefreshContext } from './portalRefreshGuard.js'
 import { AssistantIdentityControls } from './AssistantRegistryPanel'
+import AssistantRemovalDialog from './AssistantRemovalDialog'
 import { assistantDutyEnabled, assistantIdentityForName, ensureAssistantRegistry, renameAssistantInPlanner, renameAssistantBindings, setAssistantDutyEnabled, setAssistantArchived } from './assistantIdentity.js'
 import {
   isCloudWriteEnabled,
@@ -2467,6 +2468,7 @@ function App() {
   const [dutyImportIssues, setDutyImportIssues] = useState<string[]>([])
   const [dutyDeleteMonth, setDutyDeleteMonth] = useState(currentMonthISO)
   const [assistantToRemove, setAssistantToRemove] = useState('')
+  const [assistantRemovalTarget, setAssistantRemovalTarget] = useState<string | null>(null)
   const [locationToRemove, setLocationToRemove] = useState('')
   const [manualCleanupDay, setManualCleanupDay] = useState(todayISO)
   const [cellDrafts, setCellDrafts] = useState<Record<string, string>>({})
@@ -5282,15 +5284,6 @@ function App() {
   }
 
   const removeAssistant = (name: string) => {
-    if (
-      typeof window !== 'undefined' &&
-      !window.confirm(
-        `${name} isimli asistanı listeden çıkarmak istediğine emin misin? Bu işlem atama ve nöbet kayıtlarından da temizler.`,
-      )
-    ) {
-      return
-    }
-
     setData((previous) => {
       const registry = ensureAssistantRegistry(previous.assistants, previous.assistantRegistry, undefined, currentMonthISO).registry
       const identity = assistantIdentityForName(registry, name)
@@ -8198,7 +8191,7 @@ function App() {
                       <option value="">Asistan seç</option>
                       {data.assistants.map((name) => <option key={name} value={name}>{name}</option>)}
                     </select>
-                    <button type="button" className="danger-soft-button" disabled={!data.assistants.includes(assistantToRemove) || ownersEditMode || Object.values(plannerEditModes).some(Boolean)} onClick={() => void runBulkRecordChange(() => removeAssistant(assistantToRemove))}>Asistanı Çıkar</button>
+                    <button type="button" className="danger-soft-button" disabled={!data.assistants.includes(assistantToRemove) || ownersEditMode || Object.values(plannerEditModes).some(Boolean)} onClick={() => setAssistantRemovalTarget(assistantToRemove)}>Asistanı Çıkar</button>
                   </div>
                   {ownersEditMode || Object.values(plannerEditModes).some(Boolean) ? <p className="hint-text">Önce açık alan/planlama taslaklarını kaydet veya iptal et.</p> : null}
                 </article>
@@ -8264,7 +8257,7 @@ function App() {
                 </button>
               </div>
 
-              <p className="hint-text">Asistan çıkarma işlemi Toplu Veri Girişi → Kayıt Yönetimi bölümündedir.</p>
+              <p className="hint-text">Asistanı çıkarmak için kartın sağ üstündeki × işaretine bas. İşlem öncesinde onay istenir.</p>
               <label className="registry-month-control"><span>Nöbet listesi ayı</span><input type="month" value={registryMonth} onInput={event => { if (isValidMonthISO(event.currentTarget.value)) setRegistryMonth(event.currentTarget.value) }} onChange={event => { if (isValidMonthISO(event.target.value)) setRegistryMonth(event.target.value) }} /></label>
               {assistantsBySeniority.map((group) => (
                 <section key={`assistant-rank-group-${group.level}`} className="assistant-rank-group">
@@ -8278,6 +8271,7 @@ function App() {
                         const identity = assistantIdentityForName(data.assistantRegistry ?? {}, assistant)
                         return <article key={identity?.id ?? assistant} className="assistant-chip assistant-identity-card">
                           <strong className="assistant-chip-name">{assistant}</strong>
+                          <button type="button" className="assistant-card-remove" aria-label={`${assistant} isimli asistanı çıkar`} title="Asistanı çıkar" disabled={!isSecureCloudWriteUnlocked || isCloudSaving || bulkRecordBusy || (isSupabaseConfigured && cloudState !== 'ready') || ownersEditMode || Object.values(plannerEditModes).some(Boolean)} onClick={() => setAssistantRemovalTarget(assistant)}><span aria-hidden="true">×</span></button>
                           {identity ? <AssistantIdentityControls id={identity.id} name={assistant} dutyEnabled={assistantDutyEnabled(identity, registryMonth) ?? false} archived={identity.archived} disabled={!isSecureCloudWriteUnlocked || isCloudSaving || cloudState !== 'ready' || ownersEditMode || Object.values(plannerEditModes).some(Boolean)} onDutyChange={changeAssistantDuty} onRename={renameSharedAssistant} /> : <span>Kişi kaydı bekleniyor…</span>}
                         </article>
                       })}
@@ -9778,6 +9772,7 @@ function App() {
 
         </main>
       )}
+      {assistantRemovalTarget && session.role === 'admin' ? <AssistantRemovalDialog name={assistantRemovalTarget} disabled={!data.assistants.includes(assistantRemovalTarget) || !isSecureCloudWriteUnlocked || isCloudSaving || bulkRecordBusy || (isSupabaseConfigured && cloudState !== 'ready') || ownersEditMode || Object.values(plannerEditModes).some(Boolean)} onCancel={() => setAssistantRemovalTarget(null)} onConfirm={() => void runBulkRecordChange(() => { removeAssistant(assistantRemovalTarget); setAssistantRemovalTarget(null) })} /> : null}
       {appFooter}
     </div>
   )

@@ -1,9 +1,11 @@
+import { matchingRichText, type RichTextDocument } from './richText.ts'
+
 // Keep the storage discriminator for compatibility; the product now contains guides only.
 export type LibraryKind = 'reference'
-export type LibraryTable = { id: string; type: 'table'; caption: string; headers: string[]; rows: string[][]; headerColor?: string; rowColors?: (string | null)[]; align?: 'left' | 'center' | 'right'; compact?: boolean }
+export type LibraryTable = { id: string; type: 'table'; caption: string; headers: string[]; rows: string[][]; headerColor?: string; rowColors?: (string | null)[]; align?: 'left' | 'center' | 'right'; compact?: boolean; headerRichText?: (RichTextDocument | null)[]; rowRichText?: (RichTextDocument | null)[][] }
 export type LibraryBlock =
   | { id: string; type: 'section'; title: string }
-  | { id: string; type: 'text'; text: string }
+  | { id: string; type: 'text'; text: string; richText?: RichTextDocument }
   | LibraryTable
   | { id: string; type: 'image' | 'pdf'; path: string; fileName: string; caption: string }
 
@@ -57,7 +59,34 @@ export function flattenLibrarySections(sections: LibrarySection[]): LibraryBlock
 }
 
 export function reorderTableRows(block: LibraryTable, order: number[]): LibraryTable {
-  return { ...block, rows: order.map((index) => [...block.rows[index]]), rowColors: order.map((index) => block.rowColors?.[index] ?? null) }
+  return { ...block, rows: order.map((index) => [...block.rows[index]]), rowColors: order.map((index) => block.rowColors?.[index] ?? null), ...(block.rowRichText ? { rowRichText: order.map((index) => structuredClone(block.rowRichText?.[index] ?? [])) } : {}) }
+}
+
+export function removeTableColumn(block: LibraryTable, column: number): LibraryTable {
+  return { ...block, headers: block.headers.filter((_, index) => index !== column), rows: block.rows.map((row) => row.filter((_, index) => index !== column)),
+    ...(block.headerRichText ? { headerRichText: block.headerRichText.filter((_, index) => index !== column) } : {}),
+    ...(block.rowRichText ? { rowRichText: block.rowRichText.map((row) => row.filter((_, index) => index !== column)) } : {}) }
+}
+
+export function updateTableCell(block: LibraryTable, row: number, column: number, text: string, richText: RichTextDocument): LibraryTable {
+  if (row === -1) return { ...block, headers: block.headers.map((value, index) => index === column ? text : value), headerRichText: block.headers.map((_, index) => index === column ? richText : block.headerRichText?.[index] ?? null) }
+  return { ...block, rows: block.rows.map((values, index) => index === row ? values.map((value, col) => col === column ? text : value) : values),
+    rowRichText: block.rows.map((values, index) => values.map((_, col) => index === row && col === column ? richText : block.rowRichText?.[index]?.[col] ?? null)) }
+}
+
+export function normalizeRichBlock(block: LibraryBlock): LibraryBlock {
+  if (block.type === 'text' && block.richText !== undefined) {
+    const next = { ...block }; delete next.richText
+    const richText = matchingRichText(block.text, block.richText)
+    return richText ? { ...next, richText } : next
+  }
+  if (block.type === 'table') {
+    const next = { ...block }; delete next.headerRichText; delete next.rowRichText
+    if (Array.isArray(block.headerRichText)) next.headerRichText = block.headers.map((text, column) => matchingRichText(text, block.headerRichText?.[column]) ?? null)
+    if (Array.isArray(block.rowRichText)) next.rowRichText = block.rows.map((row, index) => row.map((text, column) => matchingRichText(text, block.rowRichText?.[index]?.[column]) ?? null))
+    return next
+  }
+  return block
 }
 
 export function newLibraryEntry(): LibraryEntry {
@@ -158,10 +187,10 @@ export function parseLibraryRow(raw: Record<string, unknown>): LibraryEntry {
     if (block.type === 'text') return typeof block.text === 'string'
     if (block.type === 'table') return typeof block.caption === 'string' && Array.isArray(block.headers) && block.headers.every((cell: unknown) => typeof cell === 'string') && Array.isArray(block.rows) && block.rows.every((row: unknown) => Array.isArray(row) && row.every((cell: unknown) => typeof cell === 'string'))
     return ['image', 'pdf'].includes(block.type) && typeof block.path === 'string' && validAssetPath(block.path) && typeof block.caption === 'string' && typeof block.fileName === 'string'
-  }).map((block) => block.type === 'table' ? { ...block, headerColor: safeTableColor(block.headerColor), rowColors: block.rows.map((_, index) => safeTableColor(block.rowColors?.[index]) ?? null), align: ['left', 'center', 'right'].includes(block.align ?? '') ? block.align : 'left', compact: block.compact === true } : block) : []
+  }).map((block) => block.type === 'table' ? { ...block, headerColor: safeTableColor(block.headerColor), rowColors: block.rows.map((_, index) => safeTableColor(block.rowColors?.[index]) ?? null), align: ['left', 'center', 'right'].includes(block.align ?? '') ? block.align : 'left', compact: block.compact === true } : block).map(normalizeRichBlock) : []
   return { id: str('id'), title: str('title'), summary: str('summary'), category: str('category'), kind: 'reference', pinned: raw.pinned === true, published: raw.is_published === true, blocks, sourceLabel: str('source_label'), sourceUrl: safeSourceUrl(str('source_url')) ?? '', createdAt: str('created_at'), updatedAt: str('updated_at'), archivedAt: str('archived_at') || null }
 }
 
 export function libraryRow(entry: LibraryEntry) {
-  return { id: entry.id, title: entry.title.trim(), summary: entry.summary.trim(), category: entry.category.trim(), kind: 'reference', pinned: entry.pinned, is_published: entry.published, blocks: entry.blocks, source_label: entry.sourceLabel.trim(), source_url: safeSourceUrl(entry.sourceUrl) ?? '', archived_at: entry.archivedAt }
+  return { id: entry.id, title: entry.title.trim(), summary: entry.summary.trim(), category: entry.category.trim(), kind: 'reference', pinned: entry.pinned, is_published: entry.published, blocks: entry.blocks.map(normalizeRichBlock), source_label: entry.sourceLabel.trim(), source_url: safeSourceUrl(entry.sourceUrl) ?? '', archived_at: entry.archivedAt }
 }

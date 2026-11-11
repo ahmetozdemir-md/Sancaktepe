@@ -1,5 +1,5 @@
 import { isSupabaseConfigured, supabase } from '../supabase'
-import { ASSET_TYPES, MAX_ASSET_BYTES, libraryRow, parseLibraryRow, validateLibraryEntry, validAssetPath, type LibraryEntry } from './model'
+import { ASSET_TYPES, MAX_ASSET_BYTES, libraryRow, normalizeRichBlock, parseLibraryRow, validateLibraryEntry, validAssetPath, type LibraryEntry } from './model'
 
 const TABLE = 'portal_library_items'
 const BUCKET = 'portal-library'
@@ -74,7 +74,7 @@ export async function saveLibraryEntry(entry: LibraryEntry): Promise<LibraryEntr
         const previous = request.result as LibraryEntry | undefined
         if ((previous?.updatedAt ?? '') !== entry.updatedAt) { conflict = true; transaction.abort(); return }
         const now = new Date().toISOString()
-        saved = { ...entry, kind: 'reference', createdAt: entry.createdAt || now, updatedAt: now }
+        saved = { ...entry, blocks: entry.blocks.map(normalizeRichBlock), kind: 'reference', createdAt: entry.createdAt || now, updatedAt: now }
         store.put(saved)
       }
       transaction.oncomplete = () => { database.close(); resolve(saved) }

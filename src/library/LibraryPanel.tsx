@@ -1,11 +1,12 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react'
 import { filterLibrary, librarySections, newLibraryEntry, type LibraryEntry } from './model'
 import { libraryIsLocal, listLibraryEntries, removeNewLibraryAssets, saveLibraryEntry, uploadLibraryAsset } from './repository'
 import LibraryAccess from './LibraryAccess'
 import LibraryContent from './LibraryContent'
-import LibraryEditor from './LibraryEditor'
 import LibraryDirectory from './LibraryDirectory'
 import './library.css'
+
+const LibraryEditor = lazy(() => import('./LibraryEditor'))
 
 function LibraryIcon() {
   return <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 5v15M3 4c4-1 6 0 9 1 3-1 5-2 9-1v15c-4-1-6 0-9 1-3-1-5-2-9-1z" /><path d="M6 8h3m-3 4h3m6-4h3m-3 4h3" /></svg>
@@ -111,7 +112,7 @@ function LibraryWorkspace({ admin = false, active = true, onBusyChange }: Props)
   const visible = filterLibrary(entries, { query: '', category: 'all', favorites, onlyFavorites, admin, status })
   const available = entries.filter((entry) => admin ? !entry.archivedAt : entry.published && !entry.archivedAt)
   const current = entries.find((entry) => entry.id === selected && (admin || (entry.published && !entry.archivedAt)))
-  if (editing) return <><LibraryEditor key={editing.id} initial={editing} onClose={() => setEditing(null)} onSave={save} busy={busy} /></>
+  if (editing) return <Suspense fallback={<section className="card" role="status">Rehber editörü açılıyor…</section>}><LibraryEditor key={editing.id} initial={editing} onClose={() => setEditing(null)} onSave={save} busy={busy} /></Suspense>
   if (current) {
     const topics = librarySections(current.blocks).filter((section) => section.id)
     return <section className="card library-detail">

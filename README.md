@@ -73,6 +73,18 @@ satır aralığı, satır taşıma ve çoğaltma desteklenir; renkler satırla b
 önizleme, taslak/yayınlama ve arşivden taslağa geri alma desteklenir. Dosya sınırı 8 MB'dır;
 görseller özgün çözünürlükte saklanır ve büyütülebilir. Klinik içerik otomatik oluşturulmaz.
 
+Metin bloklarında seçili yazıya kalın/normal, italik, altı/üstü çizili, yazı ve vurgu rengi,
+bağlantı, başlık, liste, alıntı ve hizalama uygulanabilir. Biçim temizleme ve geri al/yinele
+araçları bulunur. Tablo hücresine tıklayınca aynı yazı araçları etkinleşir; satırın zemin rengi
+ve tablonun aralık/hizalama ayarları ayrı “Tablo görünümü” bölümündedir. Hücreye özel yazı
+rengi seçilmezse zemin kontrastına göre otomatik renk kullanılır. Hücre biçimleri satırla
+birlikte taşınır/çoğaltılır; sütun silme sırasında eşleşmeleri korunur.
+
+Biçimler mevcut JSON içinde isteğe bağlı, izin verilen düğümlerle sınırlı belgeler olarak
+saklanır; HTML çalıştırılmaz. Eski düz metinler değişmeden okunur. Biçimli belgenin metni
+kaydedilmiş düz metinle uyuşmuyorsa düz metin gösterilir. Ağır yazı editörü yalnız admin
+bir rehberi düzenlemeye başladığında yüklenir.
+
 Güvenli admin kurulumundan sonra `supabase/009_portal_library.sql` uygulanır. İçerikler
 `portal_library_items` tablosunda, dosyalar özel `portal-library` deposunda saklanır;
 çalışma listesi ve onun yedeklerinden bağımsızdır. Alt konu başlıkları ve tablo biçimleri

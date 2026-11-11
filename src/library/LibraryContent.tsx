@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { librarySections, tableColorStyle, type LibraryBlock, type LibraryEntry } from './model'
+import RichTextView from './RichTextView'
 import { getLibraryAssetUrl } from './repository'
 
 function AssetView({ block, file }: { block: Extract<LibraryBlock, { path: string }>; file?: File }) {
@@ -47,10 +48,10 @@ export default function LibraryContent({ entry, files = new Map(), sectionId }: 
     {selectedSection ? <h3 className="library-subtopic-title">{selectedSection.title}</h3> : null}
     {blocks.map((block) => {
       if (block.type === 'section') return <h3 key={block.id} className="library-subtopic-title">{block.title}</h3>
-      if (block.type === 'text') return <div key={block.id} className="library-prose">{block.text}</div>
+      if (block.type === 'text') return <div key={block.id} className="library-prose"><RichTextView text={block.text} document={block.richText} /></div>
       if (block.type === 'table') return <div key={block.id} className="library-table-section">
         {block.caption ? <h3>{block.caption}</h3> : null}
-        <div className="library-table-scroll" tabIndex={0} role="region" aria-label={block.caption || 'Referans tablosu'}><table className={block.compact ? 'is-compact' : ''}><thead><tr>{block.headers.map((header, index) => <th key={index} scope="col" style={{ ...tableColorStyle(block.headerColor ?? '#18584e'), textAlign: block.align ?? 'left' }}>{header}</th>)}</tr></thead><tbody>{block.rows.map((row, index) => <tr key={index}>{block.headers.map((_, column) => column === 0 ? <th key={column} scope="row" style={{ ...tableColorStyle(block.rowColors?.[index]), textAlign: block.align ?? 'left' }}>{row[column]}</th> : <td key={column} style={{ ...tableColorStyle(block.rowColors?.[index]), textAlign: block.align ?? 'left' }}>{row[column]}</td>)}</tr>)}</tbody></table></div>
+        <div className="library-table-scroll" tabIndex={0} role="region" aria-label={block.caption || 'Referans tablosu'}><table className={block.compact ? 'is-compact' : ''}><thead><tr>{block.headers.map((header, index) => <th key={index} scope="col" style={{ ...tableColorStyle(block.headerColor ?? '#18584e'), textAlign: block.align ?? 'left' }}><RichTextView text={header} document={block.headerRichText?.[index]} /></th>)}</tr></thead><tbody>{block.rows.map((row, index) => <tr key={index}>{block.headers.map((_, column) => column === 0 ? <th key={column} scope="row" style={{ ...tableColorStyle(block.rowColors?.[index]), textAlign: block.align ?? 'left' }}><RichTextView text={row[column] ?? ''} document={block.rowRichText?.[index]?.[column]} /></th> : <td key={column} style={{ ...tableColorStyle(block.rowColors?.[index]), textAlign: block.align ?? 'left' }}><RichTextView text={row[column] ?? ''} document={block.rowRichText?.[index]?.[column]} /></td>)}</tr>)}</tbody></table></div>
       </div>
       return <AssetView key={block.id} block={block} file={files.get(block.id)} />
     })}
