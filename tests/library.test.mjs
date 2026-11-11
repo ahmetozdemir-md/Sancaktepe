@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { filterLibrary, libraryRow, newLibraryEntry, parseLibraryRow, parsePastedTable, safeSourceUrl, validateLibraryEntry, validAssetPath } from '../src/library/model.ts'
+import { filterLibrary, flattenLibrarySections, librarySections, reorderTableRows, tableColorStyle, libraryRow, newLibraryEntry, parseLibraryRow, parsePastedTable, safeSourceUrl, validateLibraryEntry, validAssetPath } from '../src/library/model.ts'
 
 const entry = (overrides = {}) => ({ ...newLibraryEntry(), title: 'CRRT — sitrat ayarı', category: 'Böbrek / CRRT', published: true, blocks: [{ id: 'text', type: 'text', text: 'Kurum tarafından eklenen içerik.' }], ...overrides })
 const filter = (entries, options = {}) => filterLibrary(entries, { query: '', kind: 'all', category: 'all', ...options })
@@ -53,4 +53,64 @@ test('remote parsing ignores malformed blocks and unsafe sources; storage preser
   const parsed = parseLibraryRow(raw)
   assert.deepEqual(parsed.blocks, item.blocks)
   assert.equal(parsed.sourceUrl, '')
+})
+
+
+test('legacy entries remain a single general section; subtopics round-trip without nesting asset paths', () => {
+  const legacy = entry()
+  assert.deepEqual(librarySections(legacy.blocks), [{ id: null, title: 'Genel içerik', blocks: legacy.blocks }])
+  const asset = { id: 'image', type: 'image', path: `${crypto.randomUUID()}/${crypto.randomUUID()}.png`, fileName: 'guide.png', caption: 'Kurum tablosu' }
+  const item = entry({ blocks: [...legacy.blocks, { id: 'vanco', type: 'section', title: 'Vankomisin' }, asset, { id: 'mero', type: 'section', title: 'Meropenem' }, { id: 'note', type: 'text', text: 'Örnek açıklama' }] })
+  const saved = parseLibraryRow(libraryRow(item))
+  assert.deepEqual(saved.blocks, item.blocks)
+  const groups = librarySections(saved.blocks)
+  assert.deepEqual(groups.map((group) => group.title), ['Genel içerik', 'Vankomisin', 'Meropenem'])
+  const reordered = flattenLibrarySections([groups[0], groups[2], groups[1]])
+  assert.equal(librarySections(reordered)[2].blocks[0].path, asset.path)
+  assert.ok(libraryRow({ ...item, blocks: reordered }).blocks.some((block) => block.path === asset.path))
+  assert.deepEqual(validateLibraryEntry(item), [])
+})
+test('empty subtopics, missing titles and duplicate block identities cannot be published', () => {
+  const marker = { id: 'subtopic', type: 'section', title: 'Vankomisin' }
+  assert.ok(validateLibraryEntry(entry({ blocks: [marker] })).some((issue) => issue.includes('metin, tablo veya dosya')))
+  assert.ok(validateLibraryEntry(entry({ blocks: [{ ...marker, title: '' }, { id: 'text', type: 'text', text: 'Not' }] })).some((issue) => issue.includes('Alt konu adı')))
+  assert.ok(validateLibraryEntry(entry({ blocks: [{ ...marker, id: 'text' }, { id: 'text', type: 'text', text: 'Not' }] })).some((issue) => issue.includes('benzersiz')))
+})
+test('table colors, alignment and spacing survive storage; missing legacy styles stay usable', () => {
+  const table = { id: 'table', type: 'table', caption: 'Örnek', headers: ['A', 'B'], rows: [['X', 'Y'], ['Z', 'W']], headerColor: '#234563', rowColors: ['#fff0bf', null], align: 'center', compact: true }
+  const item = entry({ blocks: [table] })
+  assert.deepEqual(parseLibraryRow(libraryRow(item)).blocks, [table])
+  assert.deepEqual(validateLibraryEntry(item), [])
+  const legacy = { id: 'old', type: 'table', caption: '', headers: ['Başlık'], rows: [['İçerik']] }
+  const parsed = parseLibraryRow(libraryRow(entry({ blocks: [legacy] }))).blocks[0]
+  assert.deepEqual(parsed.rows, legacy.rows)
+  assert.deepEqual(parsed.rowColors, [null])
+  assert.equal(parsed.align, 'left')
+  assert.equal(parsed.compact, false)
+})
+test('row movement, duplication and removal carry colors with the original content', () => {
+  const table = { id: 'table', type: 'table', caption: '', headers: ['A'], rows: [['Bir'], ['İki'], ['Üç']], rowColors: ['#fff0bf', '#e3effa', null] }
+  const updated = reorderTableRows(table, [2, 0, 0])
+  assert.deepEqual(updated.rows, [['Üç'], ['Bir'], ['Bir']])
+  assert.deepEqual(updated.rowColors, [null, '#fff0bf', '#fff0bf'])
+  updated.rows[1][0] = 'Düzenlendi'
+  assert.equal(updated.rows[2][0], 'Bir')
+  assert.equal(table.rows[0][0], 'Bir')
+})
+test('arbitrary CSS is rejected and untrusted stored colors cannot become CSS properties', () => {
+  const table = { id: 'table', type: 'table', caption: '', headers: ['A'], rows: [['X']], headerColor: 'url(https://example.org)', rowColors: ['red;display:none'], align: 'unsafe' }
+  const parsed = parseLibraryRow(libraryRow(entry({ blocks: [table] }))).blocks[0]
+  assert.equal(parsed.headerColor, undefined)
+  assert.deepEqual(parsed.rowColors, [null])
+  assert.equal(parsed.align, 'left')
+  assert.ok(validateLibraryEntry(entry({ blocks: [table] })).length >= 2)
+  assert.deepEqual(tableColorStyle('red;display:none'), {})
+  assert.equal(tableColorStyle('#ffffff').color, '#000000')
+  assert.equal(tableColorStyle('#18584e').color, '#ffffff')
+})
+test('thirty titles with subtopics retain reader visibility and ordering', () => {
+  const entries = Array.from({ length: 30 }, (_, index) => entry({ title: `Rehber ${String(index).padStart(2, '0')}`, blocks: [{ id: 'section', type: 'section', title: 'Alt konu' }, { id: 'text', type: 'text', text: 'Açıklama' }] }))
+  assert.equal(filter(entries).length, 30)
+  assert.equal(filter(entries)[0].title, 'Rehber 00')
+  assert.equal(filter([...entries, entry({ published: false }), entry({ archivedAt: '2026-11-11' })]).length, 30)
 })

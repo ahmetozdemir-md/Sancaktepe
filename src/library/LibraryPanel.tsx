@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { filterLibrary, newLibraryEntry, type LibraryEntry } from './model'
+import { filterLibrary, librarySections, newLibraryEntry, type LibraryEntry } from './model'
 import { libraryIsLocal, listLibraryEntries, removeNewLibraryAssets, saveLibraryEntry, uploadLibraryAsset } from './repository'
 import LibraryAccess from './LibraryAccess'
 import LibraryContent from './LibraryContent'
 import LibraryEditor from './LibraryEditor'
+import LibraryDirectory from './LibraryDirectory'
 import './library.css'
 
 function LibraryIcon({ kind }: { kind: 'reference' | 'announcement' }) {
@@ -35,6 +36,8 @@ function LibraryWorkspace({ admin = false, active = true, onBusyChange }: Props)
     try { const saved = JSON.parse(localStorage.getItem(FAVORITES_KEY) ?? '[]'); return new Set(Array.isArray(saved) ? saved.filter((id): id is string => typeof id === 'string') : []) } catch { return new Set() }
   })
   const [selected, setSelected] = useState<string | null>(null)
+  const [selectedSection, setSelectedSection] = useState<string | null>(null)
+  const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const [editing, setEditing] = useState<LibraryEntry | null>(null)
   const [busy, setBusy] = useState(false)
   const operationLock = useRef(false)
@@ -62,7 +65,7 @@ function LibraryWorkspace({ admin = false, active = true, onBusyChange }: Props)
   useEffect(() => {
     if (selected) detailHeading.current?.focus()
     else if (lastOpened.current) document.getElementById(`library-open-${lastOpened.current}`)?.focus()
-  }, [selected])
+  }, [selected, selectedSection])
   const favorite = (id: string) => setFavorites((previous) => {
     const next = new Set(previous)
     if (next.has(id)) next.delete(id); else next.add(id)
@@ -110,7 +113,17 @@ function LibraryWorkspace({ admin = false, active = true, onBusyChange }: Props)
   const available = entries.filter((entry) => admin ? !entry.archivedAt : entry.published && !entry.archivedAt)
   const current = entries.find((entry) => entry.id === selected && (admin || (entry.published && !entry.archivedAt)))
   if (editing) return <><LibraryEditor key={editing.id} initial={editing} onClose={() => setEditing(null)} onSave={save} busy={busy} /></>
-  if (current) return <><section className="card library-detail"><div className="library-detail-toolbar"><button type="button" className="ghost-button" onClick={() => setSelected(null)}>← Tüm başlıklar</button><div>{admin && !current.archivedAt ? <button type="button" className="secondary" onClick={() => setEditing(current)}>Düzenle</button> : null}<button type="button" className="ghost-button" aria-pressed={favorites.has(current.id)} onClick={() => favorite(current.id)}>{favorites.has(current.id) ? '★ Yıldızlı' : '☆ Yıldızla'}</button></div></div><div className="library-detail-head"><div className="library-card-tags"><span className={`library-kind ${current.kind}`}>{current.kind === 'announcement' ? 'Duyuru' : 'Hızlı rehber'}</span>{admin && !current.published ? <span>Taslak</span> : null}</div><h2 ref={detailHeading} tabIndex={-1}>{current.title}</h2>{current.summary ? <p>{current.summary}</p> : null}<small>Son güncelleme: {formatDate(current.updatedAt)}</small></div><LibraryContent entry={current} /></section></>
+  if (current) {
+    const topics = librarySections(current.blocks).filter((section) => section.id)
+    return <section className="card library-detail">
+      <div className="library-detail-toolbar"><button type="button" className="ghost-button" onClick={() => setSelected(null)}>← Tüm başlıklar</button><div>{admin && !current.archivedAt ? <button type="button" className="secondary" onClick={() => setEditing(current)}>Düzenle</button> : null}<button type="button" className="ghost-button" aria-pressed={favorites.has(current.id)} onClick={() => favorite(current.id)}>{favorites.has(current.id) ? '★ Yıldızlı' : '☆ Yıldızla'}</button></div></div>
+      <div className="library-detail-head"><div className="library-card-tags"><span className={`library-kind ${current.kind}`}>{current.kind === 'announcement' ? 'Duyuru' : 'Hızlı rehber'}</span>{admin && !current.published ? <span>Taslak</span> : null}</div><h2 ref={detailHeading} tabIndex={-1}>{current.title}</h2>{current.summary ? <p>{current.summary}</p> : null}<small>Son güncelleme: {formatDate(current.updatedAt)}</small></div>
+      <div className={topics.length ? 'library-reading-layout' : ''}>
+        {topics.length ? <nav className="library-reading-topics" aria-label="Rehber alt konuları"><p>BU REHBERDE</p><button type="button" aria-current={!selectedSection ? 'true' : undefined} onClick={() => setSelectedSection(null)}>Tüm içerik</button>{topics.map((topic) => <button type="button" key={topic.id} aria-current={selectedSection === topic.id ? 'true' : undefined} onClick={() => setSelectedSection(topic.id)}>{topic.title}</button>)}</nav> : null}
+        <LibraryContent entry={current} sectionId={selectedSection} />
+      </div>
+    </section>
+  }
   return <div className="library-workspace">
     <section className="card library-directory" aria-labelledby="library-directory-title">
       <header className="library-section-heading"><div><p className="eyebrow">KLİNİK KÜTÜPHANE</p><h2 id="library-directory-title">Duyurular ve Rehberler</h2><p>{admin ? 'Klinik ekibinin ihtiyaç duyduğu bilgileri tek yerde düzenle.' : 'Güncel duyurular ve ihtiyaç duyduğun bilgilere hızlı erişim.'}</p></div>{admin ? <button type="button" onClick={() => { setEditing(newLibraryEntry()); setNotice('') }}>+ Yeni İçerik</button> : null}</header>
@@ -119,12 +132,10 @@ function LibraryWorkspace({ admin = false, active = true, onBusyChange }: Props)
       {notice ? <p className="notice success" role="status">{notice}</p> : null}
       {error ? <p className="notice warning" role="alert">{error}</p> : null}
       {loading && !loaded ? <div className="library-empty" role="status">İçerikler yükleniyor…</div> : loaded && !visible.length ? <div className="library-empty"><LibraryIcon kind="reference" /><h3>{!available.length && status !== 'archived' ? 'Henüz içerik eklenmedi' : 'Bu filtrelerle eşleşen başlık yok'}</h3><p>{!available.length ? admin ? 'İlk duyurunu veya hızlı rehberini ekleyerek başla.' : 'Yayınlanan duyurular ve rehberler burada görünecek.' : 'Filtreleri değiştirerek tekrar dene.'}</p>{available.length ? <button type="button" className="ghost-button" onClick={() => { setKind('all'); setOnlyFavorites(false); setStatus('all') }}>Filtreleri Temizle</button> : null}</div> : null}
-      {visible.length ? <div className="library-grid">{visible.map((entry) => <article key={entry.id} className={`library-card ${entry.kind}${entry.pinned ? ' is-pinned' : ''}`}>
-        <div className="library-card-top"><span className={`library-card-symbol ${entry.kind}`}><LibraryIcon kind={entry.kind} /></span><div>{entry.pinned ? <span className="library-pinned">Sabit</span> : null}{admin ? <span className={`library-status ${entry.archivedAt ? 'archived' : entry.published ? 'published' : 'draft'}`}>{entry.archivedAt ? 'Arşiv' : entry.published ? 'Yayında' : 'Taslak'}</span> : null}<button type="button" className="library-star" aria-label={`${entry.title}: ${favorites.has(entry.id) ? 'yıldızı kaldır' : 'yıldızla'}`} aria-pressed={favorites.has(entry.id)} onClick={() => favorite(entry.id)}>{favorites.has(entry.id) ? '★' : '☆'}</button></div></div>
-        <button id={`library-open-${entry.id}`} type="button" className="library-card-open" onClick={() => { lastOpened.current = entry.id; setSelected(entry.id) }}><span className="library-kicker">{entry.kind === 'announcement' ? 'Duyuru' : 'Rehber'}</span><h3>{entry.title}</h3>{entry.summary ? <p>{entry.summary}</p> : <p className="library-card-no-summary">İçeriği görüntüle</p>}<span className="library-card-read">İçeriği aç <span aria-hidden="true">↗</span></span></button>
-        <footer><span>{[...new Set(entry.blocks.map((block) => ({ text: 'Metin', table: 'Tablo', image: 'Görsel', pdf: 'PDF' })[block.type]))].join(' · ')}</span><time dateTime={entry.updatedAt}>{formatDate(entry.updatedAt)}</time></footer>
-        {admin ? <div className="library-card-admin">{entry.archivedAt ? <button type="button" className="ghost-button" disabled={busy} onClick={() => void archive(entry, true)}>Taslağa Geri Al</button> : <><button type="button" className="secondary" disabled={busy} onClick={() => setEditing(entry)}>Düzenle</button><button type="button" className="ghost-button" disabled={busy} onClick={() => void archive(entry)}>Arşivle</button></>}</div> : null}
-      </article>)}</div> : null}
+      {visible.length ? <LibraryDirectory entries={visible} admin={admin} busy={busy} favorites={favorites} expanded={expanded}
+        onExpand={(id) => setExpanded((previous) => { const next = new Set(previous); if (next.has(id)) next.delete(id); else next.add(id); return next })}
+        onFavorite={favorite} onEdit={setEditing} onArchive={(entry, restore) => void archive(entry, restore)}
+        onOpen={(entry, sectionId) => { lastOpened.current = entry.id; setSelectedSection(sectionId ?? null); setSelected(entry.id) }} /> : null}
     </section>
   </div>
 }

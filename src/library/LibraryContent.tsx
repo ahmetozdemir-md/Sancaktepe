@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import type { LibraryBlock, LibraryEntry } from './model'
+import { librarySections, tableColorStyle, type LibraryBlock, type LibraryEntry } from './model'
 import { getLibraryAssetUrl } from './repository'
 
 function AssetView({ block, file }: { block: Extract<LibraryBlock, { path: string }>; file?: File }) {
@@ -39,13 +39,18 @@ function AssetView({ block, file }: { block: Extract<LibraryBlock, { path: strin
   </figure>
 }
 
-export default function LibraryContent({ entry, files = new Map() }: { entry: LibraryEntry; files?: Map<string, File> }) {
+export default function LibraryContent({ entry, files = new Map(), sectionId }: { entry: LibraryEntry; files?: Map<string, File>; sectionId?: string | null }) {
+  const sections = librarySections(entry.blocks)
+  const selectedSection = sections.find((section) => section.id === sectionId && sectionId)
+  const blocks = selectedSection ? selectedSection.blocks : entry.blocks
   return <div className="library-content">
-    {entry.blocks.map((block) => {
+    {selectedSection ? <h3 className="library-subtopic-title">{selectedSection.title}</h3> : null}
+    {blocks.map((block) => {
+      if (block.type === 'section') return <h3 key={block.id} className="library-subtopic-title">{block.title}</h3>
       if (block.type === 'text') return <div key={block.id} className="library-prose">{block.text}</div>
       if (block.type === 'table') return <div key={block.id} className="library-table-section">
         {block.caption ? <h3>{block.caption}</h3> : null}
-        <div className="library-table-scroll" tabIndex={0} role="region" aria-label={block.caption || 'Referans tablosu'}><table><thead><tr>{block.headers.map((header, index) => <th key={index} scope="col">{header}</th>)}</tr></thead><tbody>{block.rows.map((row, index) => <tr key={index}>{block.headers.map((_, column) => column === 0 ? <th key={column} scope="row">{row[column]}</th> : <td key={column}>{row[column]}</td>)}</tr>)}</tbody></table></div>
+        <div className="library-table-scroll" tabIndex={0} role="region" aria-label={block.caption || 'Referans tablosu'}><table className={block.compact ? 'is-compact' : ''}><thead><tr>{block.headers.map((header, index) => <th key={index} scope="col" style={{ ...tableColorStyle(block.headerColor ?? '#18584e'), textAlign: block.align ?? 'left' }}>{header}</th>)}</tr></thead><tbody>{block.rows.map((row, index) => <tr key={index}>{block.headers.map((_, column) => column === 0 ? <th key={column} scope="row" style={{ ...tableColorStyle(block.rowColors?.[index]), textAlign: block.align ?? 'left' }}>{row[column]}</th> : <td key={column} style={{ ...tableColorStyle(block.rowColors?.[index]), textAlign: block.align ?? 'left' }}>{row[column]}</td>)}</tr>)}</tbody></table></div>
       </div>
       return <AssetView key={block.id} block={block} file={files.get(block.id)} />
     })}

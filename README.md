@@ -56,18 +56,26 @@ Otomatik/manüel yedek geçmişi için `supabase/002_portal_state_history.sql` d
 
 ## Duyurular ve Rehberler
 
-Uzman/asistan panelinin dördüncü sekmesinde yayınlanan içerikler kartlar halinde görünür.
+Uzman/asistan panelinin dördüncü sekmesinde yayınlanan içerikler 20–30 başlığı
+rahatça taramaya uygun kompakt bir liste halinde görünür. Alt konulu rehberler açılıp
+kapanır; okuyucu örneğin Antibiyotikler → Vankomisin seçerek doğrudan ilgili içeriğe geçer.
 Duyuru/rehber türü ve cihazda tutulan yıldızlılar ile filtrelenebilir. Arama, kategori
 alanları ve başlık sayaçları gösterilmez; admin içerik formunda da kategori istenmez. Sabitlenen içerikler üstte, duyurular kendi içinde güncelden eskiye sıralanır.
 
 Admin panelindeki aynı adlı sekmede metin, düzenlenebilir tablo, PNG/JPG/WebP ve PDF
-bölümleri eklenir. Excel/Sheets'ten başlık satırı dahil tablo yapıştırılabilir. Bölüm sırası,
+bölümleri eklenir. İsteğe bağlı alt konular ayrı seçilerek düzenlenir ve içerikleriyle birlikte
+yeniden sıralanabilir. Mevcut içerikler otomatik olarak genel içerik bölümünde açılır.
+Excel/Sheets'ten başlık satırı dahil tablo yapıştırılabilir. Başlık ve veri satırlarına hazır
+veya özel HEX renkleri uygulanır; yazı rengi kontrasta göre seçilir. Hizalama, sıkı/rahat
+satır aralığı, satır taşıma ve çoğaltma desteklenir; renkler satırla birlikte taşınır. Bölüm sırası,
 önizleme, taslak/yayınlama ve arşivden taslağa geri alma desteklenir. Dosya sınırı 8 MB'dır;
 görseller özgün çözünürlükte saklanır ve büyütülebilir. Klinik içerik otomatik oluşturulmaz.
 
 Güvenli admin kurulumundan sonra `supabase/009_portal_library.sql` uygulanır. İçerikler
 `portal_library_items` tablosunda, dosyalar özel `portal-library` deposunda saklanır;
-çalışma listesi ve onun yedeklerinden bağımsızdır. Mevcut yetkili Supabase admin oturumu
+çalışma listesi ve onun yedeklerinden bağımsızdır. Alt konu başlıkları ve tablo biçimleri
+mevcut `blocks` JSON alanında saklanır; ek veritabanı geçişi gerektirmez. Dosya yolları
+erişim politikalarıyla uyumlu olarak üst seviyede kalır. Mevcut yetkili Supabase admin oturumu
 kullanılır. Yerel admin girişinde Supabase oturumu yoksa bu sekme yetkili hesapla giriş ister.
 Taslaklar/arşivler yalnız admine açıktır; okuyucular yayınlanmış içeriklerin dosyaları için
 bir saatlik imzalı bağlantı alır. Yayından kaldırınca yeni bağlantı üretilemez; daha önce
