@@ -115,6 +115,14 @@ Bunun için sırasıyla:
 
 Bu modda asistanlar listeyi okumaya devam eder; veri yazma, yedek alma ve yedekten dönme sadece yetkili Supabase admin oturumuyla yapılır.
 
+## Asistan düzenleme
+
+Asistan kartındaki **Düzenle** düğmesi ad-soyad ve kıdem alanlarını tek pencerede açar.
+Değişiklikler birlikte kaydedilir; isim değişikliğinde ortak kişi kimliği ve geçmiş atamalar
+korunur. Seçili kıdem numarası boş gruplar olsa bile yeniden numaralandırılmaz; diğer
+asistanların kıdemleri değişmez. Aynı penceredeki **Asistanı sil** seçeneği, karttaki çarpı
+ve Toplu Veri Girişi ile aynı isimli silme onayını açar. Vazgeçmek kayıtları değiştirmez.
+
 ## Asistan Giriş Şifresi
 
 Ortak asistan şifresi ve hatırlanan cihaz doğrulaması için güvenli admin modu kurulduktan sonra

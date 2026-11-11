@@ -30,7 +30,8 @@ import { readPortalState, readPortalRevision, isPortalAccessError, type PortalCl
 import { canStartPortalRefresh, canAdoptPortalRefresh, type PortalRefreshContext } from './portalRefreshGuard.js'
 import { AssistantIdentityControls } from './AssistantRegistryPanel'
 import AssistantRemovalDialog from './AssistantRemovalDialog'
-import { assistantDutyEnabled, assistantIdentityForName, ensureAssistantRegistry, renameAssistantInPlanner, renameAssistantBindings, setAssistantDutyEnabled, setAssistantArchived } from './assistantIdentity.js'
+import AssistantEditDialog from './AssistantEditDialog'
+import { assistantDutyEnabled, assistantIdentityForName, ensureAssistantRegistry, updateAssistantProfileInPlanner, retainAssistantRanks, renameAssistantBindings, setAssistantDutyEnabled, setAssistantArchived } from './assistantIdentity.js'
 import {
   isCloudWriteEnabled,
   isSupabaseAdminAuthRequired,
@@ -786,35 +787,6 @@ function buildRandomAssistantRanks(assistants: string[]): AssistantRanks {
   ) as AssistantRanks
 }
 
-function compactAssistantRanks(assistants: string[], ranks: AssistantRanks): AssistantRanks {
-  if (!assistants.length) {
-    return {}
-  }
-
-  const buckets = new Map<number, string[]>()
-  assistants.forEach((assistant) => {
-    const safeLevel = toSafeSeniorityLevel(ranks[assistant] ?? 1)
-    if (!buckets.has(safeLevel)) {
-      buckets.set(safeLevel, [])
-    }
-    buckets.get(safeLevel)?.push(assistant)
-  })
-
-  const presentLevels = [...buckets.keys()].sort((a, b) => a - b)
-  const levelMap = new Map<number, SeniorityLevel>()
-  presentLevels.forEach((originalLevel, index) => {
-    levelMap.set(originalLevel, index + 1)
-  })
-
-  return Object.fromEntries(
-    assistants.map((assistant) => {
-      const originalLevel = toSafeSeniorityLevel(ranks[assistant] ?? 1)
-      const targetLevel = levelMap.get(originalLevel) ?? 1
-      return [assistant, targetLevel]
-    }),
-  ) as AssistantRanks
-}
-
 function normalizeAssistantRanks(raw: unknown, assistants: string[]): AssistantRanks {
   const parsedRanks: Partial<Record<string, SeniorityLevel>> = {}
   if (raw && typeof raw === 'object') {
@@ -836,7 +808,7 @@ function normalizeAssistantRanks(raw: unknown, assistants: string[]): AssistantR
     ]),
   ) as AssistantRanks
 
-  return compactAssistantRanks(assistants, merged)
+  return retainAssistantRanks(assistants, merged)
 }
 
 function normalizeDutySite(rawSite: string): DutySite | null {
@@ -2469,6 +2441,8 @@ function App() {
   const [dutyDeleteMonth, setDutyDeleteMonth] = useState(currentMonthISO)
   const [assistantToRemove, setAssistantToRemove] = useState('')
   const [assistantRemovalTarget, setAssistantRemovalTarget] = useState<string | null>(null)
+  const [assistantEditingId, setAssistantEditingId] = useState<string | null>(null)
+  const editingAssistant = assistantEditingId ? data.assistantRegistry?.[assistantEditingId] : undefined
   const [locationToRemove, setLocationToRemove] = useState('')
   const [manualCleanupDay, setManualCleanupDay] = useState(todayISO)
   const [cellDrafts, setCellDrafts] = useState<Record<string, string>>({})
@@ -2849,8 +2823,8 @@ function App() {
   const portalAccessMode = isAdminCloudAuthVerified ? 'admin' : assistantAccessRemembered ? 'assistant' : ''
   const portalViewRef = useRef<PortalRefreshContext>({ accessMode: '', role: '', hydrated: false, revision: null, payload: '', savedPayload: '', editVersion: 0, visible: true, saving: false, dutyPlannerOpen: false, ownersEditMode: false, plannerEditing: false, bulkBusy: false, libraryBusy: false })
   useLayoutEffect(() => {
-    portalViewRef.current = { accessMode: portalAccessMode, role: session?.role ?? '', hydrated: cloudHydratedRef.current, revision: cloudRevisionRef.current, payload: cloudPayload, savedPayload: cloudPayloadRef.current, editVersion: portalEditVersionRef.current, visible: true, saving: isCloudSaving, dutyPlannerOpen, ownersEditMode, plannerEditing: Object.values(plannerEditModes).some(Boolean), bulkBusy: bulkImportBusyRef.current, libraryBusy: libraryBusyRef.current }
-  }, [portalAccessMode, session, cloudPayload, isCloudSaving, dutyPlannerOpen, ownersEditMode, plannerEditModes])
+    portalViewRef.current = { accessMode: portalAccessMode, role: session?.role ?? '', hydrated: cloudHydratedRef.current, revision: cloudRevisionRef.current, payload: cloudPayload, savedPayload: cloudPayloadRef.current, editVersion: portalEditVersionRef.current, visible: true, saving: isCloudSaving, dutyPlannerOpen, ownersEditMode, plannerEditing: Boolean(assistantEditingId) || Object.values(plannerEditModes).some(Boolean), bulkBusy: bulkImportBusyRef.current, libraryBusy: libraryBusyRef.current }
+  }, [portalAccessMode, session, cloudPayload, isCloudSaving, dutyPlannerOpen, ownersEditMode, plannerEditModes, assistantEditingId])
   const portalRefreshContext = useCallback((): PortalRefreshContext => ({
     ...portalViewRef.current, hydrated: cloudHydratedRef.current, revision: cloudRevisionRef.current,
     savedPayload: cloudPayloadRef.current, editVersion: portalEditVersionRef.current,
@@ -5057,7 +5031,7 @@ function App() {
       }
 
       const nextAssistants = uniqueSortedNames([...previous.assistants, candidate])
-      const nextAssistantRanks = compactAssistantRanks(nextAssistants, {
+      const nextAssistantRanks = retainAssistantRanks(nextAssistants, {
         ...previous.assistantRanks,
         [candidate]: toSafeSeniorityLevel(assistantRankInput, 1),
       })
@@ -5288,7 +5262,7 @@ function App() {
       const registry = ensureAssistantRegistry(previous.assistants, previous.assistantRegistry, undefined, currentMonthISO).registry
       const identity = assistantIdentityForName(registry, name)
       const remainingAssistants = previous.assistants.filter((assistant) => assistant !== name)
-      const nextAssistantRanks = compactAssistantRanks(
+      const nextAssistantRanks = retainAssistantRanks(
         remainingAssistants,
         Object.fromEntries(
           Object.entries(previous.assistantRanks).filter(([assistantName]) => assistantName !== name),
@@ -5346,15 +5320,26 @@ function App() {
     showSuccess(`${registry[identityId].name} · ${registryMonth} için ${enabled ? 'nöbete dahil edildi' : 'nöbet listesinden çıkarıldı'}. Önceki kayıtlar korundu.`)
   }
 
-  const renameSharedAssistant = async (identityId: string, name: string) => {
-    if (!(await createPreChangeBackup('before-assistant-rename', 'assistant-rename'))) throw new Error('İsim değişikliği öncesinde yedek alınamadı.')
-    const current = latestDataRef.current
-    const oldName = current.assistantRegistry?.[identityId]?.name
-    if (!oldName) throw new Error('Kişi kaydı yenilendi. Tekrar dene.')
-    const next = renameAssistantInPlanner(current, identityId, name)
-    setData(next)
-    setUserBindings(previous => renameAssistantBindings(previous, oldName, name))
-    showSuccess('İsim, geçmiş kayıtlar ve nöbet programındaki kişi kimliği korunarak güncellendi.')
+  const saveAssistantProfile = async (identityId: string, name: string, rank: number) => {
+    if (bulkImportBusyRef.current || isCloudSaving || !isSecureCloudWriteUnlocked || (isSupabaseConfigured && cloudState !== 'ready')) throw new Error('Kayıt bağlantısı hazır değil. Devam eden işlemin bitmesini bekleyip tekrar dene.')
+    if (ownersEditMode || Object.values(plannerEditModes).some(Boolean)) throw new Error('Önce açık planlama veya alan taslağını kaydet ya da iptal et.')
+    // Validate before taking a backup, then apply both changes to the latest snapshot together.
+    updateAssistantProfileInPlanner(latestDataRef.current, identityId, name, rank)
+    bulkImportBusyRef.current = true
+    setBulkRecordBusy(true)
+    try {
+      if (!(await createPreChangeBackup('before-assistant-edit', 'assistant-edit'))) throw new Error('Asistan düzenlemesi öncesinde yedek alınamadı.')
+      const current = latestDataRef.current
+      const next = updateAssistantProfileInPlanner(current, identityId, name, rank)
+      const oldName = current.assistantRegistry![identityId].name
+      const nextName = next.assistantRegistry![identityId].name
+      setData(next)
+      if (oldName !== nextName) setUserBindings(previous => renameAssistantBindings(previous, oldName, nextName))
+      showSuccess(`${nextName} bilgileri güncellendi · ${rank}. kıdem.`)
+    } finally {
+      bulkImportBusyRef.current = false
+      setBulkRecordBusy(false)
+    }
   }
 
   const addDutyPerson = (dayKey: string) => {
@@ -8257,7 +8242,7 @@ function App() {
                 </button>
               </div>
 
-              <p className="hint-text">Asistanı çıkarmak için kartın sağ üstündeki × işaretine bas. İşlem öncesinde onay istenir.</p>
+              <p className="hint-text">İsim ve kıdem değişikliği ya da asistanı çıkarma işlemi için Düzenle’yi kullan.</p>
               <label className="registry-month-control"><span>Nöbet listesi ayı</span><input type="month" value={registryMonth} onInput={event => { if (isValidMonthISO(event.currentTarget.value)) setRegistryMonth(event.currentTarget.value) }} onChange={event => { if (isValidMonthISO(event.target.value)) setRegistryMonth(event.target.value) }} /></label>
               {assistantsBySeniority.map((group) => (
                 <section key={`assistant-rank-group-${group.level}`} className="assistant-rank-group">
@@ -8272,7 +8257,7 @@ function App() {
                         return <article key={identity?.id ?? assistant} className="assistant-chip assistant-identity-card">
                           <strong className="assistant-chip-name">{assistant}</strong>
                           <button type="button" className="assistant-card-remove" aria-label={`${assistant} isimli asistanı çıkar`} title="Asistanı çıkar" disabled={!isSecureCloudWriteUnlocked || isCloudSaving || bulkRecordBusy || (isSupabaseConfigured && cloudState !== 'ready') || ownersEditMode || Object.values(plannerEditModes).some(Boolean)} onClick={() => setAssistantRemovalTarget(assistant)}><span aria-hidden="true">×</span></button>
-                          {identity ? <AssistantIdentityControls id={identity.id} name={assistant} dutyEnabled={assistantDutyEnabled(identity, registryMonth) ?? false} archived={identity.archived} disabled={!isSecureCloudWriteUnlocked || isCloudSaving || cloudState !== 'ready' || ownersEditMode || Object.values(plannerEditModes).some(Boolean)} onDutyChange={changeAssistantDuty} onRename={renameSharedAssistant} /> : <span>Kişi kaydı bekleniyor…</span>}
+                          {identity ? <AssistantIdentityControls id={identity.id} name={assistant} dutyEnabled={assistantDutyEnabled(identity, registryMonth) ?? false} archived={identity.archived} disabled={!isSecureCloudWriteUnlocked || isCloudSaving || bulkRecordBusy || (isSupabaseConfigured && cloudState !== 'ready') || ownersEditMode || Object.values(plannerEditModes).some(Boolean)} onDutyChange={changeAssistantDuty} onEdit={setAssistantEditingId} /> : <span>Kişi kaydı bekleniyor…</span>}
                         </article>
                       })}
                     </div>
@@ -9772,6 +9757,7 @@ function App() {
 
         </main>
       )}
+      {assistantEditingId && editingAssistant && session.role === 'admin' ? <AssistantEditDialog key={assistantEditingId} name={editingAssistant.name} rank={data.assistantRanks[editingAssistant.name] ?? 1} rankOptions={assistantInputLevels} disabled={!isSecureCloudWriteUnlocked || isCloudSaving || bulkRecordBusy || (isSupabaseConfigured && cloudState !== 'ready')} onSave={(name, rank) => saveAssistantProfile(assistantEditingId, name, rank)} onCancel={() => setAssistantEditingId(null)} onRemove={() => { setAssistantRemovalTarget(editingAssistant.name); setAssistantEditingId(null) }} /> : null}
       {assistantRemovalTarget && session.role === 'admin' ? <AssistantRemovalDialog name={assistantRemovalTarget} disabled={!data.assistants.includes(assistantRemovalTarget) || !isSecureCloudWriteUnlocked || isCloudSaving || bulkRecordBusy || (isSupabaseConfigured && cloudState !== 'ready') || ownersEditMode || Object.values(plannerEditModes).some(Boolean)} onCancel={() => setAssistantRemovalTarget(null)} onConfirm={() => void runBulkRecordChange(() => { removeAssistant(assistantRemovalTarget); setAssistantRemovalTarget(null) })} /> : null}
       {appFooter}
     </div>

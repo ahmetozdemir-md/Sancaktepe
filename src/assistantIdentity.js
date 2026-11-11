@@ -157,3 +157,22 @@ export function renameAssistantBindings(bindings, previousName, nextName) {
   const key = assistantNameKey(previousName);
   return Object.fromEntries(Object.entries(bindings ?? {}).map(([id,name])=>[id,assistantNameKey(name)===key?cleanName(nextName):name]));
 }
+
+/** Keep explicit seniority numbers, including gaps; never renumber other people. */
+export function retainAssistantRanks(assistants, ranks) {
+  return Object.fromEntries(assistants.map(name => {
+    const value = Number(ranks?.[name]);
+    return [name, Number.isSafeInteger(value) && value >= 1 ? value : 1];
+  }));
+}
+
+/** Validate the whole profile before returning a new planner snapshot. */
+export function updateAssistantProfileInPlanner(planner, id, requestedName, rank) {
+  const identity = planner.assistantRegistry?.[id];
+  if (!identity || identity.archived || !planner.assistants.includes(identity.name)) throw new Error('Aktif asistan kaydı bulunamadı. Listeyi yenileyip tekrar dene.');
+  if (!Number.isSafeInteger(rank) || rank < 1) throw new Error('Geçerli bir kıdem seç.');
+  const name = uniqueName(requestedName);
+  const next = renameAssistantInPlanner(planner, id, name);
+  next.assistantRanks = {...next.assistantRanks, [next.assistantRegistry[id].name]: rank};
+  return next;
+}

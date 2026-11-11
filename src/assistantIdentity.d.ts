@@ -11,3 +11,5 @@ export function setAssistantDutyEnabled(registry:AssistantRegistry,id:string,ena
 export function assistantIdentityForName(registry:AssistantRegistry,name:string):({id:string}&AssistantIdentity)|null;
 export function renameAssistantInPlanner<T extends {assistants:string[];assistantRegistry?:AssistantRegistry}>(planner:T,id:string,name:string):T;
 export function renameAssistantBindings(bindings:Record<string,string>,previousName:string,nextName:string):Record<string,string>;
+export function retainAssistantRanks(assistants:string[],ranks:Record<string,number>):Record<string,number>;
+export function updateAssistantProfileInPlanner<T extends {assistants:string[];assistantRanks:Record<string,number>;assistantRegistry?:AssistantRegistry}>(planner:T,id:string,name:string,rank:number):T;

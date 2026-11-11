@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {ensureAssistantRegistry,assistantDutyEnabled,setAssistantArchived,setAssistantDutyEnabled,assistantIdentityForName,renameAssistantInPlanner,renameAssistantBindings,validateAssistantRegistry} from '../src/assistantIdentity.js';
+import {ensureAssistantRegistry,retainAssistantRanks,updateAssistantProfileInPlanner,assistantDutyEnabled,setAssistantArchived,setAssistantDutyEnabled,assistantIdentityForName,renameAssistantInPlanner,renameAssistantBindings,validateAssistantRegistry} from '../src/assistantIdentity.js';
 const people=[{id:'p-active',name:'İpek',from:'2026-10-01',until:null},{id:'p-old',name:'Mezun',from:'2026-10-01',until:'2026-11-01'}];
 const seed=()=>ensureAssistantRegistry(['İpek','Mezun','Yeni Rotasyoner'],{},people,'2026-11');
 test('initial identities link the exact existing person IDs and retain current duty participation only',()=>{
@@ -61,4 +61,36 @@ test('an old label reappearing after a rename cannot bind the same planner perso
 
 test('archiving cancels future automatic re-inclusion while preserving prior monthly history',()=>{
  const before=seed().registry;const planned=setAssistantDutyEnabled(before,'p-active',true,'2027-02');const archived=setAssistantArchived(planned,'p-active',true,'2026-12');assert.equal(assistantDutyEnabled(archived['p-active'],'2026-11'),true);assert.equal(assistantDutyEnabled(archived['p-active'],'2027-02'),false);assert.equal(archived['p-active'].dutyEnabled,false);assert.equal(validateAssistantRegistry(archived).valid,true);const gone=ensureAssistantRegistry(['Mezun'],planned,people,'2026-12').registry;assert.equal(assistantDutyEnabled(gone['p-active'],'2027-02'),false);assert.equal(validateAssistantRegistry(gone).valid,true);
+});
+
+
+test('profile changes name and rank together while preserving identity, duty history and other ranks', () => {
+ const before = planner(); before.assistantRegistry.p.dutyHistory = [{from:'2026-11',enabled:true}];
+ const original = structuredClone(before);
+ const next = updateAssistantProfileInPlanner(before, 'p', '  İpek Deniz  ', 5);
+ assert.deepEqual(before, original);
+ assert.deepEqual(next.assistantRanks, {'İpek Deniz':5,Diğer:1});
+ assert.equal(next.assistantRegistry.p.plannerPersonId, 'p-active');
+ assert.deepEqual(next.assistantRegistry.p.dutyHistory, before.assistantRegistry.p.dutyHistory);
+ assert.equal(next.dutyRoster['2026-11-01'][0].name, 'İpek Deniz');
+ assert.equal(next.assistantRegistry.p.name, 'İpek Deniz');
+ assert.deepEqual(next.specialistDutyRoster, before.specialistDutyRoster);
+});
+test('rank-only editing preserves assignments and explicit seniority gaps through normalization', () => {
+ const before = planner(), next = updateAssistantProfileInPlanner(before, 'p', 'İpek', 5);
+ assert.deepEqual(next.assistantRanks, {İpek:5,Diğer:1});
+ for (const field of ['assistants','locationOwners','locationOwnersByMonth','manualAssignments','dutyRoster','rotatorRoster']) assert.deepEqual(next[field], before[field]);
+ assert.deepEqual(retainAssistantRanks(next.assistants, next.assistantRanks), {İpek:5,Diğer:1});
+ assert.deepEqual(retainAssistantRanks(['İpek'], next.assistantRanks), {İpek:5});
+ assert.deepEqual(retainAssistantRanks(['İpek','Yeni'], {...next.assistantRanks,Yeni:3}), {İpek:5,Yeni:3});
+});
+test('invalid profiles and unavailable people never partially change name or rank', () => {
+ const before = planner(), original = structuredClone(before);
+ for (const rank of [0,-1,1.5,NaN,Infinity,'2']) assert.throws(() => updateAssistantProfileInPlanner(before,'p','Yeni Ad',rank), /kıdem/);
+ assert.throws(() => updateAssistantProfileInPlanner(before,'p','Diğer',3), /başka/);
+ assert.throws(() => updateAssistantProfileInPlanner(before,'p',' ',3));
+ assert.throws(() => updateAssistantProfileInPlanner(before,'missing','İpek',3), /Aktif/);
+ assert.throws(() => updateAssistantProfileInPlanner({...before,assistants:['Diğer']},'p','İpek',3), /Aktif/);
+ assert.throws(() => updateAssistantProfileInPlanner({...before,assistantRegistry:{...before.assistantRegistry,p:{...before.assistantRegistry.p,archived:true}}},'p','İpek',3), /Aktif/);
+ assert.deepEqual(before, original);
 });
