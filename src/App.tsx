@@ -56,6 +56,7 @@ import AssistantMonthlyTableView, {
 } from './AssistantMonthlyTableView'
 
 const LibraryPanel = lazy(() => import('./library/LibraryPanel'))
+const ContributorPasswordPanel = lazy(() => import('./library/ContributorPasswordPanel'))
 
 type PanelMode = 'admin' | 'observer'
 type AdminSection =
@@ -8013,7 +8014,7 @@ function App() {
                 className={adminSection === 'password' ? 'active' : ''}
                 onClick={() => selectAdminSection('password')}
               >
-                Şifre
+                Şifreler
               </button>
             </div>
           </section>
@@ -9006,6 +9007,7 @@ function App() {
           ) : null}
 
           {adminSection === 'password' ? (
+            <>
             <section className="card fade-up delay-5 assistant-password-admin-card">
               <div className="assistant-password-admin-heading">
                 <div>
@@ -9085,6 +9087,8 @@ function App() {
                 </button>
               </div>
             </section>
+            <Suspense fallback={<section className="card" role="status">Rehber şifre ayarları yükleniyor…</section>}><ContributorPasswordPanel /></Suspense>
+            </>
           ) : null}
         </main>
       ) : (
@@ -9124,7 +9128,7 @@ function App() {
           </section>
 
           {observerSection === 'library' ? <Suspense fallback={<section className="card" role="status">Rehberler yükleniyor…</section>}>
-            <LibraryPanel />
+            <LibraryPanel onBusyChange={onLibraryBusyChange} contributorIdentity={loggedAssistantName && loggedAssistantName !== SPECIALIST_LOGIN_NAME ? { parentToken: safeReadAssistantAccessToken() ?? '', author: loggedAssistantName } : undefined} />
           </Suspense> : null}
 
           {observerSection === 'myPanel' ? (

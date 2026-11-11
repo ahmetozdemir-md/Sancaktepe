@@ -10,10 +10,11 @@ interface Props {
   onSave: (entry: LibraryEntry, files: Map<string, File>) => Promise<void>
   onClose: () => void
   busy: boolean
+  contributionMode?: boolean
 }
 const blockLabels = { text: 'Metin', table: 'Tablo', image: 'Görsel', pdf: 'PDF dosyası' }
 
-export default function LibraryEditor({ initial, onSave, onClose, busy }: Props) {
+export default function LibraryEditor({ initial, onSave, onClose, busy, contributionMode = false }: Props) {
   const [draft, setDraft] = useState<LibraryEntry>(() => structuredClone(initial))
   const [files, setFiles] = useState<Map<string, File>>(new Map())
   const [issues, setIssues] = useState<string[]>([])
@@ -59,8 +60,11 @@ export default function LibraryEditor({ initial, onSave, onClose, busy }: Props)
     if (draft.blocks.length + selected.length > MAX_BLOCKS) { setIssues([`En fazla ${MAX_BLOCKS} içerik bölümü ekleyebilirsin. Gerekirse ayrı bir rehber oluştur.`]); return }
     setReadingFile(true)
     try {
-      await Promise.all(selected.map(validateAsset))
-      const additions = selected.map((file) => ({ id: crypto.randomUUID(), file }))
+      const processed = contributionMode ? await (await import('./contributionFiles')).prepareContributionFiles(selected) : selected
+      if (draft.blocks.length + processed.length > MAX_BLOCKS) throw new Error(`En fazla ${MAX_BLOCKS} içerik bölümü eklenebilir.`)
+      if (contributionMode && draft.blocks.filter(block => block.type === 'image').length + processed.length > 8) throw new Error('Bir gönderide en fazla 8 görsel / PDF sayfası olabilir.')
+      await Promise.all(processed.map(validateAsset))
+      const additions = processed.map((file) => ({ id: crypto.randomUUID(), file }))
       setFiles((previous) => new Map([...previous, ...additions.map(({ id, file }) => [id, file] as const)]))
       addBlocks(additions.map(({ id, file }) => ({ id, type: file.type === 'application/pdf' ? 'pdf' : 'image', path: '', fileName: file.name, caption: '' })), uploadSection.current)
       setIssues([])
@@ -75,12 +79,13 @@ export default function LibraryEditor({ initial, onSave, onClose, busy }: Props)
     try { await onSave(next, files) } catch (failure) { setIssues([failure instanceof Error ? failure.message : 'Kayıt tamamlanamadı.']) }
   }
   return <section className="card library-editor" aria-labelledby="library-editor-title">
-    <div className="library-section-heading"><div><p className="eyebrow">REHBER YÖNETİMİ</p><h2 id="library-editor-title">{initial.updatedAt ? 'Rehberi düzenle' : 'Yeni rehber'}</h2><p>Başlığını belirle, içeriğini ekle. İstersen alt konulara ayır.</p></div><button type="button" className="ghost-button" disabled={busy || readingFile} onClick={() => { if (!dirty || window.confirm('Kaydedilmemiş değişiklikler var. Düzenlemeden çıkılsın mı?')) onClose() }}>Vazgeç</button></div>
+    <div className="library-section-heading"><div><p className="eyebrow">{contributionMode ? 'REHBER KATKISI' : 'REHBER YÖNETİMİ'}</p><h2 id="library-editor-title">{contributionMode ? 'Rehber gönder' : initial.reviewStatus === 'pending' ? 'Gönderiyi incele' : initial.updatedAt ? 'Rehberi düzenle' : 'Yeni rehber'}</h2><p>{contributionMode ? 'İçeriğini hazırla ve incelemeye gönder. Admin onayından sonra yayınlanır.' : 'Başlığını belirle, içeriğini ekle. İstersen alt konulara ayır.'}</p></div><button type="button" className="ghost-button" disabled={busy || readingFile} onClick={() => { if (!dirty || window.confirm('Kaydedilmemiş değişiklikler var. Düzenlemeden çıkılsın mı?')) onClose() }}>Vazgeç</button></div>
+    {!contributionMode && initial.reviewStatus === 'pending' ? <p className="library-review-note">Onay bekliyor · İletilen ad: {initial.submittedBy || 'Katılımcı'}{initial.submittedAt ? ` · ${new Date(initial.submittedAt).toLocaleDateString('tr-TR')}` : ''}. İçeriği düzenleyip onaylayarak yayınlayabilirsin.</p> : null}
     <fieldset disabled={busy || readingFile} className="library-editor-fields">
       <div className="library-editor-meta">
         <label className="library-span-two">Rehber başlığı<input ref={titleInput} value={draft.title} maxLength={120} onChange={(event) => setDraft({ ...draft, title: event.target.value })} placeholder="Örn. Antibiyotikler" /></label>
         <label className="library-span-two">Kısa açıklama <span className="library-optional">İsteğe bağlı</span><textarea rows={2} maxLength={240} value={draft.summary} onChange={(event) => setDraft({ ...draft, summary: event.target.value })} placeholder="Başlığın altında görünecek kısa açıklama" /></label>
-        <label className="library-check"><input type="checkbox" checked={draft.pinned} onChange={(event) => setDraft({ ...draft, pinned: event.target.checked })} />Üstte sabitle</label>
+        {!contributionMode ? <label className="library-check"><input type="checkbox" checked={draft.pinned} onChange={(event) => setDraft({ ...draft, pinned: event.target.checked })} />Üstte sabitle</label> : null}
       </div>
       <div className="library-editor-tabs" role="group" aria-label="Editör görünümü"><button type="button" aria-pressed={!preview} className={!preview ? 'active' : ''} onClick={() => setPreview(false)}>Rehberi Düzenle</button><button type="button" aria-pressed={preview} className={preview ? 'active' : ''} onClick={() => setPreview(true)}>Kullanıcı Önizlemesi</button></div>
       {preview ? <article className="library-editor-preview"><h2>{draft.title || 'Rehber başlığı'}</h2><p>{draft.summary}</p><LibraryContent entry={draft} files={files} /></article> : <div className="library-compose-layout">
@@ -93,13 +98,13 @@ export default function LibraryEditor({ initial, onSave, onClose, busy }: Props)
           </section>)}</div>
           {!section.blocks.length ? <div className="library-editor-empty">{section.id ? 'Bu alt konuya metin, tablo veya dosya ekle.' : 'Metin, tablo veya dosya ekleyerek başla; ya da bir alt konu oluştur.'}</div> : null}
           <div className="library-add-blocks"><button type="button" className="secondary" disabled={draft.blocks.length >= MAX_BLOCKS} onClick={() => addBlocks([{ id: crypto.randomUUID(), type: 'text', text: '' }])}>+ Metin</button><button type="button" className="secondary" disabled={draft.blocks.length >= MAX_BLOCKS} onClick={() => addBlocks([{ id: crypto.randomUUID(), type: 'table', caption: '', headers: ['', ''], rows: [['', '']] }])}>+ Tablo</button><button type="button" className="secondary" disabled={draft.blocks.length >= MAX_BLOCKS} onClick={() => { uploadSection.current = section.id; fileInput.current?.click() }}>+ Görsel / PDF</button><input ref={fileInput} type="file" multiple accept="image/png,image/jpeg,image/webp,application/pdf" className="library-file-input" aria-label="Görsel veya PDF seç" onChange={(event) => void addFiles(Array.from(event.target.files ?? []))} /></div>
-          <p className="hint-text">PNG, JPG, WebP veya PDF · Dosya başına en fazla 8 MB.</p>
+          <p className="hint-text">{contributionMode ? 'PNG, JPG, WebP veya PDF · Dosya başına en fazla 8 MB. PDF sayfaları görsele dönüştürülür. Gönderide en fazla 8 görsel / sayfa ve dönüşüm sonrası toplam 16 MB kullanılabilir.' : 'PNG, JPG, WebP veya PDF · Dosya başına en fazla 8 MB.'}</p>
           {draft.blocks.length >= MAX_BLOCKS ? <p className="notice warning">Bu rehberdeki bölüm sınırına ulaştın. Yeni içerikler için ayrı bir rehber oluşturabilirsin.</p> : null}
         </div>
       </div>}
       <details className="library-source-fields"><summary>Kaynak bilgisi <span className="library-optional">İsteğe bağlı</span></summary><div className="library-editor-meta"><label>Kaynak adı<input value={draft.sourceLabel} maxLength={300} onChange={(event) => setDraft({ ...draft, sourceLabel: event.target.value })} placeholder="Kaynak veya belge adı" /></label><label>Kaynak bağlantısı<input type="url" value={draft.sourceUrl} onChange={(event) => setDraft({ ...draft, sourceUrl: event.target.value })} placeholder="https://…" /></label></div></details>
     </fieldset>
     {issues.length ? <div className="notice warning" role="alert"><ul>{issues.map((issue) => <li key={issue}>{issue}</li>)}</ul></div> : null}
-    <div className="library-editor-footer"><p role="status">{busy ? 'Dosyalar ve içerik kaydediliyor…' : readingFile ? 'Dosyalar kontrol ediliyor…' : dirty ? 'Kaydedilmemiş değişiklikler var.' : 'Değişiklikler kaydedildiğinde kullanıcı görünümüne yansır.'}</p><div><button type="button" className="ghost-button" disabled={busy || readingFile} onClick={() => void save(false)}>{initial.published ? 'Yayından Kaldır ve Kaydet' : 'Taslak Kaydet'}</button><button type="button" disabled={busy || readingFile} onClick={() => void save(true)}>{initial.published ? 'Değişiklikleri Yayınla' : 'Yayınla'}</button></div></div>
+    <div className="library-editor-footer"><p role="status">{busy ? 'Dosyalar ve içerik kaydediliyor…' : readingFile ? 'Dosyalar hazırlanıyor…' : contributionMode ? 'Gönderiler otomatik yayınlanmaz; admin tarafından incelenir.' : dirty ? 'Kaydedilmemiş değişiklikler var.' : 'Değişiklikler kaydedildiğinde kullanıcı görünümüne yansır.'}</p><div>{contributionMode ? <button type="button" disabled={busy || readingFile} onClick={() => void save(false)}>İncelemeye gönder</button> : <><button type="button" className="ghost-button" disabled={busy || readingFile} onClick={() => void save(false)}>{initial.published ? 'Yayından Kaldır ve Kaydet' : initial.reviewStatus === 'pending' ? 'İncelemeyi kaydet' : 'Taslak Kaydet'}</button><button type="button" disabled={busy || readingFile} onClick={() => void save(true)}>{initial.reviewStatus === 'pending' ? 'Onayla ve yayınla' : initial.published ? 'Değişiklikleri Yayınla' : 'Yayınla'}</button></>}</div></div>
   </section>
 }

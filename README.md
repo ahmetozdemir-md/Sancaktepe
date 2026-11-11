@@ -163,3 +163,32 @@ Kıdem sırası `groups[].rankHistory` ile değişir; sabit grup kimliği, manue
 `011_shared_assistant_identity.sql`, eski istemci kayıtlarında ortak kimliğin kaybolmasını önler. `012_duty_publication_recovery.sql`, yayın nedeniyle kaldırılan çalışma atamalarını özel kayıtla izler. Sonraki yayında nöbet kaldırılmışsa, hâlâ güvenli olan eski yerler varsayılan olarak seçilmemiş öneriler halinde sunulur. Sonradan elle düzenlenen gün, izin, oda geçerliliği veya yeni nöbet çakışması varsa geri dönüş önerilmez. İzleme başlamadan önce kaldırılmış atamalar tahmin edilmez.
 
 Doğrulama: `npm run build`, `npm run lint`, `node --test tests/*.test.*`. `tests/duty-planner-db.sql`, kurulu veritabanında sentetik verilerle gerçek RLS/RPC kontrollerini bir işlem içinde çalıştırır ve sonunda her değişikliği `ROLLBACK` ile geri alır.
+
+### Asistanlardan rehber katkısı ve admin onayı
+
+`013_library_contributions.sql`, rehber gönderilerini yayınlanmamış `pending` kayıtlar olarak tutar.
+Mevcut rehberler `approved` olarak korunur. Asistanın geçerli cihaz oturumu ve ayrı rehber şifresi gerekir;
+bu giriş hiçbir tabloya veya dosya deposuna doğrudan yazma yetkisi vermez. Admin **Rehberler → Onay bekleyenler**
+üzerinden içeriği düzenler, onaylayarak yayınlar veya reddedip arşivler. Gönderici adı paylaşılan girişten geldiği için
+tekil kişi kimliği doğrulaması değildir; inceleme ekranında “İletilen ad” olarak gösterilir.
+
+Kurulum sırası: SQL geçişini uygula, `library-contributions` Edge Function'ı `verify_jwt=false` ile dağıt,
+adminin **Şifreler → Rehber Gönderme Şifresi** bölümünden ilk şifreyi belirle, sonra istemciyi dağıt.
+Fonksiyon kendi rastgele oturum anahtarını doğrular; Supabase service key yalnız sunucudadır.
+İlk şifre kaynak koduna konmaz. Hash dışarıdan hazırlanacaksa pgcrypto ile uyumlu bcrypt `$2a$` biçimi gerekir;
+tercih edilen yöntem `change_library_contributor_password` RPC'sinin hash'i sunucuda üretmesidir.
+`LIBRARY_CONTRIBUTION_ORIGINS` varsayılan olarak üretim origin'ini içerir; ek origin gerekiyorsa açıkça yapılandırılır.
+
+- Rehber oturumu 8 saattir; rehber şifresi veya asistan giriş şifresi değişince geçersiz olur.
+- Cihaz anahtarı başına 3 gönderim/saat, 10/gün; ek IP, toplam istek, toplam dosya ve kuyruk sınırları vardır.
+  Saat/gün pencereleri ilk kullanımdan itibaren ilerler; yarım kalan gönderim başlatmaları da kotaya dahildir.
+- Şifre doğrulama cihaz başına 5 deneme/15 dakika; ek IP ve toplam deneme sınırları uygulanır.
+- Metin/tablo içeriği izin verilen JSON alanlarına indirgenir. HTML, betik veya ham SVG kabul edilmez.
+- Katılımcı PDF'leri tarayıcıda sayfa görsellerine dönüşür. Görseller sunucuda boyut ve PNG yapısı denetiminden
+  geçip yalnız piksel verisinden tekrar üretilir; metadata ve ek dosya yükleri saklanmaz. Bu bir antivirüs taraması değildir.
+- Gönderi başına 20 içerik bloğu, 8 görsel, dönüşümden sonra görsel başına 4 MB ve toplam 16 MB sınırı vardır.
+  Henüz gönderilmemiş, süresi dolmuş dosyalar 24 saat sonra sonraki gönderim başlangıcında temizlenir.
+- Klinik doğruluk adminin incelemesini gerektirir. Onaylanmayan içerik ve dosyalar okuyucuya kapalıdır.
+
+`tests/libraryContributions.test.mjs` içerik/dosya doğrulamasını, `tests/library-contributions-db.sql`
+gerçek RLS, kota, parola iptali ve onay akışını denetler. SQL testinin tüm değişiklikleri geri alınır.

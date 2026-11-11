@@ -74,7 +74,7 @@ export async function saveLibraryEntry(entry: LibraryEntry): Promise<LibraryEntr
         const previous = request.result as LibraryEntry | undefined
         if ((previous?.updatedAt ?? '') !== entry.updatedAt) { conflict = true; transaction.abort(); return }
         const now = new Date().toISOString()
-        saved = { ...entry, blocks: entry.blocks.map(normalizeRichBlock), kind: 'reference', createdAt: entry.createdAt || now, updatedAt: now }
+        saved = { ...entry, reviewStatus: entry.published ? 'approved' : entry.reviewStatus ?? 'approved', blocks: entry.blocks.map(normalizeRichBlock), kind: 'reference', createdAt: entry.createdAt || now, updatedAt: now }
         store.put(saved)
       }
       transaction.oncomplete = () => { database.close(); resolve(saved) }

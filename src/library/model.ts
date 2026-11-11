@@ -23,6 +23,9 @@ export interface LibraryEntry {
   createdAt: string
   updatedAt: string
   archivedAt: string | null
+  reviewStatus?: 'pending' | 'approved' | 'rejected'
+  submittedBy?: string
+  submittedAt?: string
 }
 
 export const LIBRARY_CATEGORIES = ['Genel', 'İlaç ve doz', 'Hemodinami', 'Böbrek / CRRT', 'Solunum', 'Prosedürler', 'Klinik işleyiş']
@@ -170,6 +173,9 @@ export function filterLibrary(entries: LibraryEntry[], options: { query: string;
       const showArchived = options.status === 'archived'
       if (showArchived !== Boolean(entry.archivedAt)) return false
     }
+    if (!options.admin && entry.reviewStatus && entry.reviewStatus !== 'approved') return false
+    if (options.admin && options.status === 'pending' && entry.reviewStatus !== 'pending') return false
+    if (options.admin && options.status !== 'pending' && options.status !== 'archived' && entry.reviewStatus === 'pending') return false
     if (options.admin && options.status === 'draft' && entry.published) return false
     if (options.admin && options.status === 'published' && !entry.published) return false
     if (options.category !== 'all' && entry.category !== options.category) return false
@@ -188,9 +194,9 @@ export function parseLibraryRow(raw: Record<string, unknown>): LibraryEntry {
     if (block.type === 'table') return typeof block.caption === 'string' && Array.isArray(block.headers) && block.headers.every((cell: unknown) => typeof cell === 'string') && Array.isArray(block.rows) && block.rows.every((row: unknown) => Array.isArray(row) && row.every((cell: unknown) => typeof cell === 'string'))
     return ['image', 'pdf'].includes(block.type) && typeof block.path === 'string' && validAssetPath(block.path) && typeof block.caption === 'string' && typeof block.fileName === 'string'
   }).map((block) => block.type === 'table' ? { ...block, headerColor: safeTableColor(block.headerColor), rowColors: block.rows.map((_, index) => safeTableColor(block.rowColors?.[index]) ?? null), align: ['left', 'center', 'right'].includes(block.align ?? '') ? block.align : 'left', compact: block.compact === true } : block).map(normalizeRichBlock) : []
-  return { id: str('id'), title: str('title'), summary: str('summary'), category: str('category'), kind: 'reference', pinned: raw.pinned === true, published: raw.is_published === true, blocks, sourceLabel: str('source_label'), sourceUrl: safeSourceUrl(str('source_url')) ?? '', createdAt: str('created_at'), updatedAt: str('updated_at'), archivedAt: str('archived_at') || null }
+  return { id: str('id'), title: str('title'), summary: str('summary'), category: str('category'), kind: 'reference', pinned: raw.pinned === true, published: raw.is_published === true, blocks, sourceLabel: str('source_label'), sourceUrl: safeSourceUrl(str('source_url')) ?? '', createdAt: str('created_at'), updatedAt: str('updated_at'), archivedAt: str('archived_at') || null, reviewStatus: raw.review_status === 'pending' || raw.review_status === 'rejected' ? raw.review_status : 'approved', submittedBy:str('submitted_by'), submittedAt:str('submitted_at') }
 }
 
 export function libraryRow(entry: LibraryEntry) {
-  return { id: entry.id, title: entry.title.trim(), summary: entry.summary.trim(), category: entry.category.trim(), kind: 'reference', pinned: entry.pinned, is_published: entry.published, blocks: entry.blocks.map(normalizeRichBlock), source_label: entry.sourceLabel.trim(), source_url: safeSourceUrl(entry.sourceUrl) ?? '', archived_at: entry.archivedAt }
+  return { id: entry.id, title: entry.title.trim(), summary: entry.summary.trim(), category: entry.category.trim(), kind: 'reference', pinned: entry.pinned, is_published: entry.published, blocks: entry.blocks.map(normalizeRichBlock), source_label: entry.sourceLabel.trim(), source_url: safeSourceUrl(entry.sourceUrl) ?? '', archived_at: entry.archivedAt, review_status: entry.published ? 'approved' : entry.reviewStatus ?? 'approved' }
 }
