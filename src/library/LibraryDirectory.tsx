@@ -17,10 +17,10 @@ export default function LibraryDirectory({ entries, admin, busy, favorites, expa
   return <div className="library-index">{entries.map((entry) => {
     const topics = librarySections(entry.blocks).filter((section) => section.id)
     const open = expanded.has(entry.id)
-    return <article key={entry.id} className={`library-index-item ${entry.kind}${entry.pinned ? ' is-pinned' : ''}`}>
+    return <article key={entry.id} className={`library-index-item${entry.pinned ? ' is-pinned' : ''}`}>
       <div className="library-index-row">
         <button id={`library-open-${entry.id}`} type="button" className="library-index-open" aria-expanded={topics.length ? open : undefined} aria-controls={topics.length ? `library-topics-${entry.id}` : undefined} onClick={() => topics.length ? onExpand(entry.id) : onOpen(entry)}>
-          <span className={`library-index-symbol ${entry.kind}`} aria-hidden="true">{entry.kind === 'announcement' ? '!' : topics.length ? '≡' : '↗'}</span>
+          <span className="library-index-symbol" aria-hidden="true"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M5 3h11l3 3v15H5zM9 8h6M9 12h6" />{topics.length ? <path d="M9 16h6" /> : null}</svg></span>
           <span className="library-index-copy"><span className="library-index-title">{entry.title}{entry.pinned ? <span className="library-pinned">Sabit</span> : null}</span>{entry.summary ? <span className="library-index-summary">{entry.summary}</span> : null}</span>
           <span className="library-index-arrow" aria-hidden="true">{topics.length ? open ? '−' : '+' : '→'}</span>
         </button>

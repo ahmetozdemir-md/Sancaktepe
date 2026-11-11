@@ -54,13 +54,15 @@ node --test tests/bulkImport.test.mjs tests/workLocationMatching.test.mjs
 Online kayıt için `supabase/001_portal_state.sql` dosyasını Supabase SQL Editor'de çalıştır.
 Otomatik/manüel yedek geçmişi için `supabase/002_portal_state_history.sql` dosyasının da çalışmış olması gerekir.
 
-## Duyurular ve Rehberler
+## Rehberler
 
 Uzman/asistan panelinin dördüncü sekmesinde yayınlanan içerikler 20–30 başlığı
 rahatça taramaya uygun kompakt bir liste halinde görünür. Alt konulu rehberler açılıp
 kapanır; okuyucu örneğin Antibiyotikler → Vankomisin seçerek doğrudan ilgili içeriğe geçer.
-Duyuru/rehber türü ve cihazda tutulan yıldızlılar ile filtrelenebilir. Arama, kategori
-alanları ve başlık sayaçları gösterilmez; admin içerik formunda da kategori istenmez. Sabitlenen içerikler üstte, duyurular kendi içinde güncelden eskiye sıralanır.
+Tüm rehberler veya cihazda tutulan yıldızlılar görüntülenebilir. Arama, kategori
+alanları ve başlık sayaçları gösterilmez; admin içerik formunda da kategori istenmez. Sabitlenen rehberler üstte; başlıklar Türkçe alfabetik sırada gösterilir.
+Tür seçimi yoktur; eski duyuru kayıtları veri kaybetmeden rehber olarak okunur ve sonraki
+kayıtta `reference` türüyle saklanır.
 
 Admin panelindeki aynı adlı sekmede metin, düzenlenebilir tablo, PNG/JPG/WebP ve PDF
 bölümleri eklenir. İsteğe bağlı alt konular ayrı seçilerek düzenlenir ve içerikleriyle birlikte

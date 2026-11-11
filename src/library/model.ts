@@ -1,4 +1,5 @@
-export type LibraryKind = 'reference' | 'announcement'
+// Keep the storage discriminator for compatibility; the product now contains guides only.
+export type LibraryKind = 'reference'
 export type LibraryTable = { id: string; type: 'table'; caption: string; headers: string[]; rows: string[][]; headerColor?: string; rowColors?: (string | null)[]; align?: 'left' | 'center' | 'right'; compact?: boolean }
 export type LibraryBlock =
   | { id: string; type: 'section'; title: string }
@@ -132,7 +133,7 @@ export function parsePastedTable(text: string): { headers: string[]; rows: strin
   return { headers: normalized[0], rows: normalized.slice(1) }
 }
 
-export function filterLibrary(entries: LibraryEntry[], options: { query: string; kind: string; category: string; favorites?: Set<string>; onlyFavorites?: boolean; admin?: boolean; status?: string }): LibraryEntry[] {
+export function filterLibrary(entries: LibraryEntry[], options: { query: string; category: string; favorites?: Set<string>; onlyFavorites?: boolean; admin?: boolean; status?: string }): LibraryEntry[] {
   const terms = normalizeSearch(options.query).split(/\s+/).filter(Boolean)
   return entries.filter((entry) => {
     if (!options.admin && (!entry.published || entry.archivedAt)) return false
@@ -142,12 +143,11 @@ export function filterLibrary(entries: LibraryEntry[], options: { query: string;
     }
     if (options.admin && options.status === 'draft' && entry.published) return false
     if (options.admin && options.status === 'published' && !entry.published) return false
-    if (options.kind !== 'all' && entry.kind !== options.kind) return false
     if (options.category !== 'all' && entry.category !== options.category) return false
     if (options.onlyFavorites && !options.favorites?.has(entry.id)) return false
     const searchable = normalizeSearch(`${entry.title} ${entry.summary} ${entry.category}`)
     return terms.every((term) => searchable.includes(term))
-  }).sort((a, b) => Number(b.pinned) - Number(a.pinned) || Number(b.kind === 'announcement') - Number(a.kind === 'announcement') || (a.kind === 'announcement' && b.kind === 'announcement' ? b.updatedAt.localeCompare(a.updatedAt) : a.title.localeCompare(b.title, 'tr')))
+  }).sort((a, b) => Number(b.pinned) - Number(a.pinned) || a.title.localeCompare(b.title, 'tr'))
 }
 
 export function parseLibraryRow(raw: Record<string, unknown>): LibraryEntry {
@@ -159,9 +159,9 @@ export function parseLibraryRow(raw: Record<string, unknown>): LibraryEntry {
     if (block.type === 'table') return typeof block.caption === 'string' && Array.isArray(block.headers) && block.headers.every((cell: unknown) => typeof cell === 'string') && Array.isArray(block.rows) && block.rows.every((row: unknown) => Array.isArray(row) && row.every((cell: unknown) => typeof cell === 'string'))
     return ['image', 'pdf'].includes(block.type) && typeof block.path === 'string' && validAssetPath(block.path) && typeof block.caption === 'string' && typeof block.fileName === 'string'
   }).map((block) => block.type === 'table' ? { ...block, headerColor: safeTableColor(block.headerColor), rowColors: block.rows.map((_, index) => safeTableColor(block.rowColors?.[index]) ?? null), align: ['left', 'center', 'right'].includes(block.align ?? '') ? block.align : 'left', compact: block.compact === true } : block) : []
-  return { id: str('id'), title: str('title'), summary: str('summary'), category: str('category'), kind: raw.kind === 'announcement' ? 'announcement' : 'reference', pinned: raw.pinned === true, published: raw.is_published === true, blocks, sourceLabel: str('source_label'), sourceUrl: safeSourceUrl(str('source_url')) ?? '', createdAt: str('created_at'), updatedAt: str('updated_at'), archivedAt: str('archived_at') || null }
+  return { id: str('id'), title: str('title'), summary: str('summary'), category: str('category'), kind: 'reference', pinned: raw.pinned === true, published: raw.is_published === true, blocks, sourceLabel: str('source_label'), sourceUrl: safeSourceUrl(str('source_url')) ?? '', createdAt: str('created_at'), updatedAt: str('updated_at'), archivedAt: str('archived_at') || null }
 }
 
 export function libraryRow(entry: LibraryEntry) {
-  return { id: entry.id, title: entry.title.trim(), summary: entry.summary.trim(), category: entry.category.trim(), kind: entry.kind, pinned: entry.pinned, is_published: entry.published, blocks: entry.blocks, source_label: entry.sourceLabel.trim(), source_url: safeSourceUrl(entry.sourceUrl) ?? '', archived_at: entry.archivedAt }
+  return { id: entry.id, title: entry.title.trim(), summary: entry.summary.trim(), category: entry.category.trim(), kind: 'reference', pinned: entry.pinned, is_published: entry.published, blocks: entry.blocks, source_label: entry.sourceLabel.trim(), source_url: safeSourceUrl(entry.sourceUrl) ?? '', archived_at: entry.archivedAt }
 }

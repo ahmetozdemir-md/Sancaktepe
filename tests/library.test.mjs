@@ -3,7 +3,7 @@ import { test } from 'node:test'
 import { filterLibrary, flattenLibrarySections, librarySections, reorderTableRows, tableColorStyle, libraryRow, newLibraryEntry, parseLibraryRow, parsePastedTable, safeSourceUrl, validateLibraryEntry, validAssetPath } from '../src/library/model.ts'
 
 const entry = (overrides = {}) => ({ ...newLibraryEntry(), title: 'CRRT — sitrat ayarı', category: 'Böbrek / CRRT', published: true, blocks: [{ id: 'text', type: 'text', text: 'Kurum tarafından eklenen içerik.' }], ...overrides })
-const filter = (entries, options = {}) => filterLibrary(entries, { query: '', kind: 'all', category: 'all', ...options })
+const filter = (entries, options = {}) => filterLibrary(entries, { query: '', category: 'all', ...options })
 
 test('readers see only published, non-archived records; admin status filters stay separate', () => {
   const published = entry(), draft = entry({ published: false }), archived = entry({ archivedAt: '2026-11-06' })
@@ -17,11 +17,11 @@ test('Turkish search matches unaccented words across title, description and cate
   assert.deepEqual(filter([item], { query: 'INOTROP ilac hizli' }), [item])
   assert.deepEqual(filter([item], { query: 'CRRT' }), [])
 })
-test('category, content type and device favorites combine without changing source order', () => {
-  const a = entry({ pinned: false }), b = entry({ pinned: true, kind: 'announcement' })
+test('category and device favorites combine without changing source order', () => {
+  const a = entry({ pinned: false }), b = entry({ pinned: true })
   const source = Object.freeze([a, b])
   assert.deepEqual(filter(source), [b, a])
-  assert.deepEqual(filter(source, { category: a.category, kind: 'reference', onlyFavorites: true, favorites: new Set([a.id]) }), [a])
+  assert.deepEqual(filter(source, { category: a.category, onlyFavorites: true, favorites: new Set([a.id]) }), [a])
   assert.deepEqual(source, [a, b])
 })
 test('Excel paste preserves quoted tabs, line breaks and escaped quotes', () => {
@@ -113,4 +113,24 @@ test('thirty titles with subtopics retain reader visibility and ordering', () =>
   assert.equal(filter(entries).length, 30)
   assert.equal(filter(entries)[0].title, 'Rehber 00')
   assert.equal(filter([...entries, entry({ published: false }), entry({ archivedAt: '2026-11-11' })]).length, 30)
+})
+
+
+test('legacy announcements become guides without losing identity, content or publication state', () => {
+  const legacy = entry({ kind: 'announcement', title: 'Eski kayıt', pinned: true })
+  const raw = { ...libraryRow(legacy), kind: 'announcement', updated_at: '2026-11-11T09:00:00Z' }
+  const parsed = parseLibraryRow(raw)
+  assert.equal(parsed.kind, 'reference')
+  assert.equal(parsed.id, legacy.id)
+  assert.equal(parsed.title, legacy.title)
+  assert.deepEqual(parsed.blocks, legacy.blocks)
+  assert.equal(parsed.published, true)
+  assert.equal(parsed.pinned, true)
+  assert.equal(libraryRow(legacy).kind, 'reference')
+})
+test('guide ordering uses pinned status then Turkish titles, irrespective of legacy kind or date', () => {
+  const a = entry({ title: 'Antibiyotikler', updatedAt: '2026-01-01' })
+  const c = entry({ title: 'CRRT', kind: 'announcement', updatedAt: '2026-11-11' })
+  const pinned = entry({ title: 'Zor hava yolu', pinned: true })
+  assert.deepEqual(filter([c, pinned, a]), [pinned, a, c])
 })

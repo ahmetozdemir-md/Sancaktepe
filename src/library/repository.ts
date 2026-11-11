@@ -49,7 +49,7 @@ function readableError(error: { code?: string; message?: string }): Error {
 
 export async function listLibraryEntries(admin: boolean): Promise<LibraryEntry[]> {
   if (!supabase) {
-    const entries = await localRead<LibraryEntry[]>('entries')
+    const entries = (await localRead<LibraryEntry[]>('entries')).map((entry): LibraryEntry => ({ ...entry, kind: 'reference' }))
     return admin ? entries : entries.filter((entry) => entry.published && !entry.archivedAt)
   }
   let query = supabase.from(TABLE).select('*').order('updated_at', { ascending: false }).limit(500)
@@ -74,7 +74,7 @@ export async function saveLibraryEntry(entry: LibraryEntry): Promise<LibraryEntr
         const previous = request.result as LibraryEntry | undefined
         if ((previous?.updatedAt ?? '') !== entry.updatedAt) { conflict = true; transaction.abort(); return }
         const now = new Date().toISOString()
-        saved = { ...entry, createdAt: entry.createdAt || now, updatedAt: now }
+        saved = { ...entry, kind: 'reference', createdAt: entry.createdAt || now, updatedAt: now }
         store.put(saved)
       }
       transaction.oncomplete = () => { database.close(); resolve(saved) }

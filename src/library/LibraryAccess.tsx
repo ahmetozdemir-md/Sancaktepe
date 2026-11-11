@@ -23,18 +23,18 @@ export default function LibraryAccess({ onReady }: { onReady: (ready: boolean) =
     if (!supabase || userId === undefined) return
     let active = true
     setReady(false); onReady(false)
-    if (!userId) { setStatus('İçerik yönetimi için mevcut yönetici hesabınla giriş yap.'); return }
+    if (!userId) { setStatus('Rehber yönetimi için mevcut yönetici hesabınla giriş yap.'); return }
     const client = supabase
     void client.from('portal_admins').select('user_id').eq('user_id', userId).maybeSingle().then(({ data, error }) => {
       if (!active) return
       const allowed = !error && Boolean(data)
       setReady(allowed); onReady(allowed)
-      setStatus(allowed ? '' : 'Bu hesap içerik yönetimi için yetkili değil. Yetkili yönetici hesabını kullan.')
+      setStatus(allowed ? '' : 'Bu hesap rehber yönetimi için yetkili değil. Yetkili yönetici hesabını kullan.')
     })
     return () => { active = false }
   }, [userId, onReady])
   if (ready || libraryIsLocal) return null
-  return <section className="card library-access"><h2>İçerik yönetimine giriş</h2><p role="status">{status}</p><form onSubmit={(event) => {
+  return <section className="card library-access"><h2>Rehber yönetimine giriş</h2><p role="status">{status}</p><form onSubmit={(event) => {
     event.preventDefault()
     if (!supabase || busy) return
     setBusy(true)
@@ -42,5 +42,5 @@ export default function LibraryAccess({ onReady }: { onReady: (ready: boolean) =
       setPassword('')
       if (error) setStatus('Giriş yapılamadı. E-posta ve şifreni kontrol et.')
     }).catch(() => setStatus('Bağlantı kurulamadı. Yeniden dene.')).finally(() => setBusy(false))
-  }}><label>Yönetici e-postası<input type="email" autoComplete="username" required value={email} onChange={(event) => setEmail(event.target.value)} /></label><label>Yönetici şifresi<input type="password" autoComplete="current-password" required value={password} onChange={(event) => setPassword(event.target.value)} /></label><button disabled={busy}>{busy ? 'Giriş yapılıyor…' : 'İçerik Yönetimini Aç'}</button></form></section>
+  }}><label>Yönetici e-postası<input type="email" autoComplete="username" required value={email} onChange={(event) => setEmail(event.target.value)} /></label><label>Yönetici şifresi<input type="password" autoComplete="current-password" required value={password} onChange={(event) => setPassword(event.target.value)} /></label><button disabled={busy}>{busy ? 'Giriş yapılıyor…' : 'Rehber Yönetimini Aç'}</button></form></section>
 }

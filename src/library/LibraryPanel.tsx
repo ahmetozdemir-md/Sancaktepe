@@ -7,8 +7,8 @@ import LibraryEditor from './LibraryEditor'
 import LibraryDirectory from './LibraryDirectory'
 import './library.css'
 
-function LibraryIcon({ kind }: { kind: 'reference' | 'announcement' }) {
-  return <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{kind === 'announcement' ? <><path d="m4 10 13-5v14L4 14zM4 10H2v4h2m3 1 2 6h3l-2-5M21 8v8" /></> : <><path d="M12 5v15M3 4c4-1 6 0 9 1 3-1 5-2 9-1v15c-4-1-6 0-9 1-3-1-5-2-9-1z" /><path d="M6 8h3m-3 4h3m6-4h3m-3 4h3" /></>}</svg>
+function LibraryIcon() {
+  return <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 5v15M3 4c4-1 6 0 9 1 3-1 5-2 9-1v15c-4-1-6 0-9 1-3-1-5-2-9-1z" /><path d="M6 8h3m-3 4h3m6-4h3m-3 4h3" /></svg>
 }
 const formatDate = (value: string) => value ? new Date(value).toLocaleDateString('tr-TR', { day: 'numeric', month: 'short', year: 'numeric' }) : ''
 const FAVORITES_KEY = 'klinik-atlas-library-favorites-v1'
@@ -29,7 +29,6 @@ function LibraryWorkspace({ admin = false, active = true, onBusyChange }: Props)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
-  const [kind, setKind] = useState('all')
   const [status, setStatus] = useState('all')
   const [onlyFavorites, setOnlyFavorites] = useState(false)
   const [favorites, setFavorites] = useState<Set<string>>(() => {
@@ -51,7 +50,7 @@ function LibraryWorkspace({ admin = false, active = true, onBusyChange }: Props)
       const result = await listLibraryEntries(admin)
       if (request !== requestNumber.current) return
       setEntries(result); setLoaded(true)
-    } catch (failure) { if (request === requestNumber.current) setError(admin && failure instanceof Error ? failure.message : 'İçerikler yüklenemedi. Bağlantını kontrol edip yeniden dene.') }
+    } catch (failure) { if (request === requestNumber.current) setError(admin && failure instanceof Error ? failure.message : 'Rehberler yüklenemedi. Bağlantını kontrol edip yeniden dene.') }
     finally { if (request === requestNumber.current) setLoading(false) }
   }, [admin])
   useEffect(() => {
@@ -90,7 +89,7 @@ function LibraryWorkspace({ admin = false, active = true, onBusyChange }: Props)
       recordSaveStarted = true
       const saved = await saveLibraryEntry({ ...entry, blocks })
       replaceEntry(saved); setEditing(null); setSelected(null)
-      setNotice(`${saved.published ? 'İçerik yayınlandı.' : 'Taslak kaydedildi.'}${libraryIsLocal ? ' Yalnız bu cihazda saklanıyor.' : ''}`)
+      setNotice(`${saved.published ? 'Rehber yayınlandı.' : 'Taslak kaydedildi.'}${libraryIsLocal ? ' Yalnız bu cihazda saklanıyor.' : ''}`)
     } catch (failure) {
       if (!recordSaveStarted) {
         try { await removeNewLibraryAssets(uploaded) } catch { /* Unreferenced private files remain invisible; never remove old published assets. */ }
@@ -105,11 +104,11 @@ function LibraryWorkspace({ admin = false, active = true, onBusyChange }: Props)
     operationLock.current = true; setBusy(true); onBusyChange?.(true)
     try {
       const saved = await saveLibraryEntry({ ...entry, published: false, archivedAt: restore ? null : new Date().toISOString() })
-      replaceEntry(saved); setSelected(null); setNotice(restore ? 'İçerik taslağa geri alındı. Düzenleyip tekrar yayınlayabilirsin.' : 'İçerik arşivlendi.')
+      replaceEntry(saved); setSelected(null); setNotice(restore ? 'Rehber taslağa geri alındı. Düzenleyip tekrar yayınlayabilirsin.' : 'Rehber arşivlendi.')
     } catch (failure) { setError((failure as Error).message) }
     finally { operationLock.current = false; setBusy(false); onBusyChange?.(false) }
   }
-  const visible = filterLibrary(entries, { query: '', kind, category: 'all', favorites, onlyFavorites, admin, status })
+  const visible = filterLibrary(entries, { query: '', category: 'all', favorites, onlyFavorites, admin, status })
   const available = entries.filter((entry) => admin ? !entry.archivedAt : entry.published && !entry.archivedAt)
   const current = entries.find((entry) => entry.id === selected && (admin || (entry.published && !entry.archivedAt)))
   if (editing) return <><LibraryEditor key={editing.id} initial={editing} onClose={() => setEditing(null)} onSave={save} busy={busy} /></>
@@ -117,7 +116,7 @@ function LibraryWorkspace({ admin = false, active = true, onBusyChange }: Props)
     const topics = librarySections(current.blocks).filter((section) => section.id)
     return <section className="card library-detail">
       <div className="library-detail-toolbar"><button type="button" className="ghost-button" onClick={() => setSelected(null)}>← Tüm başlıklar</button><div>{admin && !current.archivedAt ? <button type="button" className="secondary" onClick={() => setEditing(current)}>Düzenle</button> : null}<button type="button" className="ghost-button" aria-pressed={favorites.has(current.id)} onClick={() => favorite(current.id)}>{favorites.has(current.id) ? '★ Yıldızlı' : '☆ Yıldızla'}</button></div></div>
-      <div className="library-detail-head"><div className="library-card-tags"><span className={`library-kind ${current.kind}`}>{current.kind === 'announcement' ? 'Duyuru' : 'Hızlı rehber'}</span>{admin && !current.published ? <span>Taslak</span> : null}</div><h2 ref={detailHeading} tabIndex={-1}>{current.title}</h2>{current.summary ? <p>{current.summary}</p> : null}<small>Son güncelleme: {formatDate(current.updatedAt)}</small></div>
+      <div className="library-detail-head"><div className="library-card-tags">{admin && !current.published ? <span>Taslak</span> : null}</div><h2 ref={detailHeading} tabIndex={-1}>{current.title}</h2>{current.summary ? <p>{current.summary}</p> : null}<small>Son güncelleme: {formatDate(current.updatedAt)}</small></div>
       <div className={topics.length ? 'library-reading-layout' : ''}>
         {topics.length ? <nav className="library-reading-topics" aria-label="Rehber alt konuları"><p>BU REHBERDE</p><button type="button" aria-current={!selectedSection ? 'true' : undefined} onClick={() => setSelectedSection(null)}>Tüm içerik</button>{topics.map((topic) => <button type="button" key={topic.id} aria-current={selectedSection === topic.id ? 'true' : undefined} onClick={() => setSelectedSection(topic.id)}>{topic.title}</button>)}</nav> : null}
         <LibraryContent entry={current} sectionId={selectedSection} />
@@ -126,12 +125,12 @@ function LibraryWorkspace({ admin = false, active = true, onBusyChange }: Props)
   }
   return <div className="library-workspace">
     <section className="card library-directory" aria-labelledby="library-directory-title">
-      <header className="library-section-heading"><div><p className="eyebrow">KLİNİK KÜTÜPHANE</p><h2 id="library-directory-title">Duyurular ve Rehberler</h2><p>{admin ? 'Klinik ekibinin ihtiyaç duyduğu bilgileri tek yerde düzenle.' : 'Güncel duyurular ve ihtiyaç duyduğun bilgilere hızlı erişim.'}</p></div>{admin ? <button type="button" onClick={() => { setEditing(newLibraryEntry()); setNotice('') }}>+ Yeni İçerik</button> : null}</header>
+      <header className="library-section-heading"><div><p className="eyebrow">KLİNİK BAŞVURU</p><h2 id="library-directory-title">Rehberler</h2><p>{admin ? 'Rehberleri ve alt konularını düzenle; klinik bilgiyi kolay ulaşılır tut.' : 'İhtiyacın olan bilgiye başlıktan veya alt konudan ulaş.'}</p></div>{admin ? <button type="button" onClick={() => { setEditing(newLibraryEntry()); setNotice('') }}>+ Yeni Rehber</button> : null}</header>
       {libraryIsLocal ? <p className="hint-text library-local-note">Yerel önizleme · İçerikler ve dosyalar yalnız bu cihazda saklanır.</p> : null}
-      <div className="library-filter-row"><div className="library-type-filters" role="group" aria-label="İçerik türü filtresi">{[['all', 'Tümü'], ['reference', 'Hızlı Rehberler'], ['announcement', 'Duyurular']].map(([value, label]) => <button type="button" key={value} aria-pressed={kind === value} className={kind === value ? 'active' : ''} onClick={() => setKind(value)}>{label}</button>)}<button type="button" aria-pressed={onlyFavorites} className={onlyFavorites ? 'active' : ''} onClick={() => setOnlyFavorites((value) => !value)}>☆ Yıldızlılar</button></div><div className="library-filter-tools">{admin ? <select aria-label="Yayın durumu" value={status} onChange={(event) => setStatus(event.target.value)}><option value="all">Aktif içerikler</option><option value="published">Yayında</option><option value="draft">Taslaklar</option><option value="archived">Arşiv</option></select> : null}<button type="button" className="ghost-button" disabled={loading || busy} onClick={() => void refresh()}>Yenile</button></div></div>
+      <div className="library-filter-row"><div className="library-view-filters" role="group" aria-label="Rehber görünümü"><button type="button" aria-pressed={!onlyFavorites} className={!onlyFavorites ? 'active' : ''} onClick={() => setOnlyFavorites(false)}>Tüm rehberler</button><button type="button" aria-pressed={onlyFavorites} className={onlyFavorites ? 'active' : ''} onClick={() => setOnlyFavorites(true)}>☆ Yıldızlılar</button></div><div className="library-filter-tools">{admin ? <select aria-label="Yayın durumu" value={status} onChange={(event) => setStatus(event.target.value)}><option value="all">Aktif rehberler</option><option value="published">Yayında</option><option value="draft">Taslaklar</option><option value="archived">Arşiv</option></select> : null}<button type="button" className="ghost-button" disabled={loading || busy} onClick={() => void refresh()}>Yenile</button></div></div>
       {notice ? <p className="notice success" role="status">{notice}</p> : null}
       {error ? <p className="notice warning" role="alert">{error}</p> : null}
-      {loading && !loaded ? <div className="library-empty" role="status">İçerikler yükleniyor…</div> : loaded && !visible.length ? <div className="library-empty"><LibraryIcon kind="reference" /><h3>{!available.length && status !== 'archived' ? 'Henüz içerik eklenmedi' : 'Bu filtrelerle eşleşen başlık yok'}</h3><p>{!available.length ? admin ? 'İlk duyurunu veya hızlı rehberini ekleyerek başla.' : 'Yayınlanan duyurular ve rehberler burada görünecek.' : 'Filtreleri değiştirerek tekrar dene.'}</p>{available.length ? <button type="button" className="ghost-button" onClick={() => { setKind('all'); setOnlyFavorites(false); setStatus('all') }}>Filtreleri Temizle</button> : null}</div> : null}
+      {loading && !loaded ? <div className="library-empty" role="status">Rehberler yükleniyor…</div> : loaded && !visible.length ? <div className="library-empty"><LibraryIcon /><h3>{!available.length && status !== 'archived' ? 'Henüz rehber eklenmedi' : 'Bu filtrelerle eşleşen başlık yok'}</h3><p>{!available.length ? admin ? 'İlk rehberini ekle; istersen bilgileri alt konulara ayır.' : 'Yayınlanan rehberler burada görünecek.' : 'Filtreleri değiştirerek tekrar dene.'}</p>{available.length ? <button type="button" className="ghost-button" onClick={() => { setOnlyFavorites(false); setStatus('all') }}>Filtreleri Temizle</button> : null}</div> : null}
       {visible.length ? <LibraryDirectory entries={visible} admin={admin} busy={busy} favorites={favorites} expanded={expanded}
         onExpand={(id) => setExpanded((previous) => { const next = new Set(previous); if (next.has(id)) next.delete(id); else next.add(id); return next })}
         onFavorite={favorite} onEdit={setEditing} onArchive={(entry, restore) => void archive(entry, restore)}

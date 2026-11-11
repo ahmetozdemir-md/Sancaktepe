@@ -8014,7 +8014,7 @@ function App() {
                 Planlama
               </button>
               <button type="button" className={adminSection === 'library' ? 'active' : ''} onClick={() => selectAdminSection('library')}>
-                Duyurular ve Rehberler
+                Rehberler
               </button>
               <button
                 type="button"
@@ -8041,7 +8041,7 @@ function App() {
           </section>
 
           {libraryAdminOpened ? <div hidden={adminSection !== 'library'}>
-            <Suspense fallback={<section className="card" role="status">İçerikler yükleniyor…</section>}>
+            <Suspense fallback={<section className="card" role="status">Rehberler yükleniyor…</section>}>
               <LibraryPanel admin active={adminSection === 'library'} onBusyChange={onLibraryBusyChange} />
             </Suspense>
           </div> : null}
@@ -9139,12 +9139,12 @@ function App() {
                 Günlük Harita
               </button>
               <button type="button" className={observerSection === 'library' ? 'active' : ''} onClick={() => selectObserverSection('library')}>
-                Duyurular ve Rehberler
+                Rehberler
               </button>
             </div>
           </section>
 
-          {observerSection === 'library' ? <Suspense fallback={<section className="card" role="status">İçerikler yükleniyor…</section>}>
+          {observerSection === 'library' ? <Suspense fallback={<section className="card" role="status">Rehberler yükleniyor…</section>}>
             <LibraryPanel />
           </Suspense> : null}
 
