@@ -1,7 +1,9 @@
 import { MAX_CONTRIBUTION_IMAGES } from './contributionContent'
-import { validateAsset } from './repository'
+import { validateAsset } from './assetValidation'
 
-const MAX_IMAGE_BYTES=4*1024*1024
+import { MAX_ASSET_BYTES } from './model'
+
+const MAX_IMAGE_BYTES=MAX_ASSET_BYTES
 async function pngFile(canvas:HTMLCanvasElement,name:string):Promise<File> {
   let current=canvas
   for(let attempt=0;attempt<4;attempt++){
@@ -11,7 +13,7 @@ async function pngFile(canvas:HTMLCanvasElement,name:string):Promise<File> {
     const smaller=document.createElement('canvas');smaller.width=Math.round(current.width*.8);smaller.height=Math.round(current.height*.8)
     const ctx=smaller.getContext('2d');if(!ctx)break;ctx.drawImage(current,0,0,smaller.width,smaller.height);current=smaller
   }
-  throw new Error('Görsel çok büyük. Daha küçük bir görsel seç.')
+  throw new Error('Görsel 1 MB sınırını aşıyor. Daha küçük bir görsel seç veya bağlantı olarak paylaş.')
 }
 const scaleFor=(width:number,height:number)=>Math.min(1,1800/Math.max(width,height),Math.sqrt(3000000/(width*height)))
 export async function prepareContributionFiles(files:File[]):Promise<File[]> {

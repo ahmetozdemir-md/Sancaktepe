@@ -1,5 +1,6 @@
 import { supabase } from '../supabase'
 import { normalizeContribution } from './contributionContent'
+import { validateAsset } from './assetValidation'
 import type { LibraryEntry } from './model'
 
 export interface ContributorSession { token:string; expiresAt:string }
@@ -14,7 +15,8 @@ const messages:Record<string,string>={
  'queue-full':'İncelenmeyi bekleyen gönderi sınırına ulaşıldı. Daha sonra yeniden dene.',
  'invalid-content':'Gönderilen içerik geçersiz veya çok büyük. Metin ve tablo alanlarını kontrol et.',
  'invalid-file':'Dosya güvenlik kontrolünden geçemedi. Yeniden yükle veya başka bir görsel seç.',
- 'file-limit':'Dosya sınırına ulaşıldı. Gönderi başına en fazla 8 görsel ve toplam 16 MB kullanılabilir.',
+ 'file-limit':'Dosya sınırına ulaşıldı. Her dosya en fazla 1 MB; gönderi en fazla 8 görsel ve toplam 8 MB olabilir.',
+ 'file-too-large':'1 MB’dan büyük dosya gönderilemez. Daha küçük bir dosya seç veya bağlantı olarak paylaş.',
  'upload-retry':'Dosya yüklemesi tamamlanamadı. Gönder düğmesine tekrar basabilirsin.',
  'submission-expired':'Gönderim süresi doldu. Yeni bir gönderi açıp içeriğini aktar.',
  'forbidden':'Bu gönderi için yetkin bulunmuyor.',
@@ -38,6 +40,7 @@ export async function loginContributor(identity:ContributorIdentity,password:str
 }
 export async function logoutContributor(token:string){await request({action:'logout',token})}
 export async function submitContribution(token:string,entry:LibraryEntry,files:Map<string,File>):Promise<void>{
+ for (const file of files.values()) await validateAsset(file)
  const started=await request({action:'begin',token,id:entry.id})
  if(started.submitted)return
  const blocks=[]

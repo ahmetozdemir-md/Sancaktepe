@@ -25,7 +25,7 @@ async function readBody(request:Request):Promise<Record<string,unknown>> {
   if(!request.headers.get('content-type')?.toLowerCase().startsWith('application/json')) throw new Error('invalid-content')
   const reader=request.body?.getReader(); if(!reader) throw new Error('invalid-content')
   const chunks:Uint8Array[]=[]; let size=0
-  for(;;) { const {done,value}=await reader.read(); if(done)break; size+=value.byteLength; if(size>6000000){await reader.cancel();throw new Error('request-too-large')} chunks.push(value) }
+  for(;;) { const {done,value}=await reader.read(); if(done)break; size+=value.byteLength; if(size>1500000){await reader.cancel();throw new Error('request-too-large')} chunks.push(value) }
   const buffer=new Uint8Array(size); let offset=0; for(const chunk of chunks){buffer.set(chunk,offset);offset+=chunk.byteLength}
   const data=JSON.parse(new TextDecoder().decode(buffer)); if(!data || typeof data!=='object' || Array.isArray(data)) throw new Error('invalid-content')
   return data
@@ -67,7 +67,8 @@ Deno.serve(async request=>{
       return reply(origin,result,result?.error ? 429 : 200)
     }
     if(body.action==='upload') {
-      if(typeof body.blockId!=='string'||!uuid.test(body.blockId)||typeof body.base64!=='string'||body.base64.length>5592410||!/^[A-Za-z0-9+/]+={0,2}$/.test(body.base64))throw new Error('invalid-file')
+      if(typeof body.base64==='string' && body.base64.length>1398104)throw new Error('file-too-large')
+      if(typeof body.blockId!=='string'||!uuid.test(body.blockId)||typeof body.base64!=='string'||body.base64.length>1398104||!/^[A-Za-z0-9+/]+={0,2}$/.test(body.base64))throw new Error('invalid-file')
       await limited('decode-global',100,3600);await limited('decode-parent:'+context.parentHash,24,3600)
       const image=sanitizeContributionImage(Buffer.from(body.base64,'base64'))
       const reserved=await rpc('library_reserve_asset',{p_token:token,p_job:body.id,p_block:body.blockId,p_bytes:image.length,p_checksum:await sha(image)})
@@ -88,7 +89,7 @@ Deno.serve(async request=>{
     }
     throw new Error('invalid-action')
   } catch(error) {
-    const allowed=['invalid-content','invalid-file','file-limit','rate-limited','request-too-large','upload-retry','invalid-action','server-unavailable']
+    const allowed=['invalid-content','invalid-file','file-too-large','file-limit','rate-limited','request-too-large','upload-retry','invalid-action','server-unavailable']
     const code=error instanceof Error && allowed.includes(error.message) ? error.message : 'invalid-content'
     return reply(origin,{error:code},code==='server-unavailable'?503:code==='rate-limited'?429:400)
   }

@@ -27,6 +27,7 @@ import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRe
 import './App.css'
 import type { PublishedPortalPayload } from './dutyPlannerCloud'
 import { readPortalState, readPortalRevision, isPortalAccessError, type PortalCloudSnapshot } from './portalCloudAccess'
+import { withPortalReadTimeout } from './portalReadTimeout.js'
 import { canStartPortalRefresh, canAdoptPortalRefresh, type PortalRefreshContext } from './portalRefreshGuard.js'
 import { AssistantIdentityControls } from './AssistantRegistryPanel'
 import AssistantRemovalDialog from './AssistantRemovalDialog'
@@ -2857,7 +2858,7 @@ function App() {
     const start = portalRefreshContext()
     if (!isSupabaseConfigured || !canStartPortalRefresh(start)) return false
     const token = start.accessMode === 'assistant' ? safeReadAssistantAccessToken() : ''
-    if (!start.hydrated) { setPortalReadPending(true); setCloudState('checking'); setCloudStateText('Çevrimiçi liste yükleniyor…') }
+    if (!start.hydrated) { setPortalReadPending(true); setPortalRefreshError(''); setCloudState('checking'); setCloudStateText('Çevrimiçi liste yükleniyor…') }
     const run = async () => {
       try {
         if (start.hydrated && !initial) {
@@ -3002,6 +3003,8 @@ function App() {
 
     const client = supabase
     let cancelled = false
+    let authRevision = 0
+    let authTimer: ReturnType<typeof setTimeout> | undefined
 
     const lockCloudWrite = () => {
       adminCloudWriteUnlockedRef.current = false
@@ -3009,17 +3012,17 @@ function App() {
       setIsAdminCloudAuthVerified(false)
     }
 
-    const verifyPortalAdmin = async (userId: string, email?: string | null) => {
+    const verifyPortalAdmin = async (userId: string, email: string | null | undefined, revision: number) => {
       setAdminCloudAuthStatus('checking')
       setAdminCloudAuthMessage('Güvenli admin yetkisi kontrol ediliyor...')
 
-      const { data: adminRow, error } = await client
+      const { data: adminRow, error } = await withPortalReadTimeout(signal => client
         .from('portal_admins')
         .select('user_id')
         .eq('user_id', userId)
-        .maybeSingle()
+        .abortSignal(signal).maybeSingle())
 
-      if (cancelled) {
+      if (cancelled || revision !== authRevision) {
         return false
       }
 
@@ -3052,31 +3055,31 @@ function App() {
       return true
     }
 
-    void client.auth.getSession().then(({ data: authData, error }) => {
-      if (cancelled) {
-        return
-      }
-      if (error || !authData.session?.user) {
-        lockCloudWrite()
-        setAdminCloudAuthStatus('signed-out')
-        setAdminCloudAuthMessage('Güvenli admin girişi gerekli.')
-        return
-      }
-      void verifyPortalAdmin(authData.session.user.id, authData.session.user.email)
-    })
-
+    // INITIAL_SESSION also covers restored logins. Defer queries until the auth callback
+    // has returned so they cannot wait on the session lock that invoked this callback.
     const { data: authListener } = client.auth.onAuthStateChange((_event, nextSession) => {
+      const revision = ++authRevision
+      clearTimeout(authTimer)
       if (!nextSession?.user) {
         lockCloudWrite()
         setAdminCloudAuthStatus('signed-out')
         setAdminCloudAuthMessage('Güvenli admin girişi gerekli.')
         return
       }
-      void verifyPortalAdmin(nextSession.user.id, nextSession.user.email)
+      authTimer = setTimeout(() => {
+        if (cancelled || revision !== authRevision) return
+        void verifyPortalAdmin(nextSession.user.id, nextSession.user.email, revision).catch(() => {
+          if (cancelled || revision !== authRevision) return
+          lockCloudWrite()
+          setAdminCloudAuthStatus('error')
+          setAdminCloudAuthMessage('Admin yetkisi doğrulanamadı. Bağlantını kontrol edip yeniden giriş yap.')
+        })
+      }, 0)
     })
 
     return () => {
       cancelled = true
+      clearTimeout(authTimer)
       authListener.subscription.unsubscribe()
     }
   }, [])
@@ -7770,7 +7773,7 @@ function App() {
   }
 
   if (isSupabaseConfigured && (!portalHasSnapshot || !portalAccessMode || session.role === 'admin' && !isSecureCloudWriteUnlocked)) {
-    return <section className="page-shell card" aria-live="polite"><h1>Çalışma listesi</h1><p>{portalRefreshError || (!portalAccessMode ? 'Liste için girişini yeniden doğrulamalısın.' : 'Çevrimiçi liste yükleniyor…')}</p><div className="login-actions"><button type="button" onClick={() => { void refreshPublishedPortal(true) }}>Yeniden dene</button>{session.role === 'admin' ? <button type="button" className="secondary" onClick={() => { setSession(null); setLoginView('admin') }}>Admin girişini yenile</button> : null}{portalHasSnapshot && session.role === 'admin' ? <button type="button" className="secondary" onClick={() => {
+    return <section className="page-shell card" aria-live="polite"><h1>Çalışma listesi</h1><p>{portalRefreshError || (!portalAccessMode ? 'Liste için girişini yeniden doğrulamalısın.' : 'Çevrimiçi liste yükleniyor…')}</p><div className="login-actions"><button type="button" disabled={portalReadPending} onClick={() => { void refreshPublishedPortal(true) }}>{portalReadPending ? 'Yükleniyor…' : 'Yeniden dene'}</button>{session.role === 'admin' ? <button type="button" className="secondary" onClick={() => { setSession(null); setLoginView('admin') }}>Admin girişini yenile</button> : null}{portalHasSnapshot && session.role === 'admin' ? <button type="button" className="secondary" onClick={() => {
       const url = URL.createObjectURL(new Blob([JSON.stringify(buildRemotePayload(data, userBindings), null, 2)], { type: 'application/json' }))
       const link = document.createElement('a'); link.href = url; link.download = 'calisma-listesi-kaydedilmemis-yedek.json'; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000)
     }}>Yerel düzenlemeyi yedekle</button> : null}</div><p className="hint-text">Kaydedilmemiş düzenlemelerin bu pencerede korunur.</p>{appFooter}</section>

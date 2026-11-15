@@ -70,7 +70,7 @@ yeniden sıralanabilir. Mevcut içerikler otomatik olarak genel içerik bölüm�
 Excel/Sheets'ten başlık satırı dahil tablo yapıştırılabilir. Başlık ve veri satırlarına hazır
 veya özel HEX renkleri uygulanır; yazı rengi kontrasta göre seçilir. Hizalama, sıkı/rahat
 satır aralığı, satır taşıma ve çoğaltma desteklenir; renkler satırla birlikte taşınır. Bölüm sırası,
-önizleme, taslak/yayınlama ve arşivden taslağa geri alma desteklenir. Dosya sınırı 8 MB'dır;
+önizleme, taslak/yayınlama ve arşivden taslağa geri alma desteklenir. Dosya sınırı 1 MB'dır (1.048.576 bayt);
 görseller özgün çözünürlükte saklanır ve büyütülebilir. Klinik içerik otomatik oluşturulmaz.
 
 Metin bloklarında seçili yazıya kalın/normal, italik, altı/üstü çizili, yazı ve vurgu rengi,
@@ -186,9 +186,32 @@ tercih edilen yöntem `change_library_contributor_password` RPC'sinin hash'i sun
 - Metin/tablo içeriği izin verilen JSON alanlarına indirgenir. HTML, betik veya ham SVG kabul edilmez.
 - Katılımcı PDF'leri tarayıcıda sayfa görsellerine dönüşür. Görseller sunucuda boyut ve PNG yapısı denetiminden
   geçip yalnız piksel verisinden tekrar üretilir; metadata ve ek dosya yükleri saklanmaz. Bu bir antivirüs taraması değildir.
-- Gönderi başına 20 içerik bloğu, 8 görsel, dönüşümden sonra görsel başına 4 MB ve toplam 16 MB sınırı vardır.
+- Gönderi başına 20 içerik bloğu, 8 görsel, dosya başına 1 MB ve toplam 8 MB sınırı vardır.
   Henüz gönderilmemiş, süresi dolmuş dosyalar 24 saat sonra sonraki gönderim başlangıcında temizlenir.
 - Klinik doğruluk adminin incelemesini gerektirir. Onaylanmayan içerik ve dosyalar okuyucuya kapalıdır.
 
 `tests/libraryContributions.test.mjs` içerik/dosya doğrulamasını, `tests/library-contributions-db.sql`
 gerçek RLS, kota, parola iptali ve onay akışını denetler. SQL testinin tüm değişiklikleri geri alınır.
+
+
+### Bağlantı rehberleri ve 1 MB dosya sınırı
+
+`014_library_links_and_upload_limit.sql` sonrasında editörde **İçerik / Bağlantı** seçilir.
+Bağlantı türünde başlık ve HTTP(S) adresi yeterlidir; okuyucu listedeki başlığa bastığında adres
+`noopener noreferrer` ile doğrudan yeni sekmede açılır. Admin önce hedef adresi inceleyebilir;
+asistanın gönderdiği bağlantı da onay bekler. Drive erişim izinleri bağlantının sahibi tarafından ayarlanır.
+Kaynak bağlantıları mevcut içerik rehberlerini yönlendirme rehberine dönüştürmez.
+
+1 MB sınırı hem seçilen özgün dosyada hem dönüştürülen/yüklenen dosyada uygulanır; sunucu ve özel
+Storage bucket da 1.048.576 bayt üzerini reddeder. Önceden yüklenmiş dosyalar silinmez.
+Dağıtım sırası SQL geçişi → `library-contributions` Edge Function → web istemcisidir.
+`tests/libraryLinks.test.mjs` URL ve boyut sınırlarını; `tests/library-links-db.sql` onayı ve
+sunucu sınırlarını geri alınan işlemlerle doğrular.
+
+### Giriş sonrası liste yükleme
+
+Liste ve sürüm okumaları oturum kilidini bekleme süresi dahil 15 saniyede zaman aşımına uğrar;
+istek iptal edilir ve yeniden deneme kullanılabilir. Admin yetki sorgusu auth olayının dışına
+ertelenir; eski oturuma ait sonuçlar uygulanmaz. `?module=nobet` ilk listeyi yüklemeyi
+engellemez; açık planlayıcının mevcut düzenlemelerini koruyan arka plan okuma kuralı sürer.
+`tests/portal-read-timeout.test.js` ve `tests/portal-refresh-guard.test.js` bu sınırları doğrular.

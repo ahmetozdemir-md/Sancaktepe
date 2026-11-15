@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { librarySections, tableColorStyle, type LibraryBlock, type LibraryEntry } from './model'
+import { libraryExternalUrl, externalLinkHost, librarySections, tableColorStyle, type LibraryBlock, type LibraryEntry } from './model'
 import RichTextView from './RichTextView'
 import { getLibraryAssetUrl } from './repository'
 
@@ -41,6 +41,10 @@ function AssetView({ block, file }: { block: Extract<LibraryBlock, { path: strin
 }
 
 export default function LibraryContent({ entry, files = new Map(), sectionId }: { entry: LibraryEntry; files?: Map<string, File>; sectionId?: string | null }) {
+  if (entry.entryType === 'link') {
+    const url = libraryExternalUrl(entry)
+    return <div className="library-link-preview"><span className="library-link-label">DIŞ BAĞLANTI</span>{url ? <><a href={url} target="_blank" rel="noopener noreferrer" referrerPolicy="no-referrer">{externalLinkHost(url)} <span aria-hidden="true">↗</span></a><p>{url}</p><small>Bu adresi yeni sekmede aç</small></> : <p>Önizlemek için geçerli bir http:// veya https:// adresi gir.</p>}</div>
+  }
   const sections = librarySections(entry.blocks)
   const selectedSection = sections.find((section) => section.id === sectionId && sectionId)
   const blocks = selectedSection ? selectedSection.blocks : entry.blocks

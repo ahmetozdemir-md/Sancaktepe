@@ -1,4 +1,5 @@
 import { supabase } from './supabase'
+import { withPortalReadTimeout } from './portalReadTimeout.js'
 
 export interface PortalCloudSnapshot<T = Record<string, unknown>> {
   payload: T
@@ -33,7 +34,7 @@ function revision(value: unknown): value is string {
 
 /** The access token stays in RPC POST arguments, never in a URL or log. */
 export async function readPortalState<T = Record<string, unknown>>(accessToken = ''): Promise<PortalCloudSnapshot<T> | null> {
-  const { data, error } = await client().rpc('read_portal_state', { p_access_token: accessToken.trim() || null })
+  const { data, error } = await withPortalReadTimeout(signal => client().rpc('read_portal_state', { p_access_token: accessToken.trim() || null }).abortSignal(signal))
   if (error) fail(error)
   if (data === null) return null
   if (!object(data) || !object(data.payload) || !revision(data.updatedAt)) throw new Error('Liste kaydı doğrulanamadı. Yeniden dene.')
@@ -41,7 +42,7 @@ export async function readPortalState<T = Record<string, unknown>>(accessToken =
 }
 
 export async function readPortalRevision(accessToken = ''): Promise<PortalCloudRevision | null> {
-  const { data, error } = await client().rpc('read_portal_revision', { p_access_token: accessToken.trim() || null })
+  const { data, error } = await withPortalReadTimeout(signal => client().rpc('read_portal_revision', { p_access_token: accessToken.trim() || null }).abortSignal(signal))
   if (error) fail(error)
   if (data === null) return null
   if (!object(data) || !revision(data.updatedAt)) throw new Error('Liste sürümü doğrulanamadı. Yeniden dene.')

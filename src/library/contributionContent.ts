@@ -1,4 +1,4 @@
-import { MAX_BLOCKS, newLibraryEntry, normalizeRichBlock, safeSourceUrl, safeTableColor, validateLibraryEntry, type LibraryBlock, type LibraryEntry } from './model.ts'
+import { MAX_BLOCKS, newLibraryEntry, normalizeRichBlock, safeExternalUrl, safeSourceUrl, safeTableColor, validateLibraryEntry, type LibraryBlock, type LibraryEntry } from './model.ts'
 
 export const MAX_CONTRIBUTION_BYTES = 262144
 export const MAX_CONTRIBUTION_IMAGES = 8
@@ -13,6 +13,10 @@ const string = (value: unknown, max: number, required = false): string => {
 export function normalizeContribution(value: unknown): LibraryEntry {
   if (!object(value) || new TextEncoder().encode(JSON.stringify(value)).length > MAX_CONTRIBUTION_BYTES) throw new Error('invalid-content')
   if (typeof value.id !== 'string' || !uuid.test(value.id) || !Array.isArray(value.blocks) || value.blocks.length > MAX_BLOCKS) throw new Error('invalid-content')
+  const entryType = value.entryType ?? 'content'
+  if (entryType !== 'content' && entryType !== 'link') throw new Error('invalid-content')
+  const externalUrl = entryType === 'link' ? safeExternalUrl(string(value.externalUrl,2000,true)) : ''
+  if (entryType === 'link' && (!externalUrl || value.blocks.length)) throw new Error('invalid-content')
   let images = 0
   const blocks = value.blocks.map((raw): LibraryBlock => {
     if (!object(raw) || typeof raw.id !== 'string' || !uuid.test(raw.id)) throw new Error('invalid-content')
@@ -38,7 +42,7 @@ export function normalizeContribution(value: unknown): LibraryEntry {
   })
   const sourceUrl = string(value.sourceUrl ?? '',2000)
   if (sourceUrl && !safeSourceUrl(sourceUrl)) throw new Error('invalid-content')
-  const entry: LibraryEntry = { ...newLibraryEntry(), id:value.id, title:string(value.title,120,true).trim(), summary:string(value.summary ?? '',240), blocks,
+  const entry: LibraryEntry = { ...newLibraryEntry(), id:value.id, title:string(value.title,120,true).trim(), summary:string(value.summary ?? '',240), blocks, entryType, externalUrl:externalUrl ?? '',
     sourceLabel:string(value.sourceLabel ?? '',300), sourceUrl, published:false, pinned:false, reviewStatus:'pending' }
   if (validateLibraryEntry(entry).length) throw new Error('invalid-content')
   return entry

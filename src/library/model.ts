@@ -15,6 +15,8 @@ export interface LibraryEntry {
   summary: string
   category: string
   kind: LibraryKind
+  entryType?: 'content' | 'link'
+  externalUrl?: string
   pinned: boolean
   published: boolean
   blocks: LibraryBlock[]
@@ -29,7 +31,7 @@ export interface LibraryEntry {
 }
 
 export const LIBRARY_CATEGORIES = ['Genel', 'İlaç ve doz', 'Hemodinami', 'Böbrek / CRRT', 'Solunum', 'Prosedürler', 'Klinik işleyiş']
-export const MAX_ASSET_BYTES = 8 * 1024 * 1024
+export const MAX_ASSET_BYTES = 1024 * 1024
 export const MAX_BLOCKS = 20
 export const ASSET_TYPES: Record<string, string> = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp', 'application/pdf': 'pdf' }
 
@@ -93,7 +95,7 @@ export function normalizeRichBlock(block: LibraryBlock): LibraryBlock {
 }
 
 export function newLibraryEntry(): LibraryEntry {
-  return { id: crypto.randomUUID(), title: '', summary: '', category: 'Genel', kind: 'reference', pinned: false, published: false, blocks: [], sourceLabel: '', sourceUrl: '', createdAt: '', updatedAt: '', archivedAt: null }
+  return { id: crypto.randomUUID(), title: '', summary: '', category: 'Genel', kind: 'reference', entryType: 'content', externalUrl: '', pinned: false, published: false, blocks: [], sourceLabel: '', sourceUrl: '', createdAt: '', updatedAt: '', archivedAt: null }
 }
 
 export function normalizeSearch(value: string): string {
@@ -108,6 +110,22 @@ export function safeSourceUrl(value: string): string | null {
   } catch { return null }
 }
 
+export function safeExternalUrl(value: string): string | null {
+  const trimmed = value.trim()
+  if (!trimmed || trimmed.length > 2000 || Array.from(trimmed).some(char => char.charCodeAt(0) <= 32 || char.charCodeAt(0) === 127)) return null
+  const url = safeSourceUrl(trimmed)
+  return url && url.length <= 2000 ? url : null
+}
+
+export function libraryExternalUrl(entry: LibraryEntry): string | null {
+  return entry.entryType === 'link' ? safeExternalUrl(entry.externalUrl ?? '') : null
+}
+
+export function externalLinkHost(url: string): string {
+  const safe = safeExternalUrl(url)
+  return safe ? new URL(safe).hostname : ''
+}
+
 export function validAssetPath(path: string): boolean {
   return /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}\/[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}\.(png|jpg|webp|pdf)$/.test(path)
 }
@@ -118,6 +136,11 @@ export function validateLibraryEntry(entry: LibraryEntry, pending?: Map<string, 
   if (entry.summary.length > 240) issues.push('Kısa açıklama en fazla 240 karakter olabilir.')
   if (!entry.category.trim() || entry.category.length > 50) issues.push('Kategori 1–50 karakter olmalı.')
   if (safeSourceUrl(entry.sourceUrl) === null) issues.push('Kaynak bağlantısı http:// veya https:// ile başlamalı.')
+  if (entry.entryType === 'link') {
+    if (!safeExternalUrl(entry.externalUrl ?? '')) issues.push('Geçerli bir http:// veya https:// bağlantısı gir. Adres en fazla 2.000 karakter olabilir.')
+    if (entry.blocks.length) issues.push('Bağlantı rehberinde metin, tablo veya dosya bulunamaz.')
+    return issues
+  }
   if (!entry.blocks.length || entry.blocks.length > MAX_BLOCKS) issues.push(`En az bir içerik ekle; en fazla ${MAX_BLOCKS} bölüm olabilir.`)
   if (new Set(entry.blocks.map((block) => block.id)).size !== entry.blocks.length) issues.push('İçerik bölümlerinin kimlikleri benzersiz olmalı.')
   for (const section of librarySections(entry.blocks).filter((section) => section.id)) {
@@ -194,9 +217,9 @@ export function parseLibraryRow(raw: Record<string, unknown>): LibraryEntry {
     if (block.type === 'table') return typeof block.caption === 'string' && Array.isArray(block.headers) && block.headers.every((cell: unknown) => typeof cell === 'string') && Array.isArray(block.rows) && block.rows.every((row: unknown) => Array.isArray(row) && row.every((cell: unknown) => typeof cell === 'string'))
     return ['image', 'pdf'].includes(block.type) && typeof block.path === 'string' && validAssetPath(block.path) && typeof block.caption === 'string' && typeof block.fileName === 'string'
   }).map((block) => block.type === 'table' ? { ...block, headerColor: safeTableColor(block.headerColor), rowColors: block.rows.map((_, index) => safeTableColor(block.rowColors?.[index]) ?? null), align: ['left', 'center', 'right'].includes(block.align ?? '') ? block.align : 'left', compact: block.compact === true } : block).map(normalizeRichBlock) : []
-  return { id: str('id'), title: str('title'), summary: str('summary'), category: str('category'), kind: 'reference', pinned: raw.pinned === true, published: raw.is_published === true, blocks, sourceLabel: str('source_label'), sourceUrl: safeSourceUrl(str('source_url')) ?? '', createdAt: str('created_at'), updatedAt: str('updated_at'), archivedAt: str('archived_at') || null, reviewStatus: raw.review_status === 'pending' || raw.review_status === 'rejected' ? raw.review_status : 'approved', submittedBy:str('submitted_by'), submittedAt:str('submitted_at') }
+  return { id: str('id'), title: str('title'), summary: str('summary'), category: str('category'), kind: 'reference', entryType: raw.entry_type === 'link' ? 'link' : 'content', externalUrl: raw.entry_type === 'link' ? safeExternalUrl(str('external_url')) ?? '' : '', pinned: raw.pinned === true, published: raw.is_published === true, blocks, sourceLabel: str('source_label'), sourceUrl: safeSourceUrl(str('source_url')) ?? '', createdAt: str('created_at'), updatedAt: str('updated_at'), archivedAt: str('archived_at') || null, reviewStatus: raw.review_status === 'pending' || raw.review_status === 'rejected' ? raw.review_status : 'approved', submittedBy:str('submitted_by'), submittedAt:str('submitted_at') }
 }
 
 export function libraryRow(entry: LibraryEntry) {
-  return { id: entry.id, title: entry.title.trim(), summary: entry.summary.trim(), category: entry.category.trim(), kind: 'reference', pinned: entry.pinned, is_published: entry.published, blocks: entry.blocks.map(normalizeRichBlock), source_label: entry.sourceLabel.trim(), source_url: safeSourceUrl(entry.sourceUrl) ?? '', archived_at: entry.archivedAt, review_status: entry.published ? 'approved' : entry.reviewStatus ?? 'approved' }
+  return { id: entry.id, title: entry.title.trim(), summary: entry.summary.trim(), category: entry.category.trim(), kind: 'reference', entry_type: entry.entryType ?? 'content', external_url: libraryExternalUrl(entry) ?? '', pinned: entry.pinned, is_published: entry.published, blocks: entry.blocks.map(normalizeRichBlock), source_label: entry.sourceLabel.trim(), source_url: safeSourceUrl(entry.sourceUrl) ?? '', archived_at: entry.archivedAt, review_status: entry.published ? 'approved' : entry.reviewStatus ?? 'approved' }
 }

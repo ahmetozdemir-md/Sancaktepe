@@ -26,3 +26,12 @@ test('admin reauthentication cannot overwrite pending edits while the local role
  assert.equal(canAdoptPortalRefresh({...reauth,payload:'saved'},reauth),false);
  assert.equal(canStartPortalRefresh({...reauth,hydrated:false}),true,'initial cached fallback is distinct from an existing unsaved admin snapshot');
 });
+
+test('a direct duty-planner URL must load its first snapshot before protecting the open planner',()=>{
+ const start={...idle(),hydrated:false,revision:null,payload:'cached',savedPayload:'',dutyPlannerOpen:true};
+ assert.equal(canStartPortalRefresh(start),true);
+ assert.equal(canAdoptPortalRefresh(start,{...start}),true);
+ assert.equal(canStartPortalRefresh({...start,hydrated:true,payload:'saved',savedPayload:'saved'}),false);
+ assert.equal(canAdoptPortalRefresh(start,{...start,editVersion:1}),false);
+ assert.equal(canStartPortalRefresh({...start,accessMode:''}),false);
+});

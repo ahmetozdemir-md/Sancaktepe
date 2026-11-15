@@ -1,7 +1,7 @@
 /** Shared gate for published-list refreshes. A pending local edit always wins over an idle read. */
 export function canStartPortalRefresh(context) {
   return Boolean(context.accessMode) && context.visible !== false
-    && !context.saving && !context.dutyPlannerOpen && !context.ownersEditMode
+    && !context.saving && !(context.hydrated && context.dutyPlannerOpen) && !context.ownersEditMode
     && !context.plannerEditing && !context.bulkBusy && !context.libraryBusy
     && !(context.hydrated && (context.role === 'admin' || !context.role && context.accessMode === 'admin') && context.payload !== context.savedPayload);
 }
